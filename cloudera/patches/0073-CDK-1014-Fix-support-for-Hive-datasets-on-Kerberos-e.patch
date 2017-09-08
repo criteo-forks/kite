@@ -1,0 +1,252 @@
+From 142db0063f4cc507aafd5a03490d50b7be70d7bd Mon Sep 17 00:00:00 2001
+From: Joey Echeverria <joey42@gmail.com>
+Date: Thu, 23 Apr 2015 17:37:03 -0700
+Subject: [PATCH 073/115] CDK-1014: Fix support for Hive datasets on Kerberos enabled clusters.
+
+* Add Kerberos support to CopyCommand.
+* Add fixes for CDH4 profile
+---
+ .../java/org/kitesdk/data/spi/hive/HiveUtils.java  |   13 +++++++++
+ .../java/org/kitesdk/data/spi/hive/Loader.java     |    6 +++-
+ .../org/kitesdk/data/spi/hive/MetaStoreUtil.java   |    3 ++
+ .../main/java/org/kitesdk/compat/DynMethods.java   |    7 +++++
+ .../src/main/java/org/kitesdk/compat/Hadoop.java   |   24 ++++++++++------
+ .../src/main/java/org/kitesdk/cli/Main.java        |    3 +-
+ .../java/org/kitesdk/cli/commands/CopyCommand.java |   29 +++++++++++++++++++-
+ 7 files changed, 73 insertions(+), 12 deletions(-)
+
+diff --git a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveUtils.java b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveUtils.java
+index be2f7e5..804a764 100644
+--- a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveUtils.java
++++ b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveUtils.java
+@@ -35,6 +35,7 @@ import org.apache.avro.Schema;
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.fs.FileSystem;
+ import org.apache.hadoop.fs.Path;
++import org.apache.hadoop.hive.conf.HiveConf;
+ import org.apache.hadoop.hive.metastore.TableType;
+ import org.apache.hadoop.hive.metastore.api.FieldSchema;
+ import org.apache.hadoop.hive.metastore.api.Order;
+@@ -44,6 +45,8 @@ import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
+ import org.apache.hadoop.hive.metastore.api.Table;
+ import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectInspectorUtils;
+ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
++import org.kitesdk.compat.DynMethods;
++import org.kitesdk.compat.Hadoop;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetException;
+ import org.kitesdk.data.DatasetIOException;
+@@ -474,4 +477,14 @@ class HiveUtils {
+       return oldClass;
+     }
+   }
++
++  public static void addResource(Configuration hiveConf, Configuration conf) {
++    if (Hadoop.Configuration.addResource.isNoop()) {
++      for (Map.Entry<String, String> entry : conf) {
++        hiveConf.set(entry.getKey(), entry.getValue());
++      }
++    } else {
++      Hadoop.Configuration.addResource.invoke(hiveConf, conf);
++    }
++  }
+ }
+diff --git a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/Loader.java b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/Loader.java
+index 80b1776..84b30ef 100644
+--- a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/Loader.java
++++ b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/Loader.java
+@@ -155,7 +155,11 @@ public class Loader implements Loadable {
+ 
+   private static Configuration newHiveConf(Configuration base) {
+     checkHiveDependencies(); // ensure HIVE_CONF is present
+-    return HIVE_CONF.newInstance(base, HIVE_CONF.getConstructedClass());
++    Configuration conf = HIVE_CONF.newInstance(base, HIVE_CONF.getConstructedClass());
++
++    // Add everything in base back in to work around a bug in HiveConf
++    HiveUtils.addResource(conf, base);
++    return conf;
+   }
+ 
+   private synchronized static void checkHiveDependencies() {
+diff --git a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/MetaStoreUtil.java b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/MetaStoreUtil.java
+index 75e3ed5..56600ab 100644
+--- a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/MetaStoreUtil.java
++++ b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/MetaStoreUtil.java
+@@ -74,6 +74,9 @@ public class MetaStoreUtil {
+ 
+   public MetaStoreUtil(Configuration conf) {
+     this.hiveConf = new HiveConf(conf, HiveConf.class);
++    // Add the passed configuration back into the HiveConf to work around
++    // a Hive bug that resets to defaults
++    HiveUtils.addResource(hiveConf, conf);
+     if (!allowLocalMetaStore(hiveConf) &&
+         isEmpty(hiveConf, Loader.HIVE_METASTORE_URI_PROP)) {
+       LOG.warn("Aborting use of local MetaStore. " +
+diff --git a/kite-hadoop-compatibility/src/main/java/org/kitesdk/compat/DynMethods.java b/kite-hadoop-compatibility/src/main/java/org/kitesdk/compat/DynMethods.java
+index 692bffc..39d11c6 100644
+--- a/kite-hadoop-compatibility/src/main/java/org/kitesdk/compat/DynMethods.java
++++ b/kite-hadoop-compatibility/src/main/java/org/kitesdk/compat/DynMethods.java
+@@ -100,6 +100,13 @@ public class DynMethods {
+     }
+ 
+     /**
++     * @return whether the method is a noop
++     */
++    public boolean isNoop() {
++      return this == NOOP;
++    }
++
++    /**
+      * Returns this method as a StaticMethod.
+      *
+      * @return a {@link StaticMethod} for this method
+diff --git a/kite-hadoop-compatibility/src/main/java/org/kitesdk/compat/Hadoop.java b/kite-hadoop-compatibility/src/main/java/org/kitesdk/compat/Hadoop.java
+index 47db391..ecbef60 100644
+--- a/kite-hadoop-compatibility/src/main/java/org/kitesdk/compat/Hadoop.java
++++ b/kite-hadoop-compatibility/src/main/java/org/kitesdk/compat/Hadoop.java
+@@ -16,7 +16,6 @@
+ 
+ package org.kitesdk.compat;
+ 
+-import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.mapreduce.JobID;
+ import org.apache.hadoop.mapreduce.TaskAttemptID;
+ 
+@@ -29,8 +28,8 @@ public class Hadoop {
+   public static class Job {
+     public static final DynMethods.StaticMethod newInstance =
+         new DynMethods.Builder("getInstance")
+-            .impl(org.apache.hadoop.mapreduce.Job.class, Configuration.class)
+-            .ctorImpl(org.apache.hadoop.mapreduce.Job.class, Configuration.class)
++            .impl(org.apache.hadoop.mapreduce.Job.class, org.apache.hadoop.conf.Configuration.class)
++            .ctorImpl(org.apache.hadoop.mapreduce.Job.class, org.apache.hadoop.conf.Configuration.class)
+             .buildStatic();
+   }
+ 
+@@ -40,10 +39,10 @@ public class Hadoop {
+         new DynConstructors.Builder(org.apache.hadoop.mapreduce.TaskAttemptContext.class)
+             .hiddenImpl(
+                 "org.apache.hadoop.mapreduce.task.JobContextImpl",
+-                Configuration.class, JobID.class)
++                org.apache.hadoop.conf.Configuration.class, JobID.class)
+             .hiddenImpl(
+                 "org.apache.hadoop.mapreduce.JobContext",
+-                Configuration.class, JobID.class)
++                org.apache.hadoop.conf.Configuration.class, JobID.class)
+             .build();
+ 
+     public static final DynMethods.UnboundMethod getConfiguration =
+@@ -63,10 +62,10 @@ public class Hadoop {
+         new DynConstructors.Builder(org.apache.hadoop.mapreduce.TaskAttemptContext.class)
+             .hiddenImpl(
+                 "org.apache.hadoop.mapreduce.task.TaskAttemptContextImpl",
+-                Configuration.class, TaskAttemptID.class)
++                org.apache.hadoop.conf.Configuration.class, TaskAttemptID.class)
+             .hiddenImpl(
+                 "org.apache.hadoop.mapreduce.TaskAttemptContext",
+-                Configuration.class, TaskAttemptID.class)
++                org.apache.hadoop.conf.Configuration.class, TaskAttemptID.class)
+             .build();
+ 
+     public static final DynMethods.UnboundMethod getConfiguration =
+@@ -74,7 +73,6 @@ public class Hadoop {
+             .impl(org.apache.hadoop.mapreduce.TaskAttemptContext.class)
+             .build();
+   }
+-
+   public static class FSDataOutputStream {
+     public static final DynMethods.UnboundMethod hflush =
+         new DynMethods.Builder("hflush")
+@@ -96,7 +94,15 @@ public class Hadoop {
+             .impl(org.apache.hadoop.io.compress.SnappyCodec.class,
+                 "isNativeCodeLoaded")
+             .impl(org.apache.hadoop.io.compress.SnappyCodec.class,
+-                "isNativeSnappyLoaded", Configuration.class)
++                "isNativeSnappyLoaded", org.apache.hadoop.conf.Configuration.class)
+             .buildStatic();
+   }
++
++  public static class Configuration {
++    public static final DynMethods.UnboundMethod addResource =
++      new DynMethods.Builder("addResource")
++          .impl(org.apache.hadoop.conf.Configuration.class, org.apache.hadoop.conf.Configuration.class)
++          .defaultNoop()
++          .build();
++  }
+ }
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
+index c88ecce..ca07de1 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
+@@ -30,6 +30,7 @@ import org.apache.commons.logging.LogFactory;
+ import org.apache.hadoop.conf.Configurable;
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.conf.Configured;
++import org.apache.hadoop.hive.conf.HiveConf;
+ import org.apache.hadoop.util.Tool;
+ import org.apache.hadoop.util.ToolRunner;
+ import org.apache.log4j.Level;
+@@ -262,7 +263,7 @@ public class Main extends Configured implements Tool {
+     LogFactory.getFactory().setAttribute(
+         "org.apache.commons.logging.Log",
+         "org.apache.commons.logging.impl.Log4JLogger");
+-    int rc = ToolRunner.run(new Configuration(), new Main(console), args);
++    int rc = ToolRunner.run(new HiveConf(), new Main(console), args);
+     System.exit(rc);
+   }
+ }
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
+index 479f3f8..569570d 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
+@@ -29,6 +29,13 @@ import org.kitesdk.tools.CopyTask;
+ import org.slf4j.Logger;
+ 
+ import static org.apache.avro.generic.GenericData.Record;
++import org.apache.hadoop.hive.conf.HiveConf;
++import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
++import org.apache.hadoop.hive.thrift.DelegationTokenIdentifier;
++import org.apache.hadoop.io.Text;
++import org.apache.hadoop.mapred.JobConf;
++import org.apache.hadoop.security.token.Token;
++import org.apache.thrift.TException;
+ 
+ @Parameters(commandDescription="Copy records from one Dataset to another")
+ public class CopyCommand extends BaseDatasetCommand {
+@@ -65,7 +72,23 @@ public class CopyCommand extends BaseDatasetCommand {
+ 
+     CopyTask task = new CopyTask<Record>(source, dest);
+ 
+-    task.setConf(getConf());
++    JobConf conf = new JobConf(getConf());
++
++    try {
++      if ((isHiveView(source) || isHiveView(dest))
++          && conf.getBoolean(HiveConf.ConfVars.METASTORE_USE_THRIFT_SASL.varname, false)) {
++        // Need to set up delegation token auth
++        HiveMetaStoreClient metaStoreClient = new HiveMetaStoreClient(new HiveConf());
++        String hiveTokenStr = metaStoreClient.getDelegationToken("yarn");
++        Token<DelegationTokenIdentifier> hiveToken = new Token<DelegationTokenIdentifier>();
++        hiveToken.decodeFromUrlString(hiveTokenStr);
++        conf.getCredentials().addToken(new Text("HIVE_METASTORE_TOKEN"), hiveToken);
++    }
++    } catch (TException ex) {
++      throw new RuntimeException("Unable to obtain Hive delegation token");
++    }
++
++    task.setConf(conf);
+ 
+     if (noCompaction) {
+       task.noCompaction();
+@@ -99,4 +122,8 @@ public class CopyCommand extends BaseDatasetCommand {
+         "movies dataset:hbase:zk-host/movies --no-compaction"
+     );
+   }
++
++  private boolean isHiveView(View<Record> view) {
++    return view.getDataset().getUri().toString().startsWith("dataset:hive:");
++  }
+ }
+-- 
+1.7.0.4
+

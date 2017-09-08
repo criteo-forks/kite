@@ -65,7 +65,6 @@ h3. kite\-morphlines\-core\-stdlib
 | [#findReplace] | Examines each string value in a given field and replaces each substring of the string value that matches the given string literal or grok pattern with the given replacement. |
 | [#generateUUID] | Sets a universally unique identifier on all records that are intercepted. |
 | [#grok] | Uses regular expression pattern matching to extract structured fields from unstructured log or text data. |
-| [#hashDigest] | Compute a hash digest of the input field. |
 | [#head] | Ignores all input records beyond the N\-th record, akin to the Unix {{head}} command. |
 | [#if] | Implements if\-then\-else conditional control flow. |
 | [#java] | Scripting support for Java. Dynamically compiles and executes the given Java code block. | 
@@ -875,30 +874,6 @@ grok {
 Note: An easy way to test grok out is to use the [online grok debugger|http://grokdebug.herokuapp.com/] from the logstash project. There is also a corresponding [YouTube video|http://www.youtube.com/watch?v=YIKm6WUgFTY].
 {note}
 
-h2. hashDigest
-
-The {{hashDigest}} command ([source code|https://github.com/kite-sdk/kite/blob/master/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/HashDigestBuilder.java]) computes a cryptographic hash digest of the input field, writing the hash digest to the specified output field. The algorithm must be specified using the {{hashType}} property. See the [Java Cryptography Architecture
-Standard Algorithm Name Document|http://docs.oracle.com/javase/8/docs/technotes/guides/security/StandardNames.html#MessageDigest] for information about standard message digest algorithm names. See the [Supported Encodings Document|https://docs.oracle.com/javase/8/docs/technotes/guides/intl/encoding.doc.html] for the constants used by the {{charset}} parameter. N.B. The character sets and hashing algorithms available may depend on your JVM, your locale and also installation of JCE Unlimited Strength Jurisdiction Policy Files.
-
-The command provides the following configuration options:
-|| Property Name || Default || Description ||
-| inputField | n/a | The input to the hash digest function |
-| outputField | n/a | The field in which to store the computed hash digest |
-| hashType | n/a | The hashing algorithm to use |
-| preserveExisting | true | Whether to preserve the field value if one is already present. |
-| charset | UTF\-8 | The character encoding to use when converting the inputField into a byte\[\] for submission to the hashing algorithm. |
-
-Example usage:
-{code}
-hashDigest {
-  inputField : inputData
-  outputField : sha256HashDigest
-  preserveExisting : false
-  hashType : SHA-256
-  charset : UTF-8
-}
-{code}
-
 h2. head
 
 The {{head}} command ([source code|https://github.com/kite-sdk/kite/blob/master/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/HeadBuilder.java]) ignores all input records beyond the N\-th record, thus emitting at most N records, akin to the Unix {{head}} command. This can be helpful to quickly test a morphline with the first few records from a larger dataset.
@@ -1513,7 +1488,7 @@ h4. Example startReportingMetricsToCSV usage
 startReportingMetricsToCSV {
   outputDir : "mytest/metricsLogs"
   frequency : "10 seconds"
-  locale : en-US
+  locale : en_US
 }
 {code}
 
@@ -1522,7 +1497,7 @@ h4. More example startReportingMetricsToCSV usage
 startReportingMetricsToCSV {
   outputDir : "mytest/metricsLogs"
   frequency : "10 seconds"
-  locale : en-US
+  locale : en_US
   defaultDurationUnit : milliseconds
   defaultRateUnit : seconds
   metricFilter : {
@@ -2115,7 +2090,7 @@ For each Avro datum, the command emits a morphline record containing the datum a
 
 Optionally, an Avro schema that shall be used for projecting parquet columns can be supplied with a configuration option. 
 
-In CDH 5.0 and beyond an additional Avro reader schema parameter can be specified. For Parquet files that were not written with the {{parquet.avro}} package (e.g. Impala Parquet files) there is no Avro write schema stored in the Parquet file metadata. To read such files using the {{readAvroParquetFile}} command you must either provide an Avro reader schema via the {{readerSchemaFile}} parameter, or a default Avro schema will be derived using the [standard mapping specification|https://github.com/apache/parquet-mr/blob/master/parquet-avro/src/main/java/org/apache/parquet/avro/package-info.java]. Prior to CDH 5.0 the implementation required that the parquet file contains an explicit Avro schema, e.g. as written by the {{parquet.avro.AvroParquetWriter}} class, and the reader schema was always retrieved from the parquet file. 
+In CDH 5.0 and beyond an additional Avro reader schema parameter can be specified. For Parquet files that were not written with the {{parquet.avro}} package (e.g. Impala Parquet files) there is no Avro write schema stored in the Parquet file metadata. To read such files using the {{readAvroParquetFile}} command you must either provide an Avro reader schema via the {{readerSchemaFile}} parameter, or a default Avro schema will be derived using the [standard mapping specification|https://github.com/Parquet/parquet-mr/blob/master/parquet-avro/src/main/java/parquet/avro/package-info.java]. Prior to CDH 5.0 the implementation required that the parquet file contains an explicit Avro schema, e.g. as written by the {{parquet.avro.AvroParquetWriter}} class, and the reader schema was always retrieved from the parquet file. 
 
 The command provides the following configuration options:
 
@@ -3173,10 +3148,6 @@ solrLocator : {
 
   # Max number of documents to pass per RPC from morphline to Solr Server
   # batchSize : 10000
-
-  # Zookeeper timeouts in milliseconds; consider increasing them for large or slow clusters
-  # zkClientSessionTimeout : 60000
-  # zkClientConnectionTimeout : 60000
 }
 {code}
 
@@ -3184,40 +3155,12 @@ h2. loadSolr
 
 The {{loadSolr}} command ([source code|https://github.com/kite-sdk/kite/blob/master/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/kitesdk/morphline/solr/LoadSolrBuilder.java]) 
 inserts, updates or deletes records into a Solr server or MapReduce Reducer.
-It has an optional ingestion rate limiting feature that is implemented with the Guava [RateLimiter|https://google.github.io/guava/releases/22.0/api/docs/com/google/common/util/concurrent/RateLimiter.html].
- 
+
 The command provides the following configuration options:
 
 || Property Name || Default || Description ||
 | solrLocator | n/a | Solr location parameters as described separately above. |
 | boosts | \[\] | An optional JSON object containing zero or more fieldName\-boostValue mappings where the fieldName is a String and the boostValue is a float. The default boost is {{1.0}}. |
-| maxRecordsPerSecond | Double.MAX_VALUE | The maximum number of morphline records to ingest per second (for rate limiting). This default is to not limit the rate. |
-| retryPolicy | see below | On exceptions, the loadSolr commmand retries solrj requests according to this configurable policy, as detailed below here: [#retryPolicy]. |
-
-{anchor:retryPolicy}
-\\
-\\
-h3. retryPolicy
-
-On exceptions, the {{loadSolr}} commmand retries solrj requests according to a configurable {{retryPolicy}}.
-This is useful in case solr servers are temporarily overloaded, or if there are transient network issues, etc.
-The {{BoundedExponentialBackoffRetry}} policy retries with exponentially increasing sleep time between retries until it has
-reached either a) the given max number of retries or b) more than the given amount of 
-time has elapsed since the start of the operation, whichever occurs first.
-For example, with baseSleepTime=100, maxSleepTime=1000 we sleep as follows in each iteration:
-random(100..199), random(200..399), random(400..799), min(random(800..1599), 1000), 1000, 1000, ... and so on.
-
-The {{BoundedExponentialBackoffRetry}} policy provides the following configuration options, 
-with all durations specified in [HOCON duration format|https://github.com/typesafehub/config/blob/master/HOCON.md#duration-format]:
-|| Property Name || Default || Description ||
-| baseSleepTime | "125 milliseconds" | initial amount of time to wait between retries. |
-| maxSleepTime | "10 seconds" | The maximum time to sleep on each retry. |
-| maxRetries | 100 | The maximum number of times to retry. Set this parameter to 0 to disable the retry feature. |
-| maxElapsedTime | "180 seconds" | The maximum time to spend across all retries. |
-
-Defaults: If the {{retryPolicy}} parameter is absent then the {{loadSolr}} command defaults to reasonable {{BoundedExponentialBackoffRetry}} policy values
-as described above unless the Java System Property {{org.kitesdk.morphline.solr.LoadSolrBuilder.disableRetryPolicyByDefault=true}} is present 
-(this system property in turn is absent by default). Set the {{maxRetries}} parameter to 0 to disable the retry feature.
 
 Examples:
 - [#loadSolrUpdate]
@@ -3245,18 +3188,6 @@ loadSolr {
   boosts : {
     id : 2.0 # assign to the id field a boost value 2.0
   }
-  maxRecordsPerSecond : 1000000  # maximum number of morphline records to ingest per second (for rate limiting)
-  retryPolicy : { 
-    # retry solrj requests until a total of 100 times or 3 minutes, whichever comes first
-    # first sleep between retries lasts for random(125..249) milliseconds, 
-    # subsequently the duration between retries grows exponentially, capped at 10 second sleeps between retries 
-    BoundedExponentialBackoffRetry {
-      baseSleepTime : "125 milliseconds"
-      maxSleepTime : "10 seconds"
-      maxRetries : 100 # set this parameter to 0 to disable the retry feature
-      maxElapsedTime : "3 minutes"
-    }
-  }  
 }
 {code}
 {anchor:loadSolrPartialUpdate}
@@ -3487,7 +3418,7 @@ h2. solrCell
 
 The {{solrCell}} command ([source code|https://github.com/kite-sdk/kite/blob/master/kite-morphlines/kite-morphlines-solr-cell/src/main/java/org/kitesdk/morphline/solrcell/SolrCellBuilder.java]) pipes the first attachment of a record into one of the given Apache [Tika|http://tika.apache.org] parsers, then maps the Tika output back to a record using Apache SolrCell.
 
-The Tika parser is chosen from the configurable list of parsers, depending on the MIME type specified in the input record. Typically, this requires an upstream [#detectMimeType] command.
+The Tika parser is chosen from the configurable list of parsers, depending on the MIME type specified in the input record. Typically, this requires an upstream {{detectMimeType}} command.
 
 The command provides the following configuration options:
 

@@ -1,0 +1,60 @@
+From c3dd0755a93af4bc660c1370a00f7806b74dc85e Mon Sep 17 00:00:00 2001
+From: Mladen Kovacevic <mladkov@gmail.com>
+Date: Wed, 15 Jul 2015 11:22:45 -0400
+Subject: [PATCH 088/115] KITE-1046: Add --num-records option to json-schema.
+
+---
+ .../kitesdk/cli/commands/JSONSchemaCommand.java    |   20 +++++++++++---------
+ 1 files changed, 11 insertions(+), 9 deletions(-)
+
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/JSONSchemaCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/JSONSchemaCommand.java
+index 8ba7c40..6c38783 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/JSONSchemaCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/JSONSchemaCommand.java
+@@ -21,17 +21,12 @@ import com.beust.jcommander.Parameters;
+ import com.beust.jcommander.internal.Lists;
+ import com.google.common.annotations.VisibleForTesting;
+ import com.google.common.base.Preconditions;
+-import com.google.common.collect.ImmutableSet;
+-import java.io.IOException;
+-import java.nio.charset.Charset;
+-import java.util.List;
+-import java.util.Set;
+ import org.apache.avro.Schema;
+-import org.apache.hadoop.conf.Configuration;
+ import org.kitesdk.data.spi.JsonUtil;
+-import org.kitesdk.data.spi.filesystem.CSVProperties;
+-import org.kitesdk.data.spi.filesystem.CSVUtil;
+ import org.slf4j.Logger;
++import java.io.IOException;
++import java.nio.charset.Charset;
++import java.util.List;
+ 
+ @Parameters(commandDescription="Build a schema from a JSON data sample")
+ public class JSONSchemaCommand extends BaseCommand {
+@@ -65,6 +60,13 @@ public class JSONSchemaCommand extends BaseCommand {
+       description="Minimize schema file size by eliminating white space")
+   boolean minimize=false;
+ 
++  @edu.umd.cs.findbugs.annotations.SuppressWarnings(
++      value="UWF_NULL_FIELD",
++      justification = "Field set by JCommander")
++  @Parameter(names={"-n", "--num-records"},
++      description="Number of records to use when building the schema", arity=1)
++  int numRecords = 10;  // By default we look at first 10 records
++
+   @Override
+   public int run() throws IOException {
+     Preconditions.checkArgument(samplePaths != null && !samplePaths.isEmpty(),
+@@ -74,7 +76,7 @@ public class JSONSchemaCommand extends BaseCommand {
+ 
+     // assume fields are nullable by default, users can easily change this
+     Schema sampleSchema = JsonUtil.inferSchema(
+-        open(samplePaths.get(0)), recordName, 10);
++        open(samplePaths.get(0)), recordName, numRecords);
+ 
+     if (sampleSchema != null) {
+       output(sampleSchema.toString(!minimize), console, outputPath);
+-- 
+1.7.0.4
+

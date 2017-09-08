@@ -1,0 +1,693 @@
+From 7646a007b6362699ff69dd550f63b389dc68dbca Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Sun, 22 Mar 2015 16:18:59 -0700
+Subject: [PATCH 043/115] CDK-938: Add kite-data-s3
+
+This adds both s3n and s3a dataset URIs and a test for each.  Both URI
+patterns assume the bucket is the dataset repository.
+
+Until a mock S3 service can be added, this expects real S3 credentials
+and a bucket name passed as S3_ID, S3_KEY, and S3_BUCKET environment
+variables. If those are not present, then the test will not run. To
+disable tests for the hadoop1 and cdh4 profiles, the credentials are
+explicitly set to empty.
+
+Validated that the CLI works with S3 URIs.
+
+Conflicts:
+	pom.xml
+Resolution:
+    Conflict with CDH pom changes.
+    Need to follow up with a CLOUDERA-BUILD commit to set versions.
+---
+ kite-data/kite-data-s3/pom.xml                     |  247 ++++++++++++++++++++
+ .../main/java/org/kitesdk/data/spi/s3/Loader.java  |  125 ++++++++++
+ .../services/org.kitesdk.data.spi.Loadable         |   16 ++
+ .../org/kitesdk/data/spi/s3/TestS3Dataset.java     |  147 ++++++++++++
+ kite-data/pom.xml                                  |    1 +
+ kite-tools-parent/pom.xml                          |    6 +
+ pom.xml                                            |   28 +++
+ 7 files changed, 570 insertions(+), 0 deletions(-)
+ create mode 100644 kite-data/kite-data-s3/pom.xml
+ create mode 100644 kite-data/kite-data-s3/src/main/java/org/kitesdk/data/spi/s3/Loader.java
+ create mode 100644 kite-data/kite-data-s3/src/main/resources/META-INF/services/org.kitesdk.data.spi.Loadable
+ create mode 100644 kite-data/kite-data-s3/src/test/java/org/kitesdk/data/spi/s3/TestS3Dataset.java
+
+diff --git a/kite-data/kite-data-s3/pom.xml b/kite-data/kite-data-s3/pom.xml
+new file mode 100644
+index 0000000..7bd1bcd
+--- /dev/null
++++ b/kite-data/kite-data-s3/pom.xml
+@@ -0,0 +1,247 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!--
++~ Copyright 2013 Cloudera Inc.
++~
++~ Licensed under the Apache License, Version 2.0 (the "License");
++~ you may not use this file except in compliance with the License.
++~ You may obtain a copy of the License at
++~
++~ http://www.apache.org/licenses/LICENSE-2.0
++~
++~ Unless required by applicable law or agreed to in writing, software
++~ distributed under the License is distributed on an "AS IS" BASIS,
++~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++~ See the License for the specific language governing permissions and
++~ limitations under the License.
++-->
++<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
++
++  <modelVersion>4.0.0</modelVersion>
++  <artifactId>kite-data-s3</artifactId>
++
++  <parent>
++    <groupId>org.kitesdk</groupId>
++    <artifactId>kite-data</artifactId>
++    <version>1.0.1-SNAPSHOT</version>
++  </parent>
++
++  <name>Kite Data S3 Module</name>
++  <description>
++    The Kite Data S3 module provides tools for storing Kite datasets in Amazon S3.
++  </description>
++
++  <build>
++    <plugins>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-compiler-plugin</artifactId>
++      </plugin>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-shade-plugin</artifactId>
++      </plugin>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-source-plugin</artifactId>
++      </plugin>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-javadoc-plugin</artifactId>
++      </plugin>
++      <plugin>
++        <groupId>org.apache.rat</groupId>
++        <artifactId>apache-rat-plugin</artifactId>
++      </plugin>
++      <plugin>
++        <groupId>org.codehaus.mojo</groupId>
++        <artifactId>findbugs-maven-plugin</artifactId>
++      </plugin>
++      <plugin>
++        <groupId>org.codehaus.mojo</groupId>
++        <artifactId>findbugs-maven-plugin</artifactId>
++      </plugin>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-surefire-plugin</artifactId>
++        <configuration>
++          <systemPropertyVariables>
++            <aws.s3.id>${s3.id}</aws.s3.id>
++            <aws.s3.key>${s3.key}</aws.s3.key>
++            <aws.s3.bucket>${s3.bucket}</aws.s3.bucket>
++          </systemPropertyVariables>
++        </configuration>
++      </plugin>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-antrun-plugin</artifactId>
++        <executions>
++          <execution>
++            <phase>compile</phase>
++            <goals>
++              <goal>run</goal>
++            </goals>
++            <configuration>
++              <tasks>
++                <echo message="Create empty javadoc JAR to satisfy Maven central" />
++                <mkdir dir="target/apidocs" />
++              </tasks>
++            </configuration>
++          </execution>
++        </executions>
++      </plugin>
++    </plugins>
++  </build>
++
++  <!--
++    Seems like these reporting plugins aren't properly inherited from the parent
++    pom's pluginManagement. The docs say it's supposed to work.
++  -->
++  <reporting>
++    <plugins>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-project-info-reports-plugin</artifactId>
++        <reportSets>
++          <reportSet>
++            <inherited>false</inherited>
++            <reports>
++              <report>index</report>
++              <report>summary</report>
++              <report>dependency-info</report>
++              <report>dependencies</report>
++            </reports>
++          </reportSet>
++        </reportSets>
++      </plugin>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-javadoc-plugin</artifactId>
++      </plugin>
++    </plugins>
++  </reporting>
++
++  <dependencies>
++    <!-- Kite -->
++    <dependency>
++      <groupId>org.kitesdk</groupId>
++      <artifactId>kite-data-core</artifactId>
++      <version>${project.parent.version}</version>
++    </dependency>
++
++    <!-- Hadoop -->
++    <dependency>
++      <groupId>org.kitesdk</groupId>
++      <artifactId>${artifact.hadoop-deps}</artifactId>
++      <type>pom</type>
++      <scope>provided</scope>
++    </dependency>
++    <dependency>
++      <groupId>org.kitesdk</groupId>
++      <artifactId>kite-hadoop-compatibility</artifactId>
++    </dependency>
++
++    <!-- Avro, Parquet, and other formats -->
++    <dependency>
++      <groupId>org.apache.avro</groupId>
++      <artifactId>avro</artifactId>
++    </dependency>
++
++    <!-- These should be compile-dependencies
++         But, hive-exec includes classes from other modules at Hive-specific
++         versions, including avro's Schema. This causes errors in this and
++         other modules, so these are marked provided.
++         -->
++    <dependency>
++      <groupId>org.apache.hadoop</groupId>
++      <artifactId>hadoop-aws</artifactId>
++      <!-- exclude server-side parts that conflict with running in a webapp -->
++      <exclusions>
++        <exclusion>
++          <groupId>com.sun.jersey</groupId>
++          <artifactId>jersey-client</artifactId>
++        </exclusion>
++        <exclusion>
++          <groupId>com.sun.jersey</groupId>
++          <artifactId>jersey-core</artifactId>
++        </exclusion>
++        <exclusion>
++          <groupId>com.sun.jersey</groupId>
++          <artifactId>jersey-grizzly2</artifactId>
++        </exclusion>
++        <exclusion>
++          <groupId>com.sun.jersey</groupId>
++          <artifactId>jersey-json</artifactId>
++        </exclusion>
++        <exclusion>
++          <groupId>com.sun.jersey</groupId>
++          <artifactId>jersey-server</artifactId>
++        </exclusion>
++        <exclusion>
++          <groupId>javax.servlet</groupId>
++          <artifactId>servlet-api</artifactId>
++        </exclusion>
++        <exclusion>
++          <groupId>org.mortbay.jetty</groupId>
++          <artifactId>jetty</artifactId>
++        </exclusion>
++        <exclusion>
++          <groupId>org.mortbay.jetty</groupId>
++          <artifactId>jetty-util</artifactId>
++        </exclusion>
++        <exclusion>
++          <groupId>tomcat</groupId>
++          <artifactId>jasper-runtime</artifactId>
++        </exclusion>
++        <exclusion>
++          <groupId>tomcat</groupId>
++          <artifactId>jasper-compiler</artifactId>
++        </exclusion>
++      </exclusions>
++    </dependency>
++
++    <!-- Misc -->
++    <dependency>
++      <groupId>org.slf4j</groupId>
++      <artifactId>slf4j-api</artifactId>
++    </dependency>
++    <dependency>
++      <groupId>com.google.guava</groupId>
++      <artifactId>guava</artifactId>
++    </dependency>
++    <dependency>
++      <groupId>com.google.code.findbugs</groupId>
++      <artifactId>jsr305</artifactId>
++      <scope>provided</scope>
++      <optional>true</optional>
++    </dependency>
++    <dependency>
++      <groupId>com.google.code.findbugs</groupId>
++      <artifactId>annotations</artifactId>
++      <scope>provided</scope>
++    </dependency>
++
++    <!-- Test Dependencies -->
++
++    <dependency>
++      <groupId>junit</groupId>
++      <artifactId>junit</artifactId>
++      <scope>test</scope>
++    </dependency>
++
++    <dependency>
++      <groupId>org.kitesdk</groupId>
++      <artifactId>kite-data-core</artifactId>
++      <version>${project.parent.version}</version>
++      <type>test-jar</type>
++      <scope>test</scope>
++    </dependency>
++
++    <dependency>
++      <groupId>org.kitesdk</groupId>
++      <artifactId>${artifact.hadoop-test-deps}</artifactId>
++      <type>pom</type>
++      <scope>test</scope>
++    </dependency>
++  </dependencies>
++
++</project>
+diff --git a/kite-data/kite-data-s3/src/main/java/org/kitesdk/data/spi/s3/Loader.java b/kite-data/kite-data-s3/src/main/java/org/kitesdk/data/spi/s3/Loader.java
+new file mode 100644
+index 0000000..d59bf57
+--- /dev/null
++++ b/kite-data/kite-data-s3/src/main/java/org/kitesdk/data/spi/s3/Loader.java
+@@ -0,0 +1,125 @@
++/*
++ * Copyright 2015 Cloudera.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.kitesdk.data.spi.s3;
++
++import java.io.IOException;
++import java.net.URI;
++import java.net.URISyntaxException;
++import java.util.Map;
++import org.apache.hadoop.conf.Configuration;
++import org.apache.hadoop.fs.FileSystem;
++import org.apache.hadoop.fs.Path;
++import org.kitesdk.data.DatasetIOException;
++import org.kitesdk.data.DatasetOperationException;
++import org.kitesdk.data.spi.DatasetRepository;
++import org.kitesdk.data.spi.DefaultConfiguration;
++import org.kitesdk.data.spi.Loadable;
++import org.kitesdk.data.spi.OptionBuilder;
++import org.kitesdk.data.spi.Registration;
++import org.kitesdk.data.spi.URIPattern;
++import org.kitesdk.data.spi.filesystem.FileSystemDatasetRepository;
++
++/**
++ * A Loader implementation to register URIs for S3.
++ */
++public class Loader implements Loadable {
++
++  private static final int UNSPECIFIED_PORT = -1;
++
++  /**
++   * This class builds configured instances of
++   * {@code FileSystemDatasetRepository} from a Map of options. This is for the
++   * URI system.
++   */
++  private static class URIBuilder implements OptionBuilder<DatasetRepository> {
++
++    @Override
++    public DatasetRepository getFromOptions(Map<String, String> match) {
++      String path = match.get("path");
++      final Path root = (path == null || path.isEmpty()) ?
++          new Path("/") : new Path("/", path);
++
++      Configuration conf = DefaultConfiguration.get();
++      FileSystem fs;
++      try {
++        fs = FileSystem.get(fileSystemURI(match), conf);
++      } catch (IOException e) {
++        // "Incomplete HDFS URI, no host" => add a helpful suggestion
++        if (e.getMessage().startsWith("Incomplete")) {
++          throw new DatasetIOException("Could not get a FileSystem: " +
++              "make sure the credentials for " + match.get(URIPattern.SCHEME) +
++              " URIs are configured.", e);
++        }
++        throw new DatasetIOException("Could not get a FileSystem", e);
++      }
++      return new FileSystemDatasetRepository.Builder()
++          .configuration(new Configuration(conf)) // make a modifiable copy
++          .rootDirectory(fs.makeQualified(root))
++          .build();
++    }
++  }
++
++  @Override
++  public void load() {
++    try {
++      // load hdfs-site.xml by loading HdfsConfiguration
++      FileSystem.getLocal(DefaultConfiguration.get());
++    } catch (IOException e) {
++      throw new DatasetIOException("Cannot load default config", e);
++    }
++
++    OptionBuilder<DatasetRepository> builder = new URIBuilder();
++
++    // username and secret are the same; host is the bucket
++    Registration.register(
++        new URIPattern("s3n:/"),
++        new URIPattern("s3n:/:namespace/:dataset"),
++        builder);
++    Registration.register(
++        new URIPattern("s3a:/"),
++        new URIPattern("s3a:/:namespace/:dataset"),
++        builder);
++  }
++
++  private static URI fileSystemURI(Map<String, String> match) {
++    final String userInfo;
++    if (match.containsKey(URIPattern.USERNAME)) {
++      if (match.containsKey(URIPattern.PASSWORD)) {
++        userInfo = match.get(URIPattern.USERNAME) + ":" +
++            match.get(URIPattern.PASSWORD);
++      } else {
++        userInfo = match.get(URIPattern.USERNAME);
++      }
++    } else {
++      userInfo = null;
++    }
++    try {
++      int port = UNSPECIFIED_PORT;
++      if (match.containsKey(URIPattern.PORT)) {
++        try {
++          port = Integer.parseInt(match.get(URIPattern.PORT));
++        } catch (NumberFormatException e) {
++          port = UNSPECIFIED_PORT;
++        }
++      }
++      return new URI(match.get(URIPattern.SCHEME), userInfo,
++          match.get(URIPattern.HOST), port, "/", null, null);
++    } catch (URISyntaxException ex) {
++      throw new DatasetOperationException("[BUG] Could not build FS URI", ex);
++    }
++  }
++}
+diff --git a/kite-data/kite-data-s3/src/main/resources/META-INF/services/org.kitesdk.data.spi.Loadable b/kite-data/kite-data-s3/src/main/resources/META-INF/services/org.kitesdk.data.spi.Loadable
+new file mode 100644
+index 0000000..0ccdac8
+--- /dev/null
++++ b/kite-data/kite-data-s3/src/main/resources/META-INF/services/org.kitesdk.data.spi.Loadable
+@@ -0,0 +1,16 @@
++#
++# Copyright 2015 Cloudera Inc.
++# 
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++# 
++# http://www.apache.org/licenses/LICENSE-2.0
++# 
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++org.kitesdk.data.spi.s3.Loader
+diff --git a/kite-data/kite-data-s3/src/test/java/org/kitesdk/data/spi/s3/TestS3Dataset.java b/kite-data/kite-data-s3/src/test/java/org/kitesdk/data/spi/s3/TestS3Dataset.java
+new file mode 100644
+index 0000000..e8d13c8
+--- /dev/null
++++ b/kite-data/kite-data-s3/src/test/java/org/kitesdk/data/spi/s3/TestS3Dataset.java
+@@ -0,0 +1,147 @@
++/*
++ * Copyright 2015 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.kitesdk.data.spi.s3;
++
++import com.google.common.collect.Lists;
++import java.util.Iterator;
++import java.util.List;
++import org.apache.hadoop.conf.Configuration;
++import org.junit.AfterClass;
++import org.junit.Assert;
++import org.junit.Assume;
++import org.junit.BeforeClass;
++import org.junit.Test;
++import org.kitesdk.data.Dataset;
++import org.kitesdk.data.DatasetDescriptor;
++import org.kitesdk.data.DatasetReader;
++import org.kitesdk.data.DatasetWriter;
++import org.kitesdk.data.Datasets;
++import org.kitesdk.data.spi.DefaultConfiguration;
++
++public class TestS3Dataset {
++  private static final String ID = System.getProperty("aws.s3.id");
++  private static final String KEY = System.getProperty("aws.s3.key");
++  private static final String BUCKET = System.getProperty("aws.s3.bucket");
++
++  private static Configuration original = null;
++
++  @BeforeClass
++  public static void addCredentials() {
++    original = DefaultConfiguration.get();
++    Configuration conf = DefaultConfiguration.get();
++    if (ID != null) {
++      conf.set("fs.s3n.awsAccessKeyId", ID);
++      conf.set("fs.s3n.awsSecretAccessKey", KEY);
++      conf.set("fs.s3a.access.key", ID);
++      conf.set("fs.s3a.secret.key", KEY);
++    }
++    DefaultConfiguration.set(conf);
++  }
++
++  @AfterClass
++  public static void resetConfiguration() {
++    DefaultConfiguration.set(original);
++  }
++
++  @Test
++  public void testBasics3n() {
++    // only run this test if credentials are present
++    Assume.assumeTrue(ID != null && !ID.isEmpty());
++
++    String uri = "dataset:s3n://" + BUCKET + "/ns/test";
++
++    // make sure the dataset doesn't already exist
++    Datasets.delete(uri);
++
++    DatasetDescriptor descriptor = new DatasetDescriptor.Builder()
++        .schemaLiteral("\"string\"")
++        .build();
++
++    Dataset<String> dataset = Datasets.create(uri, descriptor, String.class);
++
++    List<String> expected = Lists.newArrayList("a", "b", "time");
++    DatasetWriter<String> writer = null;
++    try {
++      writer = dataset.newWriter();
++      for (String s : expected) {
++        writer.write(s);
++      }
++    } finally {
++      if (writer != null) {
++        writer.close();
++      }
++    }
++
++    DatasetReader<String> reader = null;
++    try {
++      reader = dataset.newReader();
++      Assert.assertEquals("Should match written strings",
++          expected, Lists.newArrayList((Iterator<String>) reader));
++    } finally {
++      if (reader != null) {
++        reader.close();
++      }
++    }
++
++    // clean up
++    Datasets.delete(uri);
++  }
++
++  @Test
++  public void testBasics3a() {
++    // only run this test if credentials are present
++    Assume.assumeTrue(ID != null && !ID.isEmpty());
++
++    String uri = "dataset:s3a://" + BUCKET + "/ns/test";
++
++    // make sure the dataset doesn't already exist
++    Datasets.delete(uri);
++
++    DatasetDescriptor descriptor = new DatasetDescriptor.Builder()
++        .schemaLiteral("\"string\"")
++        .build();
++
++    Dataset<String> dataset = Datasets.create(uri, descriptor, String.class);
++
++    List<String> expected = Lists.newArrayList("a", "b", "time");
++    DatasetWriter<String> writer = null;
++    try {
++      writer = dataset.newWriter();
++      for (String s : expected) {
++        writer.write(s);
++      }
++    } finally {
++      if (writer != null) {
++        writer.close();
++      }
++    }
++
++    DatasetReader<String> reader = null;
++    try {
++      reader = dataset.newReader();
++      Assert.assertEquals("Should match written strings",
++          expected, Lists.newArrayList((Iterator<String>) reader));
++    } finally {
++      if (reader != null) {
++        reader.close();
++      }
++    }
++
++    // clean up
++    Datasets.delete(uri);
++  }
++}
+diff --git a/kite-data/pom.xml b/kite-data/pom.xml
+index 1cbb492..7389390 100644
+--- a/kite-data/pom.xml
++++ b/kite-data/pom.xml
+@@ -25,6 +25,7 @@
+   <modules>
+     <module>kite-data-core</module>
+     <module>kite-data-hive</module>
++    <module>kite-data-s3</module>
+     <module>kite-data-crunch</module>
+     <!-- Avoid circular dependency. CDH-14681
+     <module>kite-data-flume</module>
+diff --git a/kite-tools-parent/pom.xml b/kite-tools-parent/pom.xml
+index b677509..40be268 100644
+--- a/kite-tools-parent/pom.xml
++++ b/kite-tools-parent/pom.xml
+@@ -96,6 +96,12 @@
+ 
+     <dependency>
+       <groupId>org.kitesdk</groupId>
++      <artifactId>kite-data-s3</artifactId>
++      <version>${project.version}</version>
++    </dependency>
++
++    <dependency>
++      <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-hbase</artifactId>
+       <version>${project.version}</version>
+     </dependency>
+diff --git a/pom.xml b/pom.xml
+index 1e174ef..b19e22e 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -172,6 +172,9 @@
+     <vers.jodatime>2.3</vers.jodatime>
+     <vers.jcommander>1.35</vers.jcommander>
+     <vers.spark>${cdh.spark.version}</vers.spark>
++    <vers.hadoop-aws>2.6.0</vers.hadoop-aws>
++    <vers.apache-httpcomponents>4.2</vers.apache-httpcomponents>
++    <vers.jets3t>0.9.0</vers.jets3t>
+ 
+     <!-- Plugin versions -->
+     <vers.doxia-module-markdown>1.4</vers.doxia-module-markdown>
+@@ -201,6 +204,11 @@
+     <url.jira>http://issues.cloudera.com/browse/CDK</url.jira>
+ 
+     <github.global.server>github</github.global.server>
++
++    <!-- Until we add a mock, use S3 credentials from the environment -->
++    <s3.id>${env.S3_ID}</s3.id>
++    <s3.key>${env.S3_KEY}</s3.key>
++    <s3.bucket>${env.S3_BUCKET}</s3.bucket>
+   </properties>
+ 
+   <repositories>
+@@ -755,6 +763,11 @@
+         <artifactId>kite-hadoop-compatibility</artifactId>
+         <version>${project.version}</version>
+       </dependency>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-aws</artifactId>
++        <version>${vers.hadoop-aws}</version>
++      </dependency>
+ 
+       <!-- HBase dependencies -->
+       <dependency>
+@@ -850,6 +863,11 @@
+         <artifactId>commons-jexl</artifactId>
+         <version>${vers.jexl}</version>
+       </dependency>
++      <dependency>
++        <groupId>net.java.dev.jets3t</groupId>
++        <artifactId>jets3t</artifactId>
++        <version>${vers.jets3t}</version>
++      </dependency>
+ 
+       <!-- Logging -->
+       <dependency>
+@@ -952,6 +970,16 @@
+         <artifactId>commons-lang</artifactId>
+         <version>${vers.commons-lang}</version>
+       </dependency>
++      <dependency>
++        <groupId>org.apache.httpcomponents</groupId>
++        <artifactId>httpclient</artifactId>
++        <version>${vers.apache-httpcomponents}</version>
++      </dependency>
++      <dependency>
++        <groupId>org.apache.httpcomponents</groupId>
++        <artifactId>httpcore</artifactId>
++        <version>${vers.apache-httpcomponents}</version>
++      </dependency>
+ 
+       <!-- Testing -->
+       <dependency>
+-- 
+1.7.0.4
+

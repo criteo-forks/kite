@@ -18,7 +18,7 @@
   <parent>
     <groupId>org.kitesdk</groupId>
     <artifactId>kite-morphlines</artifactId>
-    <version>1.1.1-SNAPSHOT</version>
+    <version>1.0.0-cdh5.5.0</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
 
@@ -73,32 +73,15 @@
       <artifactId>jcl-over-slf4j</artifactId>
     </dependency>
 
-    <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-log4j12</artifactId>
-      <scope>test</scope>
-    </dependency>
-
   </dependencies>
 
-  <dependencyManagement>
-    <dependencies>
-      <dependency>
-        <groupId>org.eclipse.jetty</groupId>
-        <artifactId>jetty-servlet</artifactId>
-        <version>${vers.jetty.morphlines}</version>        
-      </dependency>
-    </dependencies>
-  </dependencyManagement>
-  
   <build>
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
-        <version>${vers.maven-surefire-plugin}</version>
         <configuration>
-          <argLine>-Xmx2048m -Dtests.locale=en-US</argLine>
+          <argLine>-Dtests.locale=en_us</argLine>
           <!--<forkMode>always</forkMode>-->
           <redirectTestOutputToFile>true</redirectTestOutputToFile>
           <systemPropertyVariables>
@@ -134,11 +117,11 @@
 
   <profiles>
     <profile>
-      <id>skip-kite-morphlines-solr</id>
+      <id>jdk1.6</id>
       <activation>
-        <jdk>[,1.8)</jdk>
+        <jdk>1.6</jdk>
       </activation>
-      <!-- don't compile or run unit tests for JDK < 1.8 since Solr6 and Jetty9 require Java 1.8+ -->
+      <!-- don't compile or run unit tests for JDK 1.6 since Solr requires 1.7+ -->
       <build>
         <plugins>
           <plugin>

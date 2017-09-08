@@ -1,0 +1,26 @@
+From 888675e38213f4ad0359483aff7561b2410ba630 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Mon, 27 Jul 2015 14:43:58 -0700
+Subject: [PATCH 027/115] CLOUDERA-BUILD. Fix CDH5 parent POM version.
+
+This was 1.0.0 but should be the CDH version, 1.0.0-cdh5.x.y.
+---
+ kite-app-parent/cdh5/pom.xml |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/kite-app-parent/cdh5/pom.xml b/kite-app-parent/cdh5/pom.xml
+index 1e8b204..cfc80e8 100644
+--- a/kite-app-parent/cdh5/pom.xml
++++ b/kite-app-parent/cdh5/pom.xml
+@@ -26,7 +26,7 @@
+   <modelVersion>4.0.0</modelVersion>
+   <groupId>org.kitesdk</groupId>
+   <artifactId>kite-app-parent-cdh5</artifactId>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.5.0-SNAPSHOT</version>
+   <packaging>pom</packaging>
+ 
+   <name>Kite Application POM for CDH5</name>
+-- 
+1.7.0.4
+

@@ -1,0 +1,124 @@
+From a57154c67d5e6ecf2fb4cb526d65b108cf770ba3 Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Tue, 28 Apr 2015 11:23:01 +0300
+Subject: [PATCH 017/115] CDK-994: The morphline grok command should also support multiple groups that have the same name
+
+---
+ .../org/kitesdk/morphline/stdlib/GrokBuilder.java  |   24 +++++++++----
+ .../org/kitesdk/morphline/api/MorphlineTest.java   |   15 ++++++++
+ .../grokWithMultipleGroupsWithSameName.conf        |   36 ++++++++++++++++++++
+ 3 files changed, 67 insertions(+), 8 deletions(-)
+ create mode 100644 kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/grokWithMultipleGroupsWithSameName.conf
+
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/GrokBuilder.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/GrokBuilder.java
+index fd009d0..5dbfb7d 100644
+--- a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/GrokBuilder.java
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/GrokBuilder.java
+@@ -230,20 +230,28 @@ public final class GrokBuilder implements CommandBuilder {
+         Preconditions.checkNotNull(matcher);
+         this.recordInputField = recordInputField;
+         this.matcher = matcher;
+-        this.groupNames = new String[matcher.namedPattern().groupInfo().entrySet().size()]; 
+-        this.groupNumbers = new int[groupNames.length];
++        
++        int size = 0;
++        for (Map.Entry<String, List<GroupInfo>> entry : matcher.namedPattern().groupInfo().entrySet()) {
++          size += entry.getValue().size();
++        }
++        this.groupNames = new String[size]; 
++        this.groupNumbers = new int[size];
+         
+         int i = 0;
+         for (Map.Entry<String, List<GroupInfo>> entry : matcher.namedPattern().groupInfo().entrySet()) {
+           String groupName = entry.getKey();
+           assert groupName != null;
+-          List<GroupInfo> list = entry.getValue();
+-          int idx = list.get(0).groupIndex();
+-          int group = idx > -1 ? idx + 1 : -1;
+-          groupNames[i] = groupName;
+-          groupNumbers[i] = group;
+-          i++;
++          List<GroupInfo> groupInfos = entry.getValue();
++          for (GroupInfo groupInfo : groupInfos) {
++            int idx = groupInfo.groupIndex();
++            int group = idx > -1 ? idx + 1 : -1;
++            groupNames[i] = groupName;
++            groupNumbers[i] = group;
++            i++;
++          }
+         }
++        assert i == size;
+       }
+       
+       public void extract(Record outputRecord, boolean addEmptyStrings) {
+diff --git a/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/MorphlineTest.java b/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/MorphlineTest.java
+index 032aa9c..363953f 100644
+--- a/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/MorphlineTest.java
++++ b/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/MorphlineTest.java
+@@ -1449,6 +1449,21 @@ public class MorphlineTest extends AbstractMorphlineTest {
+   }
+   
+   @Test
++  public void testGrokWithMultipleGroupsWithSameName() throws Exception {
++    morphline = createMorphline("test-morphlines/grokWithMultipleGroupsWithSameName");
++    Record record = new Record();
++    record.put(Fields.MESSAGE, "123 456");
++    assertTrue(morphline.process(record));
++    
++    Record expected = new Record();
++    expected.put(Fields.MESSAGE, "123 456");
++    expected.put("syslog_pri", "123");
++    expected.put("syslog_pri", "456");
++    assertEquals(expected, collector.getFirstRecord());
++    assertNotSame(record, collector.getFirstRecord());      
++  }
++  
++  @Test
+   public void testConvertTimestamp() throws Exception {
+     morphline = createMorphline("test-morphlines/convertTimestamp");    
+     Record record = new Record();
+diff --git a/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/grokWithMultipleGroupsWithSameName.conf b/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/grokWithMultipleGroupsWithSameName.conf
+new file mode 100644
+index 0000000..e4a96ae
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/grokWithMultipleGroupsWithSameName.conf
+@@ -0,0 +1,36 @@
++# Copyright 2013 Cloudera Inc.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++# http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++morphlines : [
++  {
++    id : morphline1
++    importCommands : ["org.kitesdk.**"]
++    
++    commands : [                    
++      {
++        grok { 
++          dictionaryString : """
++            INT [0-9]+
++          """
++          expressions : { 
++            message : "%{INT:syslog_pri} %{INT:syslog_pri}"
++          }
++          numRequiredMatches : all
++        }
++      }
++      
++      { logDebug { format : "output record: {}", args : ["@{}"] } }    
++    ]
++  }
++]
+-- 
+1.7.0.4
+

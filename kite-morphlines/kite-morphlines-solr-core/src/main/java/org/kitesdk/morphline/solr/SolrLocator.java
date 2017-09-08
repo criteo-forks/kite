@@ -17,25 +17,18 @@ package org.kitesdk.morphline.solr;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Paths;
 
 import javax.xml.parsers.ParserConfigurationException;
 
-import org.apache.solr.client.solrj.SolrClient;
+import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.client.solrj.embedded.EmbeddedSolrServer;
-import org.apache.solr.client.solrj.impl.CloudSolrClient;
-import org.apache.solr.client.solrj.impl.CloudSolrClient.Builder;
-import org.apache.solr.client.solrj.retry.MetricsFacade;
-import org.apache.solr.client.solrj.retry.RetryPolicyFactory;
-import org.apache.solr.client.solrj.retry.RetryingSolrServer;
+import org.apache.solr.client.solrj.impl.CloudSolrServer;
 import org.apache.solr.common.cloud.SolrZkClient;
 import org.apache.solr.core.CoreContainer;
-import org.apache.solr.core.PluginInfo;
 import org.apache.solr.core.SolrConfig;
 import org.apache.solr.core.SolrResourceLoader;
 import org.apache.solr.schema.IndexSchema;
 import org.apache.solr.schema.IndexSchemaFactory;
-import org.apache.solr.schema.ManagedIndexSchemaFactory;
 import org.apache.zookeeper.KeeperException;
 import org.kitesdk.morphline.api.MorphlineCompilationException;
 import org.kitesdk.morphline.api.MorphlineContext;
@@ -96,18 +89,16 @@ public class SolrLocator {
     configs.validateArguments(config);
   }
   
-  public SolrClient getSolrServer() {
+  public SolrServer getSolrServer() {
     if (zkHost != null && zkHost.length() > 0) {
       if (collectionName == null || collectionName.length() == 0) {
         throw new MorphlineCompilationException("Parameter 'zkHost' requires that you also pass parameter 'collection'", config);
       }
-      CloudSolrClient cloudSolrClient = new Builder()
-          .withZkHost(zkHost)
-          .build();
-      cloudSolrClient.setDefaultCollection(collectionName);
-      cloudSolrClient.setZkClientTimeout(zkClientSessionTimeout); 
-      cloudSolrClient.setZkConnectTimeout(zkClientConnectTimeout); 
-      return cloudSolrClient;
+      CloudSolrServer cloudSolrServer = new CloudSolrServer(zkHost);
+      cloudSolrServer.setDefaultCollection(collectionName);
+      cloudSolrServer.setZkClientTimeout(zkClientSessionTimeout); 
+      cloudSolrServer.setZkConnectTimeout(zkClientConnectTimeout); 
+      return cloudSolrServer;
     } else {
       if (solrUrl == null && solrHomeDir != null) {
         CoreContainer coreContainer = new CoreContainer(solrHomeDir);
@@ -120,16 +111,12 @@ public class SolrLocator {
       }
       int solrServerNumThreads = 2;
       int solrServerQueueLength = solrServerNumThreads;
-      SolrClient server = new SafeConcurrentUpdateSolrServer(solrUrl, solrServerQueueLength, solrServerNumThreads);
+      SolrServer server = new SafeConcurrentUpdateSolrServer(solrUrl, solrServerQueueLength, solrServerNumThreads);
       return server;
     }
   }
 
   public DocumentLoader getLoader() {
-    return getLoader(null, null);
-  }
-  
-  DocumentLoader getLoader(RetryPolicyFactory retryPolicyFactory, MetricsFacade retryMetricsFacade) {
     if (context instanceof SolrMorphlineContext) {
       DocumentLoader loader = ((SolrMorphlineContext)context).getDocumentLoader();
       if (loader != null) {
@@ -137,22 +124,18 @@ public class SolrLocator {
       }
     }
     
-    SolrClient solrServer = getSolrServer();
-    if (solrServer instanceof CloudSolrClient) {
+    SolrServer solrServer = getSolrServer();
+    if (solrServer instanceof CloudSolrServer) {
       try {
-        ((CloudSolrClient)solrServer).setIdField(getIndexSchema().getUniqueKeyField().getName());
+        ((CloudSolrServer)solrServer).setIdField(getIndexSchema().getUniqueKeyField().getName());
       } catch (RuntimeException e) {
         try {
-          solrServer.close(); // release resources
+          solrServer.shutdown(); // release resources
         } catch (Exception ex2) {
           LOG.debug("Cannot get index schema and cannot shutdown CloudSolrServer", ex2);
         }
         throw new RuntimeException(e); // rethrow root cause
       }      
-    }
-
-    if (retryPolicyFactory != null) {
-      solrServer = new RetryingSolrServer(solrServer, retryPolicyFactory, retryMetricsFacade);
     }
     
     return new SolrServerDocumentLoader(solrServer, batchSize);
@@ -203,29 +186,19 @@ public class SolrLocator {
       
       LOG.debug("SolrLocator loading IndexSchema from dir {}", mySolrHomeDir);
       try {
-        SolrResourceLoader loader = new SolrResourceLoader(Paths.get(mySolrHomeDir));
+        SolrResourceLoader loader = new SolrResourceLoader(mySolrHomeDir);
         SolrConfig solrConfig = new SolrConfig(loader, "solrconfig.xml", null);
-
-        PluginInfo info = solrConfig.getPluginInfo(IndexSchemaFactory.class.getName());
-        IndexSchemaFactory factory = null;
-        if (null != info) {
-          factory = solrConfig.getResourceLoader().newInstance(info.className, IndexSchemaFactory.class);
-          factory.init(info.initArgs);
-        }
         
-        String resourceName;
-        if (factory != null && factory instanceof ManagedIndexSchemaFactory) {
-          resourceName = ((ManagedIndexSchemaFactory)factory).getManagedSchemaResourceName();
-        } else {
-          resourceName = IndexSchemaFactory.getResourceNameToBeUsed(null, solrConfig);
-        }
-
-        IndexSchema schema = IndexSchemaFactory.buildIndexSchema(resourceName, solrConfig);
+        IndexSchema schema = IndexSchemaFactory.buildIndexSchema("schema.xml", solrConfig);
         validateSchema(schema);
         return schema;
-      } catch (ParserConfigurationException | IOException | SAXException e) {
+      } catch (ParserConfigurationException e) {
         throw new MorphlineRuntimeException(e);
-      } 
+      } catch (IOException e) {
+        throw new MorphlineRuntimeException(e);
+      } catch (SAXException e) {
+        throw new MorphlineRuntimeException(e);
+      }
     } finally {
       if (downloadedSolrHomeDir != null) {
         try {

@@ -1,0 +1,58 @@
+From 87c40c8e5fc9afc348b26c095c9d753a8721cd4e Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Mon, 18 May 2015 08:56:42 +0300
+Subject: [PATCH 020/115] CDK-1001: dropRecord morphline command should forward notifications
+
+---
+ .../morphline/stdlib/DropRecordBuilder.java        |   30 +-------------------
+ 1 files changed, 1 insertions(+), 29 deletions(-)
+
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/DropRecordBuilder.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/DropRecordBuilder.java
+index cce0b34..559aecc 100644
+--- a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/DropRecordBuilder.java
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/DropRecordBuilder.java
+@@ -83,11 +83,7 @@ public final class DropRecordBuilder implements CommandBuilder {
+   private static final class DropRecord extends AbstractCommand {
+     
+     public DropRecord(CommandBuilder builder, Config config, Command parent, Command child, MorphlineContext context) {
+-      super(builder, ConfigFactory.empty(), parent, new DummyCommand(), context);
+-    }
+-
+-    @Override
+-    protected void doNotify(Record notification) {
++      super(builder, ConfigFactory.empty(), parent, child, context);
+     }
+ 
+     @Override
+@@ -97,28 +93,4 @@ public final class DropRecordBuilder implements CommandBuilder {
+ 
+   }
+ 
+-
+-  ///////////////////////////////////////////////////////////////////////////////
+-  // Nested classes:
+-  ///////////////////////////////////////////////////////////////////////////////
+-  /** Hack because passing child=null to AbstractCommand ctor is illegal */
+-  private static final class DummyCommand implements Command {
+-    
+-    @Override
+-    public Command getParent() {
+-      throw new UnsupportedOperationException();
+-    }
+-    
+-    @Override
+-    public void notify(Record notification) {
+-      throw new UnsupportedOperationException();
+-    }
+-
+-    @Override
+-    public boolean process(Record record) {
+-      throw new UnsupportedOperationException();
+-    }
+-
+-  }
+-
+ }
+-- 
+1.7.0.4
+

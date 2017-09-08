@@ -1,0 +1,26 @@
+From d6ef4fd674b09a40dab9c1a234d3ec394162c8ea Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 20 May 2015 10:14:26 -0700
+Subject: [PATCH 062/115] CDK-1003: Add error message to URIBuilder precondition.
+
+---
+ .../src/main/java/org/kitesdk/data/URIBuilder.java |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/URIBuilder.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/URIBuilder.java
+index ba97333..26211c9 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/URIBuilder.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/URIBuilder.java
+@@ -103,7 +103,8 @@ public class URIBuilder {
+   public URIBuilder(URI repoUri, String namespace, String dataset) {
+     Preconditions.checkNotNull(repoUri, "Repository URI cannot be null");
+     Preconditions.checkNotNull(dataset, "Dataset name cannot be null");
+-    Preconditions.checkArgument(REPO_SCHEME.equals(repoUri.getScheme()));
++    Preconditions.checkArgument(REPO_SCHEME.equals(repoUri.getScheme()),
++        "Repository URI must start with \"repo:\" but was:" + repoUri);
+ 
+     Pair<URIPattern, Map<String, String>> pair = Registration
+         .lookupPatternByRepoUri(URI.create(repoUri.getRawSchemeSpecificPart()));
+-- 
+1.7.0.4
+

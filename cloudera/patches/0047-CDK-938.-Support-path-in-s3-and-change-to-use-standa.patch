@@ -1,0 +1,156 @@
+From fd038d67caf6fefdefd1b38ba53dd7ec3b732284 Mon Sep 17 00:00:00 2001
+From: Tom White <tom@cloudera.com>
+Date: Thu, 16 Apr 2015 18:27:26 +0100
+Subject: [PATCH 047/115] CDK-938. Support path in s3, and change to use standard AWS env variables.
+
+For testing, set AWS_SECRET_ACCESS_KEY and AWS_SECRET_ACCESS_KEY to specify
+your AWS credentials, and S3_BUCKET to the name of an existing empty bucket
+to use.
+
+Conflicts:
+	pom.xml
+Resolution:
+    Conflict with hadoop-1 profile removed for CDH.
+---
+ kite-data/kite-data-s3/pom.xml                     |   55 ++------------------
+ .../main/java/org/kitesdk/data/spi/s3/Loader.java  |    4 +-
+ .../org/kitesdk/data/spi/s3/TestS3Dataset.java     |    6 +-
+ pom.xml                                            |    7 ++-
+ 4 files changed, 13 insertions(+), 59 deletions(-)
+
+diff --git a/kite-data/kite-data-s3/pom.xml b/kite-data/kite-data-s3/pom.xml
+index e74b164..fe34e73 100644
+--- a/kite-data/kite-data-s3/pom.xml
++++ b/kite-data/kite-data-s3/pom.xml
+@@ -65,9 +65,9 @@
+         <artifactId>maven-surefire-plugin</artifactId>
+         <configuration>
+           <systemPropertyVariables>
+-            <aws.s3.id>${s3.id}</aws.s3.id>
+-            <aws.s3.key>${s3.key}</aws.s3.key>
+-            <aws.s3.bucket>${s3.bucket}</aws.s3.bucket>
++            <test.aws.access.key>${test.aws.access.key}</test.aws.access.key>
++            <test.aws.s3.secret.key>${test.aws.s3.secret.key}</test.aws.s3.secret.key>
++            <test.aws.s3.bucket>${test.aws.s3.bucket}</test.aws.s3.bucket>
+           </systemPropertyVariables>
+         </configuration>
+       </plugin>
+@@ -146,57 +146,10 @@
+       <artifactId>avro</artifactId>
+     </dependency>
+ 
+-    <!-- These should be compile-dependencies
+-         But, hive-exec includes classes from other modules at Hive-specific
+-         versions, including avro's Schema. This causes errors in this and
+-         other modules, so these are marked provided.
+-         -->
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-aws</artifactId>
+-      <!-- exclude server-side parts that conflict with running in a webapp -->
+-      <exclusions>
+-        <exclusion>
+-          <groupId>com.sun.jersey</groupId>
+-          <artifactId>jersey-client</artifactId>
+-        </exclusion>
+-        <exclusion>
+-          <groupId>com.sun.jersey</groupId>
+-          <artifactId>jersey-core</artifactId>
+-        </exclusion>
+-        <exclusion>
+-          <groupId>com.sun.jersey</groupId>
+-          <artifactId>jersey-grizzly2</artifactId>
+-        </exclusion>
+-        <exclusion>
+-          <groupId>com.sun.jersey</groupId>
+-          <artifactId>jersey-json</artifactId>
+-        </exclusion>
+-        <exclusion>
+-          <groupId>com.sun.jersey</groupId>
+-          <artifactId>jersey-server</artifactId>
+-        </exclusion>
+-        <exclusion>
+-          <groupId>javax.servlet</groupId>
+-          <artifactId>servlet-api</artifactId>
+-        </exclusion>
+-        <exclusion>
+-          <groupId>org.mortbay.jetty</groupId>
+-          <artifactId>jetty</artifactId>
+-        </exclusion>
+-        <exclusion>
+-          <groupId>org.mortbay.jetty</groupId>
+-          <artifactId>jetty-util</artifactId>
+-        </exclusion>
+-        <exclusion>
+-          <groupId>tomcat</groupId>
+-          <artifactId>jasper-runtime</artifactId>
+-        </exclusion>
+-        <exclusion>
+-          <groupId>tomcat</groupId>
+-          <artifactId>jasper-compiler</artifactId>
+-        </exclusion>
+-      </exclusions>
++      <scope>provided</scope>
+     </dependency>
+ 
+     <!-- Misc -->
+diff --git a/kite-data/kite-data-s3/src/main/java/org/kitesdk/data/spi/s3/Loader.java b/kite-data/kite-data-s3/src/main/java/org/kitesdk/data/spi/s3/Loader.java
+index d59bf57..1ebc81a 100644
+--- a/kite-data/kite-data-s3/src/main/java/org/kitesdk/data/spi/s3/Loader.java
++++ b/kite-data/kite-data-s3/src/main/java/org/kitesdk/data/spi/s3/Loader.java
+@@ -86,8 +86,8 @@ public class Loader implements Loadable {
+ 
+     // username and secret are the same; host is the bucket
+     Registration.register(
+-        new URIPattern("s3n:/"),
+-        new URIPattern("s3n:/:namespace/:dataset"),
++        new URIPattern("s3n:/*path"),
++        new URIPattern("s3n:/*path/:namespace/:dataset"),
+         builder);
+     Registration.register(
+         new URIPattern("s3a:/"),
+diff --git a/kite-data/kite-data-s3/src/test/java/org/kitesdk/data/spi/s3/TestS3Dataset.java b/kite-data/kite-data-s3/src/test/java/org/kitesdk/data/spi/s3/TestS3Dataset.java
+index e8d13c8..c7d8786 100644
+--- a/kite-data/kite-data-s3/src/test/java/org/kitesdk/data/spi/s3/TestS3Dataset.java
++++ b/kite-data/kite-data-s3/src/test/java/org/kitesdk/data/spi/s3/TestS3Dataset.java
+@@ -33,9 +33,9 @@ import org.kitesdk.data.Datasets;
+ import org.kitesdk.data.spi.DefaultConfiguration;
+ 
+ public class TestS3Dataset {
+-  private static final String ID = System.getProperty("aws.s3.id");
+-  private static final String KEY = System.getProperty("aws.s3.key");
+-  private static final String BUCKET = System.getProperty("aws.s3.bucket");
++  private static final String ID = System.getProperty("test.aws.access.key");
++  private static final String KEY = System.getProperty("test.aws.s3.secret.key");
++  private static final String BUCKET = System.getProperty("test.aws.s3.bucket");
+ 
+   private static Configuration original = null;
+ 
+diff --git a/pom.xml b/pom.xml
+index 0766e61..b88215c 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -204,9 +204,9 @@
+     <github.global.server>github</github.global.server>
+ 
+     <!-- Until we add a mock, use S3 credentials from the environment -->
+-    <s3.id>${env.S3_ID}</s3.id>
+-    <s3.key>${env.S3_KEY}</s3.key>
+-    <s3.bucket>${env.S3_BUCKET}</s3.bucket>
++    <test.aws.access.key>${env.AWS_ACCESS_KEY_ID}</test.aws.access.key>
++    <test.aws.s3.secret.key>${env.AWS_SECRET_ACCESS_KEY}</test.aws.s3.secret.key>
++    <test.aws.s3.bucket>${env.S3_BUCKET}</test.aws.s3.bucket>
+   </properties>
+ 
+   <repositories>
+@@ -765,6 +765,7 @@
+         <groupId>org.apache.hadoop</groupId>
+         <artifactId>hadoop-aws</artifactId>
+         <version>${vers.hadoop-aws}</version>
++        <scope>provided</scope>
+       </dependency>
+ 
+       <!-- HBase dependencies -->
+-- 
+1.7.0.4
+

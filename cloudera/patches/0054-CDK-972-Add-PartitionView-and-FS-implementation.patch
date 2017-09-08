@@ -1,0 +1,2478 @@
+From 6ee4e044de07fc0d3372cb341990adbf420710aa Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Tue, 14 Apr 2015 21:50:54 -0700
+Subject: [PATCH 054/115] CDK-972: Add PartitionView and FS implementation.
+
+---
+ .../main/java/org/kitesdk/data/PartitionView.java  |   75 ++++
+ .../src/main/java/org/kitesdk/data/View.java       |   24 ++
+ .../java/org/kitesdk/data/spi/AbstractDataset.java |    7 +
+ .../kitesdk/data/spi/AbstractRefinableView.java    |   31 +--
+ .../main/java/org/kitesdk/data/spi/StorageKey.java |   48 ++-
+ .../data/spi/filesystem/FileSystemDataset.java     |   31 ++-
+ .../data/spi/filesystem/FileSystemDatasets.java    |   60 +---
+ .../filesystem/FileSystemPartitionIterator.java    |   57 +---
+ .../spi/filesystem/FileSystemPartitionView.java    |  260 +++++++++++++
+ .../data/spi/filesystem/FileSystemView.java        |   61 +++-
+ .../kitesdk/data/spi/filesystem/PathIterator.java  |   60 ++--
+ .../org/kitesdk/data/TestFileSystemDatasets.java   |  162 --------
+ .../java/org/kitesdk/data/spi/TestConstraints.java |    2 +-
+ .../spi/filesystem/TestFileSystemDatasets.java     |  224 +++++++++++
+ .../TestFileSystemPartitionIterator.java           |   57 ++--
+ ...ystemPartitionIteratorProvidedPartitioners.java |   29 +-
+ .../TestFileSystemPartitionIteratorTolerance.java  |   56 ++--
+ .../filesystem/TestFileSystemPartitionView.java    |  401 ++++++++++++++++++++
+ .../data/spi/filesystem/TestFileSystemView.java    |   27 +-
+ .../data/spi/filesystem/TestPathConversion.java    |   18 +-
+ .../org/kitesdk/data/crunch/CrunchDatasets.java    |    3 +-
+ kite-data/kite-data-flume/pom.xml                  |    6 +
+ 22 files changed, 1260 insertions(+), 439 deletions(-)
+ create mode 100644 kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionView.java
+ create mode 100644 kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemPartitionView.java
+ delete mode 100644 kite-data/kite-data-core/src/test/java/org/kitesdk/data/TestFileSystemDatasets.java
+ create mode 100644 kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDatasets.java
+ create mode 100644 kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionView.java
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionView.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionView.java
+new file mode 100644
+index 0000000..d8f0ab1
+--- /dev/null
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionView.java
+@@ -0,0 +1,75 @@
++/*
++ * Copyright 2015 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.kitesdk.data;
++
++import java.net.URI;
++import javax.annotation.concurrent.Immutable;
++
++/**
++ * A {@code PartitionView} is a subset of a {@link Dataset} that corresponds to
++ * a single partition, with a location.
++ *
++ * @param <E>
++ *      The type of entities stored in the {@code Dataset} underlying this
++ *      {@code View}.
++ * @since 1.1.0
++ */
++@Immutable
++public interface PartitionView<E> extends View<E> {
++  /**
++   * Returns the location of this partition as a {@link URI}.
++   *
++   * @return a {@code URI} for the location of this partition.
++   * @since 1.1.0
++   */
++  public URI getLocation();
++
++  /**
++   * Deletes the entities included in this {@link View}.
++   * <p>
++   * Unlike {@link View#deleteAll()}, implementations are not allowed to throw
++   * {@link UnsupportedOperationException} and must support this method in all
++   * {@code PartitionView} implementations.
++   *
++   * @return true if any data was deleted, false if the View was already empty
++   * @throws DatasetIOException
++   *          if the requested delete failed because of an IOException
++   * @since 1.1.0
++   */
++  @Override
++  boolean deleteAll();
++
++  /**
++   * Get an appropriate {@link DatasetWriter} implementation based on the
++   * constraints for this  {@code View} of the underlying {@code Dataset}.
++   * <p>
++   * Although the {@code view} is limited to a particular location in the
++   * dataset when reading, writers returned by this method will not necessarily
++   * write to that location. Instead, writers are subject to the logical
++   * constraints of this {@code PartitionView}.
++   * <p>
++   * Implementations are free to return different types of writers depending on
++   * the disposition of the data. For example, a partitioned dataset may use a
++   * different writer than that of a non-partitioned dataset. Clients should not
++   * make any assumptions about the returned implementations: implementations
++   * are free to change their internal structure at any time.
++   *
++   * @throws DatasetException
++   */
++  @Override
++  DatasetWriter<E> newWriter();
++}
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/View.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/View.java
+index c1ef813..1f9f5b9 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/View.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/View.java
+@@ -128,4 +128,28 @@ public interface View<E> {
+    * @since 0.16.0
+    */
+   public URI getUri();
++
++  /**
++   * Returns an {@code Iterable} of non-overlapping {@link View} objects that
++   * partition the underlying {@link Dataset} and cover this {@code View}.
++   *
++   * The returned {@code View} objects are implementation-specific, but should
++   * represent reasonable partitions of the underlying {@code Dataset} based on
++   * its layout.
++   *
++   * The data contained by the union of each {@code View} in the
++   * {@code Iterable} must be a super-set of this {@code View}.
++   *
++   * Note that partitions are actual partitions under which data is stored.
++   * Implementations should omit any {@code View} that is empty.
++   *
++   * @return
++   *      An Iterable of the {@code View} that cover this {@code View}.
++   * @throws IllegalStateException
++   *      If the underlying {@code Dataset} is not partitioned.
++   * @throws UnsupportedOperationException
++   *      If the implementation does not support covering partitions.
++   * @since 1.1.0
++   */
++  public Iterable<PartitionView<E>> getCoveringPartitions();
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractDataset.java
+index 50ae5e6..8a867a8 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractDataset.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractDataset.java
+@@ -20,6 +20,7 @@ import com.google.common.base.Objects;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetReader;
+ import org.kitesdk.data.DatasetWriter;
++import org.kitesdk.data.PartitionView;
+ import org.kitesdk.data.RefinableView;
+ import javax.annotation.concurrent.Immutable;
+ import org.apache.avro.Schema;
+@@ -66,6 +67,12 @@ public abstract class AbstractDataset<E> implements Dataset<E>, RefinableView<E>
+   }
+ 
+   @Override
++  public Iterable<PartitionView<E>> getCoveringPartitions() {
++    throw new UnsupportedOperationException("This Dataset does not support " +
++        "getCoveringPartitions.");
++  }
++
++  @Override
+   public boolean includes(E entity) {
+     return true;
+   }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractRefinableView.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractRefinableView.java
+index 09c78a5..e309488 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractRefinableView.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractRefinableView.java
+@@ -24,9 +24,9 @@ import javax.annotation.concurrent.Immutable;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetReader;
++import org.kitesdk.data.PartitionView;
+ import org.kitesdk.data.RefinableView;
+ import org.kitesdk.data.URIBuilder;
+-import org.kitesdk.data.View;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+@@ -116,29 +116,8 @@ public abstract class AbstractRefinableView<E> implements RefinableView<E> {
+     return constraints.getProvidedValues();
+   }
+ 
+-  /**
+-   * Returns an Iterable of non-overlapping {@link View} objects that partition
+-   * the underlying {@link org.kitesdk.data.Dataset} and cover this {@code View}.
+-   *
+-   * The returned {@code View} objects are implementation-specific, but should
+-   * represent reasonable partitions of the underlying {@code Dataset} based on
+-   * its layout.
+-   *
+-   * The data contained by the union of each {@code View} in the Iterable must
+-   * be a super-set of this {@code View}.
+-   *
+-   * Note that partitions are actual partitions under which data is stored.
+-   * Implementations are encouraged to omit any {@code View} that is empty.
+-   *
+-   * This method is intended to be used by classes like InputFormat, which need
+-   * to enumerate the underlying partitions to create InputSplits.
+-   *
+-   * @return
+-   *      An Iterable of the {@code View} that cover this {@code View}.
+-   * @throws IllegalStateException
+-   *      If the underlying {@code Dataset} is not partitioned.
+-   */
+-  public Iterable<View<E>> getCoveringPartitions() {
++  @Override
++  public Iterable<PartitionView<E>> getCoveringPartitions() {
+     throw new UnsupportedOperationException("This Dataset does not support " +
+         "getCoveringPartitions.");
+   }
+@@ -223,4 +202,8 @@ public abstract class AbstractRefinableView<E> implements RefinableView<E> {
+     }
+     return builder.build();
+   }
++
++  protected Predicate<StorageKey> getKeyPredicate() {
++    return constraints.toKeyPredicate();
++  }
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/StorageKey.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/StorageKey.java
+index b250261..cb34a5b 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/StorageKey.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/StorageKey.java
+@@ -17,6 +17,9 @@
+ package org.kitesdk.data.spi;
+ 
+ import com.google.common.annotations.VisibleForTesting;
++import com.google.common.base.Joiner;
++import javax.annotation.Nullable;
++import org.apache.hadoop.fs.Path;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetException;
+ import org.kitesdk.data.PartitionStrategy;
+@@ -32,6 +35,7 @@ import java.util.List;
+ import java.util.Map;
+ import java.util.concurrent.ExecutionException;
+ import org.kitesdk.data.impl.Accessor;
++import org.kitesdk.data.spi.filesystem.PathConversion;
+ 
+ /**
+  * A StorageKey is a complete set of values for a PartitionStrategy.
+@@ -40,6 +44,8 @@ import org.kitesdk.data.impl.Accessor;
+  */
+ public class StorageKey extends Marker implements Comparable<StorageKey> {
+ 
++  private static final Joiner PATH_JOINER = Joiner.on('/');
++
+   // Cache the field to index mappings for each PartitionStrategy
+   private static final LoadingCache<PartitionStrategy, Map<String, Integer>>
+       FIELD_CACHE = CacheBuilder.newBuilder().build(
+@@ -60,6 +66,7 @@ public class StorageKey extends Marker implements Comparable<StorageKey> {
+   private final PartitionStrategy strategy;
+   private final Map<String, Integer> fields;
+   private List<Object> values;
++  private Path path;
+ 
+   public StorageKey(PartitionStrategy strategy) {
+     this(strategy, Arrays.asList(
+@@ -76,12 +83,17 @@ public class StorageKey extends Marker implements Comparable<StorageKey> {
+         "Not enough values for a complete StorageKey");
+     this.strategy = strategy;
+     this.values = values;
++    this.path = null;
+   }
+ 
+   public PartitionStrategy getPartitionStrategy() {
+     return strategy;
+   }
+ 
++  public Path getPath() {
++    return path;
++  }
++
+   @Override
+   public boolean has(String name) {
+     return fields.containsKey(name);
+@@ -110,6 +122,7 @@ public class StorageKey extends Marker implements Comparable<StorageKey> {
+    */
+   public void replace(int index, Object value) {
+     values.set(index, value);
++    this.path = null; // path is no longer valid if values are replaced
+   }
+ 
+   /**
+@@ -138,14 +151,37 @@ public class StorageKey extends Marker implements Comparable<StorageKey> {
+    */
+   @SuppressWarnings("unchecked")
+   public <E> StorageKey reuseFor(E entity, EntityAccessor<E> accessor) {
+-    List<FieldPartitioner> partitioners =
+-        Accessor.getDefault().getFieldPartitioners(strategy);
++    accessor.keyFor(entity, null, this);
++    return this;
++  }
+ 
+-    for (int i = 0; i < partitioners.size(); i++) {
+-      FieldPartitioner fp = partitioners.get(i);
+-      replace(i, fp.apply(accessor.get(entity, fp.getSourceName())));
+-    }
++  /**
++   * Replaces all of the values in this {@link StorageKey} with values from the given
++   * {@code entity}.
++   *
++   * @param entity an entity to reuse this {@code StorageKey} for
++   * @return this updated {@code StorageKey}
++   * @throws IllegalStateException
++   *      If the {@code entity} cannot be used to produce a value for each
++   *      field in the {@code PartitionStrategy}
++   *
++   * @since 0.9.0
++   */
++  @SuppressWarnings("unchecked")
++  public <E> StorageKey reuseFor(E entity,
++                                 @Nullable Map<String, Object> provided,
++                                 EntityAccessor<E> accessor) {
++    accessor.keyFor(entity, provided, this);
++    return this;
++  }
++
++  public StorageKey reuseFor(List<String> dirs, PathConversion conversion) {
++    return reuseFor(new Path(PATH_JOINER.join(dirs)), conversion);
++  }
+ 
++  public StorageKey reuseFor(Path path, PathConversion conversion) {
++    conversion.toKey(path, this);
++    this.path = path;
+     return this;
+   }
+ 
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+index 36e2818..f58cb29 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+@@ -15,6 +15,7 @@
+  */
+ package org.kitesdk.data.spi.filesystem;
+ 
++import com.google.common.collect.Iterators;
+ import com.google.common.collect.Sets;
+ 
+ import java.util.Iterator;
+@@ -23,6 +24,8 @@ import org.apache.hadoop.mapreduce.InputFormat;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetIOException;
+ import org.kitesdk.data.Signalable;
++import org.kitesdk.data.PartitionView;
++import org.kitesdk.data.View;
+ import org.kitesdk.data.spi.Compatibility;
+ import org.kitesdk.data.spi.PartitionKey;
+ import org.kitesdk.data.PartitionStrategy;
+@@ -75,7 +78,7 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+   private final PartitionStrategy partitionStrategy;
+   private final PartitionListener partitionListener;
+ 
+-  private final FileSystemView<E> unbounded;
++  final FileSystemPartitionView<E> unbounded;
+ 
+   // reusable path converter, has no relevant state
+   private final PathConversion convert;
+@@ -107,7 +110,8 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+     Path signalsPath = new Path(directory, SIGNALS_DIRECTORY_NAME);
+     SignalManager signalManager = new SignalManager(fileSystem, signalsPath);
+ 
+-    this.unbounded = new FileSystemView<E>(this, partitionListener, signalManager, type);
++    this.unbounded = new FileSystemPartitionView<E>(this, partitionListener, signalManager, type);
++
+     // remove this.partitionKey for 0.14.0
+     this.partitionKey = null;
+   }
+@@ -142,6 +146,29 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+     return descriptor;
+   }
+ 
++  // needed to preserve the behavior of FileSystemDatasets
++  View<E> viewForUri(URI location) {
++    Preconditions.checkNotNull(location, "Partition location cannot be null");
++    PartitionView<E> view = getPartitionView(location);
++    if (view == unbounded) {
++      return this;
++    }
++    return view;
++  }
++
++  FileSystemPartitionView<E> getPartitionView(URI location) {
++    return FileSystemPartitionView.getPartition(unbounded, location);
++  }
++
++  FileSystemPartitionView<E> getPartitionView(Path location) {
++    return FileSystemPartitionView.getPartition(unbounded, location);
++  }
++
++  @Override
++  public Iterable<PartitionView<E>> getCoveringPartitions() {
++    return unbounded.getCoveringPartitions();
++  }
++
+   PartitionKey getPartitionKey() {
+     return partitionKey;
+   }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDatasets.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDatasets.java
+index 03542fa..415e2b3 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDatasets.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDatasets.java
+@@ -16,33 +16,18 @@
+ 
+ package org.kitesdk.data.spi.filesystem;
+ 
+-import com.google.common.base.Preconditions;
+-import com.google.common.base.Splitter;
+-import com.google.common.collect.Iterables;
+ import java.net.URI;
+-import java.util.Iterator;
+-import org.apache.avro.Schema;
+ import org.apache.hadoop.fs.Path;
+ import org.kitesdk.data.Dataset;
+-import org.kitesdk.data.DatasetDescriptor;
+-import org.kitesdk.data.PartitionStrategy;
+-import org.kitesdk.data.RefinableView;
+ import org.kitesdk.data.View;
+-import org.kitesdk.data.impl.Accessor;
+-import org.kitesdk.data.spi.Conversions;
+-import org.kitesdk.data.spi.FieldPartitioner;
+-import org.kitesdk.data.spi.SchemaUtil;
+ 
+ /**
+  * <p>
+- * A helper class working with {@link org.kitesdk.data.spi.filesystem.FileSystemDataset}s.
++ * A helper class working with {@link FileSystemDataset} instances.
+  * </p>
+  */
+ public class FileSystemDatasets {
+ 
+-  private static final Splitter PATH_SPLITTER = Splitter.on('/');
+-  private static final Splitter KV_SPLITTER = Splitter.on('=').limit(2);
+-
+   /**
+    * Convert a URI for a partition directory in a filesystem dataset to a {@link View}
+    * object representing that partition.
+@@ -51,42 +36,10 @@ public class FileSystemDatasets {
+    * @return a view of the partition
+    */
+   public static <E> View<E> viewForUri(Dataset<E> dataset, URI uri) {
+-    Preconditions.checkArgument(dataset instanceof FileSystemDataset,
+-        "Not a file system dataset: " + dataset);
+-
+-    DatasetDescriptor descriptor = dataset.getDescriptor();
+-
+-    String s1 = descriptor.getLocation().getScheme();
+-    String s2 = uri.getScheme();
+-    Preconditions.checkArgument((s1 == null || s2 == null) || s1.equals(s2),
+-        "%s is not contained in %s", uri, descriptor.getLocation());
+-
+-    URI location = URI.create(descriptor.getLocation().getPath());
+-    URI relative = location.relativize(URI.create(uri.getPath()));
+-    if (relative.toString().isEmpty()) {
+-      // no partitions are selected
+-      return dataset;
++    if (dataset instanceof FileSystemDataset) {
++      return ((FileSystemDataset<E>) dataset).viewForUri(uri);
+     }
+-
+-    Preconditions.checkArgument(!relative.getPath().startsWith("/"),
+-        "%s is not contained in %s", uri, location);
+-    Preconditions.checkArgument(descriptor.isPartitioned(),
+-        "Dataset is not partitioned");
+-
+-    Schema schema = descriptor.getSchema();
+-    PartitionStrategy strategy = descriptor.getPartitionStrategy();
+-
+-    RefinableView<E> view = dataset;
+-    Iterator<String> parts = PATH_SPLITTER.split(relative.toString()).iterator();
+-    for (FieldPartitioner fp : Accessor.getDefault().getFieldPartitioners(strategy)) {
+-      if (!parts.hasNext()) {
+-        break;
+-      }
+-      String value = Iterables.getLast(KV_SPLITTER.split(parts.next()));
+-      Schema fieldSchema = SchemaUtil.fieldSchema(schema, strategy, fp.getName());
+-      view = view.with(fp.getName(), Conversions.convert(value, fieldSchema));
+-    }
+-    return view;
++    throw new IllegalArgumentException("Not a file system dataset: " + dataset);
+   }
+ 
+   /**
+@@ -108,7 +61,10 @@ public class FileSystemDatasets {
+    * @return a view of the partition
+    */
+   public static <E> View<E> viewForPath(Dataset<E> dataset, Path path) {
+-    return viewForUri(dataset, path.toUri());
++    if (dataset instanceof FileSystemDataset) {
++      return ((FileSystemDataset<E>) dataset).viewForUri(path.toUri());
++    }
++    throw new IllegalArgumentException("Not a file system dataset: " + dataset);
+   }
+ 
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemPartitionIterator.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemPartitionIterator.java
+index 06e3f6a..a0d9f58 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemPartitionIterator.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemPartitionIterator.java
+@@ -16,21 +16,15 @@
+ 
+ package org.kitesdk.data.spi.filesystem;
+ 
+-import com.google.common.base.Joiner;
+ import com.google.common.base.Predicate;
+-import javax.annotation.Nullable;
+ import org.apache.avro.Schema;
+ import org.kitesdk.data.DatasetException;
+ import org.kitesdk.data.impl.Accessor;
+-import org.kitesdk.data.spi.FieldPartitioner;
+ import org.kitesdk.data.PartitionStrategy;
+-import org.kitesdk.data.spi.Constraints;
+-import org.kitesdk.data.spi.Pair;
+ import org.kitesdk.data.spi.StorageKey;
+ import com.google.common.base.Function;
+ import com.google.common.base.Preconditions;
+ import com.google.common.collect.Iterators;
+-import com.google.common.collect.Lists;
+ import com.google.common.collect.Sets;
+ import org.apache.hadoop.fs.FileStatus;
+ import org.apache.hadoop.fs.FileSystem;
+@@ -44,16 +38,14 @@ import java.util.List;
+ import java.util.Set;
+ 
+ class FileSystemPartitionIterator implements
+-    Iterator<Pair<StorageKey, Path>>, Iterable<Pair<StorageKey, Path>> {
++    Iterator<StorageKey>, Iterable<StorageKey> {
+ 
+   private static final Logger LOG = LoggerFactory.getLogger(
+       FileSystemPartitionIterator.class);
+ 
+-  private static final Joiner PATH_JOINER = Joiner.on("/");
+-
+   private final FileSystem fs;
+   private final Path rootDirectory;
+-  private final Iterator<Pair<StorageKey, Path>> iterator;
++  private final Iterator<StorageKey> iterator;
+ 
+   class FileSystemIterator extends MultiLevelIterator<String> {
+     public FileSystemIterator(int depth) throws IOException {
+@@ -86,15 +78,13 @@ class FileSystemPartitionIterator implements
+   }
+ 
+   /**
+-   * Conversion function to transform a List into a {@link org.kitesdk.data.spi.StorageKey}.
++   * Conversion function to transform a List into a {@link StorageKey}.
+    */
+-  private static class MakeKey implements Function<List<String>, Pair<StorageKey, Path>> {
+-    private final List<FieldPartitioner> partitioners;
++  private static class MakeKey implements Function<List<String>, StorageKey> {
+     private final StorageKey reusableKey;
+     private final PathConversion convert;
+ 
+     public MakeKey(PartitionStrategy strategy, Schema schema) {
+-      this.partitioners = Accessor.getDefault().getFieldPartitioners(strategy);
+       this.reusableKey = new StorageKey(strategy);
+       this.convert = new PathConversion(schema);
+     }
+@@ -104,41 +94,15 @@ class FileSystemPartitionIterator implements
+     @edu.umd.cs.findbugs.annotations.SuppressWarnings(
+         value="NP_PARAMETER_MUST_BE_NONNULL_BUT_MARKED_AS_NULLABLE",
+         justification="Non-null @Nullable parameter inherited from Function")
+-    public Pair<StorageKey, Path> apply(List<String> dirs) {
+-      List<Object> values = Lists.newArrayListWithCapacity(dirs.size());
+-      for (int i = 0, n = partitioners.size(); i < n; i += 1) {
+-        values.add(convert.valueForDirname(partitioners.get(i), dirs.get(i)));
+-      }
+-      reusableKey.replaceValues(values);
+-      return Pair.of(reusableKey, new Path(PATH_JOINER.join(dirs)));
+-    }
+-  }
+-
+-  /**
+-   * Predicate to apply a StorageKey Predicate to a pair.
+-   */
+-  private static class KeyPredicate implements Predicate<Pair<StorageKey, Path>> {
+-    private final Predicate<StorageKey> predicate;
+-
+-    private KeyPredicate(Predicate<StorageKey> predicate) {
+-      LOG.debug("StorageKey predicate: {}", predicate);
+-      this.predicate = predicate;
+-    }
+-
+-    @Override
+-    @edu.umd.cs.findbugs.annotations.SuppressWarnings(
+-        value="NP_PARAMETER_MUST_BE_NONNULL_BUT_MARKED_AS_NULLABLE",
+-        justification="Non-null @Nullable parameter inherited from Function")
+-    public boolean apply(@Nullable Pair<StorageKey, Path> pair) {
+-      LOG.debug("Applying predicate {} to key {}", predicate, pair.first());
+-      return predicate.apply(pair.first());
++    public StorageKey apply(List<String> dirs) {
++      return reusableKey.reuseFor(dirs, convert);
+     }
+   }
+ 
+   @SuppressWarnings("deprecation")
+   FileSystemPartitionIterator(
+       FileSystem fs, Path root, PartitionStrategy strategy, Schema schema,
+-      final Constraints constraints)
++      final Predicate<StorageKey> predicate)
+       throws IOException {
+     Preconditions.checkArgument(fs.isDirectory(root));
+     this.fs = fs;
+@@ -148,7 +112,7 @@ class FileSystemPartitionIterator implements
+             new FileSystemIterator(
+                 Accessor.getDefault().getFieldPartitioners(strategy).size()),
+             new MakeKey(strategy, schema)),
+-        new KeyPredicate(constraints.toKeyPredicate()));
++        predicate);
+   }
+ 
+   @Override
+@@ -157,7 +121,7 @@ class FileSystemPartitionIterator implements
+   }
+ 
+   @Override
+-  public Pair<StorageKey, Path> next() {
++  public StorageKey next() {
+     return iterator.next();
+   }
+ 
+@@ -167,9 +131,8 @@ class FileSystemPartitionIterator implements
+   }
+ 
+   @Override
+-  public Iterator<Pair<StorageKey, Path>> iterator() {
++  public Iterator<StorageKey> iterator() {
+     return this;
+   }
+ 
+-
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemPartitionView.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemPartitionView.java
+new file mode 100644
+index 0000000..bf9f9a4
+--- /dev/null
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemPartitionView.java
+@@ -0,0 +1,260 @@
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.kitesdk.data.spi.filesystem;
++
++import com.google.common.base.Objects;
++import com.google.common.base.Preconditions;
++import com.google.common.base.Predicate;
++import com.google.common.base.Predicates;
++import com.google.common.base.Splitter;
++import com.google.common.collect.Iterables;
++import java.net.URI;
++import java.util.Iterator;
++import javax.annotation.Nullable;
++import javax.annotation.concurrent.Immutable;
++import org.apache.avro.Schema;
++import org.apache.hadoop.fs.Path;
++import org.kitesdk.data.DatasetDescriptor;
++import org.kitesdk.data.PartitionStrategy;
++import org.kitesdk.data.PartitionView;
++import org.kitesdk.data.impl.Accessor;
++import org.kitesdk.data.spi.Constraints;
++import org.kitesdk.data.spi.Conversions;
++import org.kitesdk.data.spi.FieldPartitioner;
++import org.kitesdk.data.spi.PartitionListener;
++import org.kitesdk.data.spi.SchemaUtil;
++import org.kitesdk.data.spi.StorageKey;
++
++/**
++ * A {@link PartitionView} that is backed by a directory in a file system.
++ */
++@Immutable
++class FileSystemPartitionView<E> extends FileSystemView<E>
++    implements PartitionView<E> {
++
++  private static final Splitter PATH_SPLITTER = Splitter.on('/');
++  private static final Splitter KV_SPLITTER = Splitter.on('=').limit(2);
++
++  private final Path location;
++  private final URI relativeLocation;
++
++  FileSystemPartitionView(FileSystemDataset<E> dataset,
++                          @Nullable PartitionListener partitionListener,
++                          @Nullable SignalManager signalManager,
++                          Class<E> type) {
++    super(dataset, partitionListener, signalManager, type);
++    this.location = dataset.getDirectory();
++    this.relativeLocation = null;
++  }
++
++  static <E> FileSystemPartitionView<E> getPartition(
++      FileSystemPartitionView<E> base, URI location) {
++    URI relative = relativize(base.root.toUri(), location);
++
++    if (relative == null) {
++      return base;
++    }
++
++    return new FileSystemPartitionView<E>(base, relative);
++  }
++
++  static <E> FileSystemPartitionView<E> getPartition(
++      FileSystemPartitionView<E> base, Path location) {
++    URI relative = relativize(
++        base.root.toUri(), (location == null ? null : location.toUri()));
++
++    if (relative == null) {
++      return base;
++    }
++
++    return new FileSystemPartitionView<E>(base, relative);
++  }
++
++  private FileSystemPartitionView(FileSystemPartitionView<E> view,
++                                  URI relativeLocation) {
++    super(view, constraints(view, relativeLocation));
++    this.location = new Path(view.root, relativeLocation.toString());
++    this.relativeLocation = relativeLocation;
++  }
++
++  @Override
++  public URI getLocation() {
++    return location.toUri();
++  }
++
++  URI getRelativeLocation() {
++    return relativeLocation;
++  }
++
++  FileSystemView<E> toConstraintsView() {
++    return filter(constraints);
++  }
++
++  @Override
++  public Iterable<PartitionView<E>> getCoveringPartitions() {
++    // filter the matching partitions to return those contained by this one
++    return Iterables.filter(super.getCoveringPartitions(),
++        new Predicate<PartitionView<E>>() {
++          @Override
++          public boolean apply(@Nullable PartitionView<E> input) {
++            return input != null && input.getLocation().getPath()
++                .startsWith(location.toUri().getPath());
++          }
++        });
++  }
++
++  @Override
++  public boolean deleteAll() {
++    return deleteAllUnsafe();
++  }
++
++  @Override
++  protected Predicate<StorageKey> getKeyPredicate() {
++    if (relativeLocation == null) {
++      return Predicates.alwaysTrue();
++    }
++    return new PartitionKeyPredicate(root, location);
++  }
++
++  @Override
++  public boolean equals(Object other) {
++    if (this == other) {
++      return true;
++    }
++
++    if (!super.equals(other)) {
++      return false;
++    }
++
++    if (other == null || getClass() != other.getClass()) {
++      return false;
++    }
++
++    FileSystemPartitionView that = (FileSystemPartitionView) other;
++    return Objects.equal(this.location, that.location);
++  }
++
++  @Override
++  public int hashCode() {
++    return Objects.hashCode(super.hashCode(), location);
++  }
++
++  @edu.umd.cs.findbugs.annotations.SuppressWarnings(
++      value="NP_PARAMETER_MUST_BE_NONNULL_BUT_MARKED_AS_NULLABLE",
++      justification="Null value checked by precondition")
++  private static URI relativize(@Nullable URI root, URI location) {
++    Preconditions.checkNotNull(root, "Cannot find location relative to null");
++
++    if (location == null) {
++      return null;
++    }
++
++    String scheme = location.getScheme();
++    String path = location.getPath();
++    URI relative;
++    if (scheme == null && !path.startsWith("/")) {
++      // already a relative location
++      relative = location;
++
++    } else {
++      String rootScheme = root.getScheme();
++      Preconditions.checkArgument(
++          (scheme == null || rootScheme == null) || scheme.equals(rootScheme),
++          "%s is not contained in %s", location, root);
++
++      // use just the paths to avoid authority mismatch errors
++      URI rootPath = URI.create(root.getPath());
++      relative = rootPath.relativize(URI.create(path));
++      if (relative.getPath().isEmpty()) {
++        return null;
++      }
++    }
++
++    // remove a trailing slash
++    String relativePath = relative.getPath();
++    if (relativePath.endsWith("/")) {
++      relative = URI.create(relativePath.substring(0, relativePath.length()-1));
++    }
++
++    Preconditions.checkArgument(!relative.getPath().startsWith("/"),
++        "%s is not contained in %s", location, root);
++
++    return relative;
++  }
++
++  /**
++   * Build partition constraints for the partition URI location.
++   *
++   * @param view a {@code FileSystemPartitionView} containing {@code location}
++   * @param relative a relative URI for a partition within the given view
++   * @return a set of constraints that match the location
++   */
++  private static Constraints constraints(FileSystemPartitionView<?> view,
++                                         @Nullable URI relative) {
++    DatasetDescriptor descriptor = view.dataset.getDescriptor();
++
++    if (relative == null) {
++      // no partitions are selected, so no additional constraints
++      return view.constraints;
++    }
++
++    Preconditions.checkArgument(descriptor.isPartitioned(),
++        "Dataset is not partitioned");
++
++    Constraints constraints = view.constraints;
++
++    Schema schema = descriptor.getSchema();
++    PartitionStrategy strategy = descriptor.getPartitionStrategy();
++
++    Iterator<String> parts = PATH_SPLITTER.split(relative.getPath()).iterator();
++    for (FieldPartitioner fp : Accessor.getDefault().getFieldPartitioners(strategy)) {
++      if (!parts.hasNext()) {
++        break;
++      }
++      String directory = parts.next();
++      String value = Iterables.getLast(KV_SPLITTER.split(directory));
++      Schema fieldSchema = SchemaUtil.fieldSchema(schema, strategy, fp.getName());
++      constraints = constraints.with(
++          fp.getName(), Conversions.convert(value, fieldSchema));
++    }
++
++    Preconditions.checkArgument(!parts.hasNext(),
++        "%s is deeper than the partition strategy", relative);
++
++    return constraints;
++  }
++
++  private static class PartitionKeyPredicate implements Predicate<StorageKey> {
++    private final Path root;
++    private final URI location;
++
++    public PartitionKeyPredicate(Path root, Path location) {
++      this.root = root;
++      this.location = location.toUri();
++    }
++
++    @Override
++    public boolean apply(@Nullable StorageKey key) {
++      return (key != null && key.getPath() != null && contains(key.getPath()));
++    }
++
++    private boolean contains(Path relative) {
++      URI full = new Path(root, relative.toUri().getPath()).toUri();
++      return !location.relativize(full).isAbsolute();
++    }
++  }
++}
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
+index 4202228..f5df510 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
+@@ -16,6 +16,7 @@
+ 
+ package org.kitesdk.data.spi.filesystem;
+ 
++import com.google.common.annotations.VisibleForTesting;
+ import com.google.common.base.Function;
+ import com.google.common.collect.Iterators;
+ import java.util.Iterator;
+@@ -26,13 +27,13 @@ import org.kitesdk.data.DatasetIOException;
+ import org.kitesdk.data.DatasetReader;
+ import org.kitesdk.data.DatasetWriter;
+ import org.kitesdk.data.Signalable;
++import org.kitesdk.data.PartitionView;
+ import org.kitesdk.data.spi.AbstractDatasetReader;
+ import org.kitesdk.data.spi.AbstractDatasetWriter;
+ import org.kitesdk.data.spi.AbstractRefinableView;
+ import org.kitesdk.data.spi.Constraints;
+ import org.kitesdk.data.spi.InputFormatAccessor;
+ import org.kitesdk.data.spi.LastModifiedAccessor;
+-import org.kitesdk.data.spi.Pair;
+ import org.kitesdk.data.spi.PartitionListener;
+ import org.kitesdk.data.spi.SizeAccessor;
+ import org.kitesdk.data.spi.StorageKey;
+@@ -59,8 +60,8 @@ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatA
+ 
+   private static final Logger LOG = LoggerFactory.getLogger(FileSystemView.class);
+ 
+-  private final FileSystem fs;
+-  private final Path root;
++  final FileSystem fs;
++  final Path root;
+ 
+   private final PartitionListener listener;
+ 
+@@ -74,7 +75,7 @@ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatA
+     this.signalManager = signalManager;
+   }
+ 
+-  private FileSystemView(FileSystemView<E> view, Constraints c) {
++  FileSystemView(FileSystemView<E> view, Constraints c) {
+     super(view, c);
+     this.fs = view.fs;
+     this.root = view.root;
+@@ -108,6 +109,37 @@ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatA
+   }
+ 
+   @Override
++  public Iterable<PartitionView<E>> getCoveringPartitions() {
++    final FileSystemDataset<E> fsDataset = (FileSystemDataset<E>) dataset;
++    if (dataset.getDescriptor().isPartitioned()) {
++      return new Iterable<PartitionView<E>>() {
++        @Override
++        public Iterator<PartitionView<E>> iterator() {
++          return Iterators.transform(partitionIterator(),
++              new Function<StorageKey, PartitionView<E>>() {
++                @Override
++                @edu.umd.cs.findbugs.annotations.SuppressWarnings(
++                    value="NP_PARAMETER_MUST_BE_NONNULL_BUT_MARKED_AS_NULLABLE",
++                    justification="False positive, initialized above as non-null.")
++                public PartitionView<E> apply(@Nullable StorageKey key) {
++                  return FileSystemPartitionView.getPartition(
++                      fsDataset.unbounded, key.getPath());
++                }
++              });
++        }
++      };
++
++    } else {
++      return new Iterable<PartitionView<E>>() {
++        @Override
++        public Iterator<PartitionView<E>> iterator() {
++          return Iterators.singletonIterator((PartitionView<E>) fsDataset.unbounded);
++        }
++      };
++    }
++  }
++
++  @Override
+   public boolean deleteAll() {
+     if (!constraints.alignedWithBoundaries()) {
+       throw new UnsupportedOperationException(
+@@ -122,14 +154,11 @@ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatA
+   }
+ 
+   PathIterator pathIterator() {
+-    Iterator<Pair<StorageKey, Path>> directories;
+     if (dataset.getDescriptor().isPartitioned()) {
+-      directories = partitionIterator();
++      return new PathIterator(fs, root, partitionIterator());
+     } else {
+-      directories = Iterators.singletonIterator(
+-          Pair.of((StorageKey) null, root));
++      return new PathIterator(fs, root, null);
+     }
+-    return new PathIterator(fs, root, directories);
+   }
+ 
+   /**
+@@ -139,13 +168,13 @@ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatA
+    */
+   Iterator<Path> dirIterator() {
+     if (dataset.getDescriptor().isPartitioned()) {
+-      return Iterators.transform(partitionIterator(), new Function<Pair<StorageKey, Path>, Path>() {
++      return Iterators.transform(partitionIterator(), new Function<StorageKey, Path>() {
+         @Override
+         @edu.umd.cs.findbugs.annotations.SuppressWarnings(
+             value="NP_PARAMETER_MUST_BE_NONNULL_BUT_MARKED_AS_NULLABLE",
+             justification="False positive, initialized above as non-null.")
+-        public Path apply(@Nullable Pair<StorageKey, Path> input) {
+-          return new Path(root, input.second());
++        public Path apply(@Nullable StorageKey key) {
++          return new Path(root, key.getPath());
+         }
+       });
+     } else {
+@@ -158,7 +187,7 @@ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatA
+     try {
+       return new FileSystemPartitionIterator(
+           fs, root, descriptor.getPartitionStrategy(), descriptor.getSchema(),
+-          constraints);
++          getKeyPredicate());
+     } catch (IOException ex) {
+       throw new DatasetException("Cannot list partitions in view:" + this, ex);
+     }
+@@ -167,15 +196,15 @@ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatA
+   boolean deleteAllUnsafe() {
+     boolean deleted = false;
+     if (dataset.getDescriptor().isPartitioned()) {
+-      for (Pair<StorageKey, Path> partition : partitionIterator()) {
+-        deleted = FileSystemUtil.cleanlyDelete(fs, root, partition.second()) || deleted;
++      for (StorageKey key : partitionIterator()) {
++        deleted = FileSystemUtil.cleanlyDelete(fs, root, key.getPath()) || deleted;
+ 
+         if (listener != null) {
+ 
+           // the relative path is the partition name, so we can simply delete it
+           // in Hive
+           listener.partitionDeleted(dataset.getNamespace(),
+-              dataset.getName(), partition.second().toString());
++              dataset.getName(), key.getPath().toString());
+         }
+ 
+       }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/PathIterator.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/PathIterator.java
+index 7a0140a..bd139f5 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/PathIterator.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/PathIterator.java
+@@ -16,34 +16,30 @@
+ 
+ package org.kitesdk.data.spi.filesystem;
+ 
+-import com.google.common.base.Preconditions;
+ import com.google.common.collect.Lists;
+ import java.io.IOException;
+ import java.util.Iterator;
+ import java.util.List;
+ import java.util.NoSuchElementException;
++import javax.annotation.Nullable;
+ import org.apache.hadoop.fs.FileStatus;
+ import org.apache.hadoop.fs.FileSystem;
+ import org.apache.hadoop.fs.Path;
+ import org.kitesdk.data.DatasetIOException;
+-import org.kitesdk.data.spi.Pair;
+ import org.kitesdk.data.spi.StorageKey;
+ 
+ public class PathIterator implements Iterator<Path>, Iterable<Path> {
+   private final FileSystem fs;
+   private final Path root;
+-  private final Iterator<Pair<StorageKey, Path>> directories;
++  private final Iterator<StorageKey> partitions;
+   private StorageKey key = null;
+   private Iterator<Path> files = null;
+ 
+   public PathIterator(FileSystem fs, Path root,
+-                      Iterator<Pair<StorageKey, Path>> directories) {
+-    Preconditions.checkArgument(directories != null,
+-        "Directories cannot be null");
+-
++                      @Nullable Iterator<StorageKey> partitions) {
+     this.fs = fs;
+     this.root = root;
+-    this.directories = directories;
++    this.partitions = partitions;
+   }
+ 
+   @Override
+@@ -83,28 +79,44 @@ public class PathIterator implements Iterator<Path>, Iterable<Path> {
+   @SuppressWarnings("deprecation")
+   private boolean advance() {
+     while (true) {
+-      if (directories.hasNext()) {
+-        Pair<StorageKey, Path> pair = directories.next();
++      FileStatus[] stats;
++      if (partitions == null) {
++        if (files != null) {
++          // already read the root directory
++          return false;
++        }
++        try {
++          stats = fs.listStatus(root, PathFilters.notHidden());
++        } catch (IOException ex) {
++          throw new DatasetIOException("Cannot list files in " + root, ex);
++        }
++        this.key = null;
++
++      } else if (partitions.hasNext()) {
++        StorageKey key = partitions.next();
+         try {
+-          FileStatus[] stats = fs.listStatus(
+-              new Path(root, pair.second()), PathFilters.notHidden());
+-          this.key = pair.first();
+-          List<Path> nextFileSet = Lists.newArrayListWithCapacity(stats.length);
+-          for (FileStatus stat : stats) {
+-            if (!stat.isDir()) {
+-              nextFileSet.add(stat.getPath());
+-            }
+-          }
+-          if (nextFileSet.size() > 0) {
+-            this.files = nextFileSet.iterator();
+-            return true;
+-          }
++          stats = fs.listStatus(
++              new Path(root, key.getPath()), PathFilters.notHidden());
+         } catch (IOException ex) {
+-          throw new DatasetIOException("Cannot list files in " + pair.second(), ex);
++          throw new DatasetIOException("Cannot list files in " + key.getPath(), ex);
+         }
++        this.key = key;
++
+       } else {
+         return false;
+       }
++
++      List<Path> nextFileSet = Lists.newArrayListWithCapacity(stats.length);
++      for (FileStatus stat : stats) {
++        if (!stat.isDir()) {
++          nextFileSet.add(stat.getPath());
++        }
++      }
++      if (nextFileSet.size() > 0) {
++        this.files = nextFileSet.iterator();
++        return true;
++      }
++      return false;
+     }
+   }
+ 
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/TestFileSystemDatasets.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/TestFileSystemDatasets.java
+deleted file mode 100644
+index 8472dbe..0000000
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/TestFileSystemDatasets.java
++++ /dev/null
+@@ -1,162 +0,0 @@
+-/*
+- * Copyright 2013 Cloudera Inc.
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- *   http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-
+-package org.kitesdk.data;
+-
+-import org.apache.avro.Schema;
+-import org.apache.avro.SchemaBuilder;
+-import org.apache.avro.generic.GenericRecord;
+-import org.junit.Assert;
+-import org.junit.Before;
+-import org.junit.Test;
+-import org.kitesdk.data.spi.filesystem.FileSystemDatasets;
+-
+-public class TestFileSystemDatasets {
+-
+-  private static final Schema schema = SchemaBuilder.record("Event").fields()
+-      .requiredString("id")
+-      .requiredLong("timestamp")
+-      .requiredString("color")
+-      .endRecord();
+-
+-  private static PartitionStrategy ymd = new PartitionStrategy.Builder()
+-      .year("timestamp", "y")
+-      .month("timestamp", "m")
+-      .day("timestamp", "d")
+-      .build();
+-
+-  private Dataset<GenericRecord> dataset;
+-
+-  @Before
+-  public void createFileSystemDataset() {
+-    String uri = "dataset:file:/tmp/datasets/ns/test";
+-    DatasetDescriptor descriptor = new DatasetDescriptor.Builder()
+-        .schema(schema)
+-        .partitionStrategy(ymd)
+-        .build();
+-    Datasets.delete(uri);
+-    this.dataset = Datasets.create(uri, descriptor);
+-  }
+-
+-  @Test
+-  public void testViewForUri() {
+-    View<GenericRecord> view = FileSystemDatasets.viewForUri(
+-        dataset, "file:/tmp/datasets/ns/test/y=2014/m=03/d=14");
+-    Assert.assertEquals("Should create correct view",
+-        view, dataset.with("y", 2014).with("m", 3).with("d", 14));
+-
+-    view = FileSystemDatasets.viewForUri(
+-        dataset, "/tmp/datasets/ns/test/y=2014/m=03/d=14");
+-    Assert.assertEquals("Should create correct view",
+-        view, dataset.with("y", 2014).with("m", 3).with("d", 14));
+-  }
+-
+-  @Test
+-  public void testViewForIncompleteUri() {
+-    View<GenericRecord> view = FileSystemDatasets.viewForUri(
+-        dataset, "/tmp/datasets/ns/test/y=2014/m=03");
+-    Assert.assertEquals("Should create correct view",
+-        view, dataset.with("y", 2014).with("m", 3));
+-  }
+-
+-  @Test
+-  public void testIgnoresAuthority() {
+-    View<GenericRecord> view = FileSystemDatasets.viewForUri(
+-        dataset, "file://127.0.0.1/tmp/datasets/ns/test/y=2014/m=03/d=14");
+-    Assert.assertEquals("Should create correct view",
+-        view, dataset.with("y", 2014).with("m", 3).with("d", 14));
+-  }
+-
+-  @Test
+-  public void testViewForRelativeUri() {
+-    View<GenericRecord> view = FileSystemDatasets.viewForUri(
+-        dataset, "y=2014/m=03/d=14");
+-    Assert.assertEquals("Should create correct view",
+-        view, dataset.with("y", 2014).with("m", 3).with("d", 14));
+-  }
+-
+-  @Test
+-  public void testViewForMissingPartitionNames() {
+-    // like PathConversion, this uses names from the partition strategy
+-    // and will accept partitions that don't have a "name=" component
+-    View<GenericRecord> view = FileSystemDatasets.viewForUri(
+-        dataset, "2014/3/14");
+-    Assert.assertEquals("Should create correct view",
+-        view, dataset.with("y", 2014).with("m", 3).with("d", 14));
+-  }
+-
+-  @Test
+-  public void testViewForDifferentPartitionNames() {
+-    // like PathConversion, this uses names from the partition strategy
+-    // and will accept partitions that have a different "name=" component
+-    View<GenericRecord> view = FileSystemDatasets.viewForUri(
+-        dataset, "year=2014/month=3/day=14");
+-    Assert.assertEquals("Should create correct view",
+-        view, dataset.with("y", 2014).with("m", 3).with("d", 14));
+-  }
+-
+-  @Test
+-  public void testNoConstraints() {
+-    View<GenericRecord> view = FileSystemDatasets.viewForUri(
+-        dataset, "file:/tmp/datasets/ns/test/");
+-    Assert.assertEquals("Should create correct view", view, dataset);
+-  }
+-
+-  @Test
+-  public void testDatasetNotPartitioned() {
+-    Datasets.delete("dataset:file:/tmp/datasets/ns/test");
+-    final Dataset<GenericRecord> ds = Datasets.create(
+-        "dataset:file:/tmp/datasets/ns/test",
+-        new DatasetDescriptor.Builder()
+-            .schema(schema)
+-            .build());
+-
+-    Assert.assertEquals("Should work for empty relative directory",
+-        ds, FileSystemDatasets.viewForUri(ds, "file:/tmp/datasets/ns/test"));
+-
+-    TestHelpers.assertThrows("Should reject paths in a non-partitioned dataset",
+-        IllegalArgumentException.class, new Runnable() {
+-          @Override
+-          public void run() {
+-            FileSystemDatasets.viewForUri(ds, "y=2014/m=03/d=14");
+-          }
+-        });
+-  }
+-
+-  @Test
+-  public void testNotContained() {
+-    TestHelpers.assertThrows("Should reject paths not in the dataset",
+-        IllegalArgumentException.class, new Runnable() {
+-          @Override
+-          public void run() {
+-            FileSystemDatasets.viewForUri(
+-                dataset, "file:/tmp/datasets/ns/test2/y=2014/m=03/d=14");
+-          }
+-        });
+-  }
+-
+-  @Test
+-  public void testOtherFileSystemRejected() {
+-    TestHelpers.assertThrows("Should reject paths not in the dataset",
+-        IllegalArgumentException.class, new Runnable() {
+-          @Override
+-          public void run() {
+-            FileSystemDatasets.viewForUri(
+-                dataset, "hdfs:/tmp/datasets/ns/test/y=2014/m=03/d=14");
+-          }
+-        });
+-  }
+-}
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestConstraints.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestConstraints.java
+index 5e86acc..abec36e 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestConstraints.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestConstraints.java
+@@ -54,7 +54,7 @@ public class TestConstraints {
+       .build();
+ 
+   private static PartitionStrategy strategy = new PartitionStrategy.Builder()
+-      .hash("id", "id-hash", 64)
++      .hash("id", "id_hash", 64)
+       .year("timestamp")
+       .month("timestamp")
+       .day("timestamp")
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDatasets.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDatasets.java
+new file mode 100644
+index 0000000..8feb2c3
+--- /dev/null
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDatasets.java
+@@ -0,0 +1,224 @@
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.kitesdk.data.spi.filesystem;
++
++import org.apache.avro.Schema;
++import org.apache.avro.SchemaBuilder;
++import org.apache.avro.generic.GenericRecord;
++import org.apache.hadoop.fs.Path;
++import org.junit.Assert;
++import org.junit.Before;
++import org.junit.Test;
++import org.kitesdk.data.Dataset;
++import org.kitesdk.data.DatasetDescriptor;
++import org.kitesdk.data.Datasets;
++import org.kitesdk.data.PartitionStrategy;
++import org.kitesdk.data.TestHelpers;
++import org.kitesdk.data.View;
++import org.kitesdk.data.spi.AbstractRefinableView;
++import org.kitesdk.data.spi.Constraints;
++
++public class TestFileSystemDatasets {
++
++  private static final Schema schema = SchemaBuilder.record("Event").fields()
++      .requiredString("id")
++      .requiredLong("timestamp")
++      .requiredString("color")
++      .endRecord();
++
++  private static PartitionStrategy ymd = new PartitionStrategy.Builder()
++      .year("timestamp", "y")
++      .month("timestamp", "m")
++      .day("timestamp", "d")
++      .build();
++
++  private FileSystemDataset<GenericRecord> dataset;
++
++  @Before
++  public void createFileSystemDataset() {
++    String uri = "dataset:file:/tmp/datasets/ns/test";
++    DatasetDescriptor descriptor = new DatasetDescriptor.Builder()
++        .schema(schema)
++        .partitionStrategy(ymd)
++        .build();
++    Datasets.delete(uri);
++    this.dataset = Datasets.create(uri, descriptor);
++  }
++
++  @Test
++  public void testViewForUri() {
++    Path path = new Path("/tmp/datasets/ns/test/y=2014/m=03/d=14");
++
++    View<GenericRecord> view = FileSystemDatasets.viewForUri(
++        dataset, "file:" + path);
++    Assert.assertEquals("Should create correct view",
++        view, dataset.getPartitionView(path));
++
++    view = FileSystemDatasets.viewForUri(
++        dataset, path.toString());
++    Assert.assertEquals("Should create correct view",
++        view, dataset.getPartitionView(path));
++
++    Constraints expected = ((AbstractRefinableView<GenericRecord>)
++        dataset.with("y", 2014).with("m", 3).with("d", 14)).getConstraints();
++    Constraints actual = ((AbstractRefinableView<GenericRecord>) view)
++        .getConstraints();
++    Assert.assertEquals("Constraints should match expected",
++        expected, actual);
++  }
++
++  @Test
++  public void testViewForIncompleteUri() {
++    Path path = new Path("/tmp/datasets/ns/test/y=2014/m=03");
++
++    View<GenericRecord> view = FileSystemDatasets.viewForUri(
++        dataset, path.toString());
++    Assert.assertEquals("Should create correct view",
++        view, dataset.getPartitionView(path));
++
++    Constraints expected = ((AbstractRefinableView<GenericRecord>)
++        dataset.with("y", 2014).with("m", 3)).getConstraints();
++    Constraints actual = ((AbstractRefinableView<GenericRecord>) view)
++        .getConstraints();
++    Assert.assertEquals("Constraints should match expected",
++        expected, actual);
++  }
++
++  @Test
++  public void testIgnoresAuthority() {
++    Path path = new Path("/tmp/datasets/ns/test/y=2014/m=03/d=14");
++
++    View<GenericRecord> view = FileSystemDatasets.viewForUri(
++        dataset, "file://127.0.0.1/tmp/datasets/ns/test/y=2014/m=03/d=14");
++    Assert.assertEquals("Should create correct view",
++        view, dataset.getPartitionView(path));
++
++    Constraints expected = ((AbstractRefinableView<GenericRecord>)
++        dataset.with("y", 2014).with("m", 3).with("d", 14)).getConstraints();
++    Constraints actual = ((AbstractRefinableView<GenericRecord>) view)
++        .getConstraints();
++    Assert.assertEquals("Constraints should match expected",
++        expected, actual);
++  }
++
++  @Test
++  public void testViewForRelativeUri() {
++    Path path = new Path("/tmp/datasets/ns/test/y=2014/m=03/d=14");
++
++    View<GenericRecord> view = FileSystemDatasets.viewForUri(
++        dataset, "y=2014/m=03/d=14");
++    Assert.assertEquals("Should create correct view",
++        view, dataset.getPartitionView(path));
++
++    Constraints expected = ((AbstractRefinableView<GenericRecord>)
++        dataset.with("y", 2014).with("m", 3).with("d", 14)).getConstraints();
++    Constraints actual = ((AbstractRefinableView<GenericRecord>) view)
++        .getConstraints();
++    Assert.assertEquals("Constraints should match expected",
++        expected, actual);
++  }
++
++  @Test
++  public void testViewForMissingPartitionNames() {
++    Path path = new Path("2014/3/14");
++
++    // like PathConversion, this uses names from the partition strategy
++    // and will accept partitions that don't have a "name=" component
++    View<GenericRecord> view = FileSystemDatasets.viewForUri(
++        dataset, path.toString());
++    Assert.assertEquals("Should create correct view",
++        view, dataset.getPartitionView(path));
++
++    Constraints expected = ((AbstractRefinableView<GenericRecord>)
++        dataset.with("y", 2014).with("m", 3).with("d", 14)).getConstraints();
++    Constraints actual = ((AbstractRefinableView<GenericRecord>) view)
++        .getConstraints();
++    Assert.assertEquals("Constraints should match expected",
++        expected, actual);
++  }
++
++  @Test
++  public void testViewForDifferentPartitionNames() {
++    Path path = new Path("year=2014/month=3/day=14");
++
++    // like PathConversion, this uses names from the partition strategy
++    // and will accept partitions that have a different "name=" component
++    View<GenericRecord> view = FileSystemDatasets.viewForUri(
++        dataset, path.toString());
++    Assert.assertEquals("Should create correct view",
++        view, dataset.getPartitionView(path));
++
++    Constraints expected = ((AbstractRefinableView<GenericRecord>)
++        dataset.with("y", 2014).with("m", 3).with("d", 14)).getConstraints();
++    Constraints actual = ((AbstractRefinableView<GenericRecord>) view)
++        .getConstraints();
++    Assert.assertEquals("Constraints should match expected",
++        expected, actual);
++  }
++
++  @Test
++  public void testNoConstraints() {
++    View<GenericRecord> view = FileSystemDatasets.viewForUri(
++        dataset, "file:/tmp/datasets/ns/test/");
++    Assert.assertEquals("Should create correct view", view, dataset);
++  }
++
++  @Test
++  public void testDatasetNotPartitioned() {
++    Datasets.delete("dataset:file:/tmp/datasets/ns/test");
++    final Dataset<GenericRecord> ds = Datasets.create(
++        "dataset:file:/tmp/datasets/ns/test",
++        new DatasetDescriptor.Builder()
++            .schema(schema)
++            .build());
++
++    Assert.assertEquals("Should work for empty relative directory",
++        ds, FileSystemDatasets.viewForUri(ds, "file:/tmp/datasets/ns/test"));
++
++    TestHelpers.assertThrows("Should reject paths in a non-partitioned dataset",
++        IllegalArgumentException.class, new Runnable() {
++          @Override
++          public void run() {
++            FileSystemDatasets.viewForUri(ds, "y=2014/m=03/d=14");
++          }
++        });
++  }
++
++  @Test
++  public void testNotContained() {
++    TestHelpers.assertThrows("Should reject paths not in the dataset",
++        IllegalArgumentException.class, new Runnable() {
++          @Override
++          public void run() {
++            FileSystemDatasets.viewForUri(
++                dataset, "file:/tmp/datasets/ns/test2/y=2014/m=03/d=14");
++          }
++        });
++  }
++
++  @Test
++  public void testOtherFileSystemRejected() {
++    TestHelpers.assertThrows("Should reject paths not in the dataset",
++        IllegalArgumentException.class, new Runnable() {
++          @Override
++          public void run() {
++            FileSystemDatasets.viewForUri(
++                dataset, "hdfs:/tmp/datasets/ns/test/y=2014/m=03/d=14");
++          }
++        });
++  }
++}
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionIterator.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionIterator.java
+index 7b7bd2d..ba8adf8 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionIterator.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionIterator.java
+@@ -16,9 +16,7 @@
+ 
+ package org.kitesdk.data.spi.filesystem;
+ 
+-import com.google.common.base.Function;
+-import com.google.common.collect.Iterables;
+-import javax.annotation.Nullable;
++import com.google.common.base.Predicate;
+ import org.apache.avro.Schema;
+ import org.apache.avro.SchemaBuilder;
+ import org.joda.time.DateTime;
+@@ -26,7 +24,6 @@ import org.joda.time.DateTimeZone;
+ import org.kitesdk.data.spi.Constraints;
+ import org.kitesdk.data.MiniDFSTest;
+ import org.kitesdk.data.PartitionStrategy;
+-import org.kitesdk.data.spi.Pair;
+ import org.kitesdk.data.spi.StorageKey;
+ import com.google.common.collect.Lists;
+ import com.google.common.collect.Sets;
+@@ -121,8 +118,9 @@ public class TestFileSystemPartitionIterator extends MiniDFSTest {
+ 
+   @Test
+   public void testUnbounded() throws Exception {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
+-        fileSystem, testDirectory, strategy, schema, emptyConstraints));
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
++        fileSystem, testDirectory, strategy, schema,
++        emptyConstraints.toKeyPredicate());
+ 
+     assertIterableEquals(keys, partitions);
+   }
+@@ -134,69 +132,66 @@ public class TestFileSystemPartitionIterator extends MiniDFSTest {
+ 
+   @Test
+   public void testFrom() throws Exception {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
+         fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.from("timestamp", oct_24_2013)));
++        emptyConstraints.from("timestamp", oct_24_2013).toKeyPredicate());
+     assertIterableEquals(keys.subList(16, 24), partitions);
+   }
+ 
+   @Test
+   public void testAfter() throws Exception {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
+         fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.fromAfter("timestamp", oct_24_2013_end)));
++        emptyConstraints.fromAfter("timestamp", oct_24_2013_end).toKeyPredicate());
+     assertIterableEquals(keys.subList(17, 24), partitions);
+   }
+ 
+   @Test
+   public void testTo() throws Exception {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
+         fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.to("timestamp", oct_25_2012)));
++        emptyConstraints.to("timestamp", oct_25_2012).toKeyPredicate());
+     assertIterableEquals(keys.subList(0, 6), partitions);
+   }
+ 
+   @Test
+   public void testBefore() throws Exception {
+-    Iterable <StorageKey> partitions = firsts(new FileSystemPartitionIterator(
++    Iterable <StorageKey> partitions = new FileSystemPartitionIterator(
+         fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.toBefore("timestamp", oct_25_2012)));
++        emptyConstraints.toBefore("timestamp", oct_25_2012).toKeyPredicate());
+     assertIterableEquals(keys.subList(0, 5), partitions);
+   }
+ 
+   @Test
+   public void testWith() throws Exception {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
+         fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.with("timestamp", oct_24_2013)));
++        emptyConstraints.with("timestamp", oct_24_2013).toKeyPredicate());
+     assertIterableEquals(keys.subList(16, 17), partitions);
+   }
+ 
+   @Test
+   public void testDayRange() throws Exception {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
+-        fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.from("timestamp", oct_24_2013).to("timestamp", oct_24_2013_end)));
++    Predicate<StorageKey> predicate = emptyConstraints
++        .from("timestamp", oct_24_2013)
++        .to("timestamp", oct_24_2013_end)
++        .toKeyPredicate();
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
++        fileSystem, testDirectory, strategy, schema, predicate);
+     assertIterableEquals(keys.subList(16, 17), partitions);
+   }
+ 
+   @Test
+   public void testLargerRange() throws Exception {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
+-        fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.from("timestamp", oct_25_2012).to("timestamp", oct_24_2013)));
++    Predicate<StorageKey> predicate = emptyConstraints
++        .from("timestamp", oct_25_2012)
++        .to("timestamp", oct_24_2013)
++        .toKeyPredicate();
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
++        fileSystem, testDirectory, strategy, schema, predicate);
+     assertIterableEquals(keys.subList(5, 17), partitions);
+   }
+ 
+-  public static <T> Iterable<T> firsts(Iterable<Pair<T, Path>> pairs) {
+-    return Iterables.transform(pairs, new Function<Pair<T, Path>, T>() {
+-      @Override
+-      public T apply(@Nullable Pair<T, Path> pair) {
+-        return pair.first();
+-      }
+-    });
+-  }
+-
+   public static <T> void assertIterableEquals(
+       Iterable<T> expected, Iterable<T> actualIterable) {
+     Set<T> expectedSet = Sets.newHashSet(expected);
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionIteratorProvidedPartitioners.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionIteratorProvidedPartitioners.java
+index 933b776..b81f5c3 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionIteratorProvidedPartitioners.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionIteratorProvidedPartitioners.java
+@@ -16,8 +16,6 @@
+ 
+ package org.kitesdk.data.spi.filesystem;
+ 
+-import com.google.common.base.Function;
+-import com.google.common.collect.Iterables;
+ import com.google.common.collect.Lists;
+ import com.google.common.collect.Sets;
+ import com.google.common.io.Files;
+@@ -25,7 +23,6 @@ import java.io.IOException;
+ import java.util.Arrays;
+ import java.util.List;
+ import java.util.Set;
+-import javax.annotation.Nullable;
+ import org.apache.avro.Schema;
+ import org.apache.avro.SchemaBuilder;
+ import org.apache.hadoop.fs.FileSystem;
+@@ -39,7 +36,6 @@ import org.kitesdk.data.LocalFileSystem;
+ import org.kitesdk.data.PartitionStrategy;
+ import org.kitesdk.data.TestHelpers;
+ import org.kitesdk.data.spi.Constraints;
+-import org.kitesdk.data.spi.Pair;
+ import org.kitesdk.data.spi.StorageKey;
+ 
+ public class TestFileSystemPartitionIteratorProvidedPartitioners {
+@@ -100,17 +96,17 @@ public class TestFileSystemPartitionIteratorProvidedPartitioners {
+ 
+   @Test
+   public void testUnbounded() throws Exception {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
+-        fileSystem, testDirectory, strategy, schema, emptyConstraints));
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
++        fileSystem, testDirectory, strategy, schema, emptyConstraints.toKeyPredicate());
+ 
+     assertIterableEquals(keys, partitions);
+   }
+ 
+   @Test
+   public void testStringConstraint() throws IOException {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
+         fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.with("year", "2012")));
++        emptyConstraints.with("year", "2012").toKeyPredicate());
+     assertIterableEquals(keys.subList(0, 12), partitions);
+ 
+     TestHelpers.assertThrows("Should reject constraint with integer type",
+@@ -131,9 +127,9 @@ public class TestFileSystemPartitionIteratorProvidedPartitioners {
+ 
+   @Test
+   public void testIntConstraint() throws IOException {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
+         fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.with("month", 9)));
++        emptyConstraints.with("month", 9).toKeyPredicate());
+     List<StorageKey> expected = Lists.newArrayList();
+     expected.addAll(keys.subList(0, 3));
+     expected.addAll(keys.subList(12, 15));
+@@ -157,9 +153,9 @@ public class TestFileSystemPartitionIteratorProvidedPartitioners {
+ 
+   @Test
+   public void testLongConstraint() throws IOException {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
+         fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.with("day", 22L)));
++        emptyConstraints.with("day", 22L).toKeyPredicate());
+     List<StorageKey> expected = Lists.newArrayList(
+         keys.get(0), keys.get(3), keys.get(6), keys.get(9),
+         keys.get(12), keys.get(15), keys.get(18), keys.get(21));
+@@ -181,15 +177,6 @@ public class TestFileSystemPartitionIteratorProvidedPartitioners {
+         });
+   }
+ 
+-  public static <T> Iterable<T> firsts(Iterable<Pair<T, Path>> pairs) {
+-    return Iterables.transform(pairs, new Function<Pair<T, Path>, T>() {
+-      @Override
+-      public T apply(@Nullable Pair<T, Path> pair) {
+-        return pair.first();
+-      }
+-    });
+-  }
+-
+   public static <T> void assertIterableEquals(
+       Iterable<T> expected, Iterable<T> actualIterable) {
+     Set<T> expectedSet = Sets.newHashSet(expected);
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionIteratorTolerance.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionIteratorTolerance.java
+index 38eae81..31d77e7 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionIteratorTolerance.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionIteratorTolerance.java
+@@ -16,9 +16,7 @@
+ 
+ package org.kitesdk.data.spi.filesystem;
+ 
+-import com.google.common.base.Function;
+-import com.google.common.collect.Iterables;
+-import javax.annotation.Nullable;
++import com.google.common.base.Predicate;
+ import org.apache.avro.Schema;
+ import org.apache.avro.SchemaBuilder;
+ import org.joda.time.DateTime;
+@@ -26,7 +24,6 @@ import org.joda.time.DateTimeZone;
+ import org.kitesdk.data.spi.Constraints;
+ import org.kitesdk.data.MiniDFSTest;
+ import org.kitesdk.data.PartitionStrategy;
+-import org.kitesdk.data.spi.Pair;
+ import org.kitesdk.data.spi.StorageKey;
+ import org.kitesdk.data.spi.MarkerComparator;
+ import com.google.common.collect.Lists;
+@@ -157,8 +154,8 @@ public class TestFileSystemPartitionIteratorTolerance extends MiniDFSTest {
+ 
+   @Test
+   public void testUnbounded() throws Exception {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
+-        fileSystem, testDirectory, strategy, schema, emptyConstraints));
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
++        fileSystem, testDirectory, strategy, schema, emptyConstraints.toKeyPredicate());
+ 
+     assertIterableEquals(keys, partitions);
+   }
+@@ -170,69 +167,66 @@ public class TestFileSystemPartitionIteratorTolerance extends MiniDFSTest {
+ 
+   @Test
+   public void testFrom() throws Exception {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
+         fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.from("timestamp", oct_24_2013)));
++        emptyConstraints.from("timestamp", oct_24_2013).toKeyPredicate());
+     assertIterableEquals(keys.subList(16, 24), partitions);
+   }
+ 
+   @Test
+   public void testAfter() throws Exception {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
+         fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.fromAfter("timestamp", oct_24_2013_end)));
++        emptyConstraints.fromAfter("timestamp", oct_24_2013_end).toKeyPredicate());
+     assertIterableEquals(keys.subList(17, 24), partitions);
+   }
+ 
+   @Test
+   public void testTo() throws Exception {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
+         fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.to("timestamp", oct_25_2012)));
++        emptyConstraints.to("timestamp", oct_25_2012).toKeyPredicate());
+     assertIterableEquals(keys.subList(0, 6), partitions);
+   }
+ 
+   @Test
+   public void testBefore() throws Exception {
+-    Iterable <StorageKey> partitions = firsts(new FileSystemPartitionIterator(
++    Iterable <StorageKey> partitions = new FileSystemPartitionIterator(
+         fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.toBefore("timestamp", oct_25_2012)));
++        emptyConstraints.toBefore("timestamp", oct_25_2012).toKeyPredicate());
+     assertIterableEquals(keys.subList(0, 5), partitions);
+   }
+ 
+   @Test
+   public void testWith() throws Exception {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
+         fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.with("timestamp", oct_24_2013)));
++        emptyConstraints.with("timestamp", oct_24_2013).toKeyPredicate());
+     assertIterableEquals(keys.subList(16, 17), partitions);
+   }
+ 
+   @Test
+   public void testDayRange() throws Exception {
+-    Iterable<StorageKey> partitions = firsts(new FileSystemPartitionIterator(
+-        fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.from("timestamp", oct_24_2013).to("timestamp", oct_24_2013_end)));
++    Predicate<StorageKey> predicate = emptyConstraints
++        .from("timestamp", oct_24_2013)
++        .to("timestamp", oct_24_2013_end)
++        .toKeyPredicate();
++    Iterable<StorageKey> partitions = new FileSystemPartitionIterator(
++        fileSystem, testDirectory, strategy, schema, predicate);
+     assertIterableEquals(keys.subList(16, 17), partitions);
+   }
+ 
+   @Test
+   public void testLargerRange() throws Exception {
+-    Iterable <StorageKey> partitions = firsts(new FileSystemPartitionIterator(
+-        fileSystem, testDirectory, strategy, schema,
+-        emptyConstraints.from("timestamp", oct_25_2012).to("timestamp", oct_24_2013)));
++    Predicate<StorageKey> predicate = emptyConstraints
++        .from("timestamp", oct_25_2012)
++        .to("timestamp", oct_24_2013)
++        .toKeyPredicate();
++    Iterable <StorageKey> partitions = new FileSystemPartitionIterator(
++        fileSystem, testDirectory, strategy, schema, predicate);
+     assertIterableEquals(keys.subList(5, 17), partitions);
+   }
+ 
+-  public static <T> Iterable<T> firsts(Iterable<Pair<T, Path>> pairs) {
+-    return Iterables.transform(pairs, new Function<Pair<T, Path>, T>() {
+-      @Override
+-      public T apply(@Nullable Pair<T, Path> pair) {
+-        return pair.first();
+-      }
+-    });
+-  }
+-
+   public static <T> void assertIterableEquals(
+       Iterable<T> expected, Iterable<T> actualIterable) {
+     Set<T> expectedSet = Sets.newHashSet(expected);
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionView.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionView.java
+new file mode 100644
+index 0000000..c68d824
+--- /dev/null
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionView.java
+@@ -0,0 +1,401 @@
++/*
++ * Copyright 2015 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.kitesdk.data.spi.filesystem;
++
++import com.google.common.collect.Iterables;
++import com.google.common.collect.Sets;
++import java.io.IOException;
++import java.net.URI;
++import java.util.Set;
++import org.apache.hadoop.fs.FileSystem;
++import org.apache.hadoop.fs.Path;
++import org.junit.After;
++import org.junit.Assert;
++import org.junit.Before;
++import org.junit.Test;
++import org.kitesdk.data.DatasetDescriptor;
++import org.kitesdk.data.DatasetWriter;
++import org.kitesdk.data.Datasets;
++import org.kitesdk.data.LocalFileSystem;
++import org.kitesdk.data.PartitionStrategy;
++import org.kitesdk.data.PartitionView;
++import org.kitesdk.data.TestHelpers;
++import org.kitesdk.data.View;
++
++public class TestFileSystemPartitionView {
++  public static class TestRecord {
++    private long id;
++    private String data;
++  }
++
++  private FileSystemDataset<TestRecord> unpartitioned = null;
++  private FileSystemDataset<TestRecord> partitioned = null;
++
++  @Before
++  public void createTestDatasets() {
++    Datasets.delete("dataset:file:/tmp/datasets/unpartitioned");
++    Datasets.delete("dataset:file:/tmp/datasets/partitioned");
++
++    DatasetDescriptor descriptor = new DatasetDescriptor.Builder()
++        .schema(TestRecord.class)
++        .build();
++    unpartitioned = Datasets.create("dataset:file:/tmp/datasets/unpartitioned",
++        descriptor, TestRecord.class);
++
++    descriptor = new DatasetDescriptor.Builder(descriptor)
++        .partitionStrategy(new PartitionStrategy.Builder()
++            .hash("id", 4)
++            .build())
++        .build();
++    partitioned = Datasets.create("dataset:file:/tmp/datasets/partitioned",
++        descriptor, TestRecord.class);
++
++    writeTestRecords(unpartitioned);
++    writeTestRecords(partitioned);
++  }
++
++  @After
++  public void removeTestDatasets() {
++    Datasets.delete("dataset:file:/tmp/datasets/unpartitioned");
++    Datasets.delete("dataset:file:/tmp/datasets/partitioned");
++  }
++
++  @Test
++  public void testFullPaths() {
++    FileSystemPartitionView<TestRecord> partition = partitioned
++        .getPartitionView(URI.create("file:/tmp/datasets/partitioned"));
++    Assert.assertEquals("Should accept a full root URI",
++        URI.create("file:/tmp/datasets/partitioned"),
++        partition.getLocation());
++    Assert.assertEquals("Should have a null relative URI",
++        null, partition.getRelativeLocation());
++
++    partition = partitioned.getPartitionView(
++        new Path("file:/tmp/datasets/partitioned"));
++    Assert.assertEquals("Should accept a full root Path",
++        URI.create("file:/tmp/datasets/partitioned"),
++        partition.getLocation());
++    Assert.assertEquals("Should have a null relative Path",
++        null, partition.getRelativeLocation());
++
++    partition = partitioned.getPartitionView(
++        URI.create("file:/tmp/datasets/partitioned/id_hash=0"));
++    Assert.assertEquals("Should accept a full sub-partition URI",
++        URI.create("file:/tmp/datasets/partitioned/id_hash=0"),
++        partition.getLocation());
++    Assert.assertEquals("Should have a correct relative URI",
++        URI.create("id_hash=0"), partition.getRelativeLocation());
++
++    partition = partitioned.getPartitionView(
++        new Path("file:/tmp/datasets/partitioned/id_hash=0"));
++    Assert.assertEquals("Should accept a full sub-partition Path",
++        URI.create("file:/tmp/datasets/partitioned/id_hash=0"),
++        partition.getLocation());
++    Assert.assertEquals("Should have a correct relative Path",
++        URI.create("id_hash=0"), partition.getRelativeLocation());
++
++    partition = partitioned.getPartitionView(
++        URI.create("/tmp/datasets/partitioned/id_hash=0"));
++    Assert.assertEquals("Should accept a schemeless URI",
++        URI.create("file:/tmp/datasets/partitioned/id_hash=0"),
++        partition.getLocation());
++    Assert.assertEquals("Should have a correct relative URI",
++        URI.create("id_hash=0"), partition.getRelativeLocation());
++
++    partition = partitioned.getPartitionView(
++        new Path("/tmp/datasets/partitioned/id_hash=0"));
++    Assert.assertEquals("Should accept a schemeless Path",
++        URI.create("file:/tmp/datasets/partitioned/id_hash=0"),
++        partition.getLocation());
++    Assert.assertEquals("Should have a correct relative Path",
++        URI.create("id_hash=0"), partition.getRelativeLocation());
++
++    partition = partitioned.getPartitionView(
++        URI.create("file:/tmp/datasets/partitioned/"));
++    Assert.assertEquals("Should strip trailing slash from full URI",
++        URI.create("file:/tmp/datasets/partitioned"),
++        partition.getLocation());
++    Assert.assertEquals("Should should strip trailing slash from relative URI",
++        null, partition.getRelativeLocation());
++
++    partition = partitioned.getPartitionView(
++        URI.create("file:/tmp/datasets/partitioned/id_hash=0/"));
++    Assert.assertEquals("Should strip trailing slash from full URI",
++        URI.create("file:/tmp/datasets/partitioned/id_hash=0"),
++        partition.getLocation());
++    Assert.assertEquals("Should should strip trailing slash from relative URI",
++        URI.create("id_hash=0"), partition.getRelativeLocation());
++
++    partition = partitioned.getPartitionView(
++        URI.create("file:/tmp/datasets/partitioned/id_hash=5"));
++    Assert.assertEquals("Should accept non-existent full URI",
++        URI.create("file:/tmp/datasets/partitioned/id_hash=5"),
++        partition.getLocation());
++    Assert.assertEquals("Should should have correct non-existent relative URI",
++        URI.create("id_hash=5"), partition.getRelativeLocation());
++
++    TestHelpers.assertThrows("Should reject paths not in the dataset",
++        IllegalArgumentException.class, new Runnable() {
++          @Override
++          public void run() {
++            partitioned.getPartitionView(URI.create(
++                "file:/tmp/datasets/unpartitioned"));
++          }
++        });
++
++    TestHelpers.assertThrows("Should reject paths not in the dataset",
++        IllegalArgumentException.class, new Runnable() {
++          @Override
++          public void run() {
++            partitioned.getPartitionView(URI.create(
++                "file:/tmp/datasets"));
++          }
++        });
++
++    TestHelpers.assertThrows("Should reject paths in other file systems",
++        IllegalArgumentException.class, new Runnable() {
++          @Override
++          public void run() {
++            partitioned.getPartitionView(URI.create(
++                "hdfs:/tmp/datasets/partitioned"));
++          }
++        });
++
++    TestHelpers.assertThrows("Should reject paths deeper than partitions",
++        IllegalArgumentException.class, new Runnable() {
++          @Override
++          public void run() {
++            partitioned.getPartitionView(URI.create(
++                "hdfs:/tmp/datasets/partitioned/id_hash=0/data_hash=2"));
++          }
++        });
++
++    TestHelpers.assertThrows("Should reject invalid paths",
++        NumberFormatException.class, new Runnable() {
++          @Override
++          public void run() {
++            partitioned.getPartitionView(URI.create(
++                "file:/tmp/datasets/partitioned/id_hash=trees"));
++          }
++        });
++  }
++
++  @Test
++  public void testRelativePaths() {
++    FileSystemPartitionView<TestRecord> partition = partitioned
++        .getPartitionView(URI.create("id_hash=0"));
++    Assert.assertEquals("Should accept a relative URI",
++        URI.create("file:/tmp/datasets/partitioned/id_hash=0"),
++        partition.getLocation());
++    Assert.assertEquals("Should have a the same relative URI",
++        URI.create("id_hash=0"), partition.getRelativeLocation());
++
++    partition = partitioned.getPartitionView(
++        new Path("id_hash=0"));
++    Assert.assertEquals("Should accept a relative Path",
++        URI.create("file:/tmp/datasets/partitioned/id_hash=0"),
++        partition.getLocation());
++    Assert.assertEquals("Should have the an equivalent relative Path",
++        URI.create("id_hash=0"), partition.getRelativeLocation());
++
++    partition = partitioned.getPartitionView((URI) null);
++    Assert.assertEquals("Should accept a null URI",
++        URI.create("file:/tmp/datasets/partitioned"),
++        partition.getLocation());
++    Assert.assertEquals("Should have the an equivalent relative URI",
++        null, partition.getRelativeLocation());
++
++    partition = partitioned.getPartitionView((Path) null);
++    Assert.assertEquals("Should accept a null Path",
++        URI.create("file:/tmp/datasets/partitioned"),
++        partition.getLocation());
++    Assert.assertEquals("Should have the an equivalent relative Path",
++        null, partition.getRelativeLocation());
++
++    TestHelpers.assertThrows("Should reject empty Path",
++        NumberFormatException.class, new Runnable() {
++          @Override
++          public void run() {
++            partitioned.getPartitionView(URI.create(""));
++          }
++        });
++  }
++
++  @Test
++  public void testCoveringPartitions() {
++    Iterable<PartitionView<TestRecord>> partitions = unpartitioned
++        .getCoveringPartitions();
++    Assert.assertEquals("Should have a single partition view at the root",
++        unpartitioned.getPartitionView(URI.create(
++            "file:/tmp/datasets/unpartitioned")),
++        Iterables.getOnlyElement(partitions));
++
++    partitions = partitioned.getCoveringPartitions();
++    Set<PartitionView<TestRecord>> expected = Sets.newHashSet();
++    expected.add(partitioned.getPartitionView(URI.create(
++        "file:/tmp/datasets/partitioned/id_hash=0")));
++    expected.add(partitioned.getPartitionView(new Path(
++        "file:/tmp/datasets/partitioned/id_hash=1")));
++    expected.add(partitioned.getPartitionView(URI.create(
++        "file:/tmp/datasets/partitioned/id_hash=2")));
++    expected.add(partitioned.getPartitionView(new Path(
++        "file:/tmp/datasets/partitioned/id_hash=3")));
++    Assert.assertEquals("Should have a partition view for each partition",
++        expected, Sets.newHashSet(partitions));
++
++    PartitionView<TestRecord> partition0 = partitioned.getPartitionView(
++        URI.create("file:/tmp/datasets/partitioned/id_hash=0"));
++    partition0.deleteAll();
++    expected.remove(partition0);
++    Assert.assertEquals("Should have a partition view for each partition",
++        expected, Sets.newHashSet(partitions));
++  }
++
++  @Test
++  public void testDeletePartitions() {
++    Iterable<PartitionView<TestRecord>> partitions = partitioned
++        .getCoveringPartitions();
++
++    Set<PartitionView<TestRecord>> expected = Sets.newHashSet(partitions);
++    for (PartitionView<TestRecord> partition : partitions) {
++      Assert.assertTrue("Should delete data", partition.deleteAll());
++
++      expected.remove(partition);
++      Set<PartitionView<TestRecord>> actual = Sets.newHashSet(
++          partitioned.getCoveringPartitions());
++      Assert.assertEquals("Should only list remaining partitions",
++          expected, actual);
++    }
++
++    for (PartitionView<TestRecord> partition : partitions) {
++      Assert.assertFalse("Should indicate no data was present",
++          partition.deleteAll());
++    }
++  }
++
++  @Test
++  public void testRestrictedRead() throws IOException {
++    FileSystemPartitionView<TestRecord> partition0 = partitioned
++        .getPartitionView(URI.create("id_hash=0"));
++    FileSystemPartitionView<TestRecord> partition1 = partitioned
++        .getPartitionView(URI.create("id_hash=1"));
++    FileSystemPartitionView<TestRecord> partition2 = partitioned
++        .getPartitionView(URI.create("id_hash=2"));
++    FileSystemPartitionView<TestRecord> partition3 = partitioned
++        .getPartitionView(URI.create("id_hash=3"));
++
++    int count0 = DatasetTestUtilities.materialize(partition0).size();
++    int total = DatasetTestUtilities.materialize(partitioned).size();
++    Assert.assertTrue("Should read some records", count0 > 0);
++    Assert.assertTrue("Should not read the entire dataset", count0 < total);
++
++    // move other partitions so they match the partition0 constraint
++    FileSystem local = LocalFileSystem.getInstance();
++    local.rename(
++        new Path(partition1.getLocation()),
++        new Path(partitioned.getDirectory(), "0"));
++    local.rename(
++        new Path(partition2.getLocation()),
++        new Path(partitioned.getDirectory(), "hash=0"));
++    local.rename(
++        new Path(partition3.getLocation()),
++        new Path(partitioned.getDirectory(), "id_hash=00"));
++
++    int newCount0 = DatasetTestUtilities.materialize(partition0).size();
++    Assert.assertEquals("Should match original count", count0, newCount0);
++
++    int countByConstraints = DatasetTestUtilities
++        .materialize(partition0.toConstraintsView()).size();
++    Assert.assertEquals("Should match total count", total, countByConstraints);
++  }
++
++  @Test
++  public void testRestrictedDelete() throws IOException {
++    FileSystemPartitionView<TestRecord> partition0 = partitioned
++        .getPartitionView(URI.create("id_hash=0"));
++    FileSystemPartitionView<TestRecord> partition1 = partitioned
++        .getPartitionView(URI.create("id_hash=1"));
++    FileSystemPartitionView<TestRecord> partition2 = partitioned
++        .getPartitionView(URI.create("id_hash=2"));
++    FileSystemPartitionView<TestRecord> partition3 = partitioned
++        .getPartitionView(URI.create("id_hash=3"));
++
++    int count0 = DatasetTestUtilities.materialize(partition0).size();
++    int total = DatasetTestUtilities.materialize(partitioned).size();
++    Assert.assertTrue("Should read some records", count0 > 0);
++    Assert.assertTrue("Should not read the entire dataset", count0 < total);
++
++    // move other partitions so they match the partition0 constraint
++    FileSystem local = LocalFileSystem.getInstance();
++    local.rename(
++        new Path(partition1.getLocation()),
++        new Path(partitioned.getDirectory(), "0"));
++    local.rename(
++        new Path(partition2.getLocation()),
++        new Path(partitioned.getDirectory(), "hash=0"));
++    local.rename(
++        new Path(partition3.getLocation()),
++        new Path(partitioned.getDirectory(), "id_hash=00"));
++
++    Assert.assertEquals("Constraints should match all 4 directories", total,
++        DatasetTestUtilities.materialize(partition0.toConstraintsView()).size());
++
++    partition0.deleteAll();
++
++    int newCount0 = DatasetTestUtilities.materialize(partition0).size();
++    Assert.assertEquals("Should have removed all records in id_hash=0",
++        0, newCount0);
++
++    Assert.assertTrue("Should not have deleted other directories",
++        local.exists(new Path(partitioned.getDirectory(), "0")));
++    Assert.assertTrue("Should not have deleted other directories",
++        local.exists(new Path(partitioned.getDirectory(), "hash=0")));
++    Assert.assertTrue("Should not have deleted other directories",
++        local.exists(new Path(partitioned.getDirectory(), "id_hash=00")));
++
++    Assert.assertEquals("Should match total without deleted data",
++        total - count0,
++        DatasetTestUtilities.materialize(partition0.toConstraintsView()).size());
++
++    partitioned.unbounded.deleteAll();
++
++    Assert.assertFalse("Should have deleted all other directories",
++        local.exists(new Path(partitioned.getDirectory(), "0")));
++    Assert.assertFalse("Should have deleted all other directories",
++        local.exists(new Path(partitioned.getDirectory(), "hash=0")));
++    Assert.assertFalse("Should have deleted all other directories",
++        local.exists(new Path(partitioned.getDirectory(), "id_hash=00")));
++  }
++
++  private static void writeTestRecords(View<TestRecord> view) {
++    DatasetWriter<TestRecord> writer = null;
++    try {
++      writer = view.newWriter();
++      for (int i = 0; i < 10; i += 1) {
++        TestRecord record = new TestRecord();
++        record.id = i;
++        record.data = "test-" + i;
++        writer.write(record);
++      }
++
++    } finally {
++      if (writer != null) {
++        writer.close();
++      }
++    }
++  }
++}
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemView.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemView.java
+index bf40e05..aa81229 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemView.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemView.java
+@@ -17,12 +17,14 @@
+ package org.kitesdk.data.spi.filesystem;
+ 
+ import org.kitesdk.data.Signalable;
++import com.google.common.collect.Maps;
+ import com.google.common.io.Closeables;
+ import java.util.Iterator;
++import java.util.Map;
+ import org.joda.time.DateTime;
+ import org.joda.time.DateTimeZone;
+-import org.junit.Ignore;
+ import org.kitesdk.data.DatasetWriter;
++import org.kitesdk.data.PartitionView;
+ import org.kitesdk.data.TestHelpers;
+ import org.kitesdk.data.View;
+ import org.kitesdk.data.spi.DatasetRepository;
+@@ -61,7 +63,6 @@ public class TestFileSystemView extends TestRefinableViews {
+   }
+ 
+   @Test
+-  @Ignore("getCoveringPartitions is not yet implemented")
+   @SuppressWarnings("unchecked")
+   public void testCoveringPartitions() throws IOException {
+     // NOTE: this is an un-restricted write so all should succeed
+@@ -75,28 +76,32 @@ public class TestFileSystemView extends TestRefinableViews {
+       Closeables.close(writer, false);
+     }
+ 
+-    Iterator<View<StandardEvent>> coveringPartitions =
+-        ((FileSystemView) unbounded).getCoveringPartitions().iterator();
++    // get the covering partitions with a reliable order
++    Map<String, PartitionView<StandardEvent>> partitions = Maps.newTreeMap();
++    for (PartitionView<StandardEvent> view : unbounded.getCoveringPartitions()) {
++      partitions.put(view.getLocation().toString(), view);
++    }
++    Iterator<PartitionView<StandardEvent>> iter = partitions.values().iterator();
+ 
+-    assertTrue(coveringPartitions.hasNext());
+-    View v1 = coveringPartitions.next();
++    assertTrue(iter.hasNext());
++    View v1 = iter.next();
+     assertTrue(v1.includes(standardEvent(sepEvent.getTimestamp())));
+     assertFalse(v1.includes(standardEvent(octEvent.getTimestamp())));
+     assertFalse(v1.includes(standardEvent(novEvent.getTimestamp())));
+ 
+-    assertTrue(coveringPartitions.hasNext());
+-    View v2 = coveringPartitions.next();
++    assertTrue(iter.hasNext());
++    View v2 = iter.next();
+     assertFalse(v2.includes(standardEvent(sepEvent.getTimestamp())));
+     assertTrue(v2.includes(standardEvent(octEvent.getTimestamp())));
+     assertFalse(v2.includes(standardEvent(novEvent.getTimestamp())));
+ 
+-    assertTrue(coveringPartitions.hasNext());
+-    View v3 = coveringPartitions.next();
++    assertTrue(iter.hasNext());
++    View v3 = iter.next();
+     assertFalse(v3.includes(standardEvent(sepEvent.getTimestamp())));
+     assertFalse(v3.includes(standardEvent(octEvent.getTimestamp())));
+     assertTrue(v3.includes(standardEvent(novEvent.getTimestamp())));
+ 
+-    assertFalse(coveringPartitions.hasNext());
++    assertFalse(iter.hasNext());
+   }
+ 
+   private StandardEvent standardEvent(long timestamp) {
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestPathConversion.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestPathConversion.java
+index cfea10c..7885f67 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestPathConversion.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestPathConversion.java
+@@ -46,35 +46,35 @@ public class TestPathConversion {
+   @Test
+   public void testDirnameMinWidth() {
+     Assert.assertEquals("min=01",
+-        convert.dirnameForValue(
++        PathConversion.dirnameForValue(
+             new MinuteFieldPartitioner("timestamp", "min"), 1));
+     Assert.assertEquals("hour=01",
+-        convert.dirnameForValue(
++        PathConversion.dirnameForValue(
+             new HourFieldPartitioner("timestamp", "hour"), 1));
+     Assert.assertEquals("day=01",
+-        convert.dirnameForValue(
++        PathConversion.dirnameForValue(
+             new DayOfMonthFieldPartitioner("timestamp", "day"), 1));
+     Assert.assertEquals("month=01",
+-        convert.dirnameForValue(
++        PathConversion.dirnameForValue(
+             new MonthFieldPartitioner("timestamp", "month"), 1));
+     Assert.assertEquals("year=2013",
+-        convert.dirnameForValue(
++        PathConversion.dirnameForValue(
+             new YearFieldPartitioner("timestamp", "year"), 2013));
+   }
+ 
+   @Test
+   public void testUsesFieldName() {
+     Assert.assertEquals("day_of_month_field",
+-        Iterables.getFirst(EQ.split(convert.dirnameForValue(
++        Iterables.getFirst(EQ.split(PathConversion.dirnameForValue(
+             new DayOfMonthFieldPartitioner("day", "day_of_month_field"), 10)),
+             null));
+   }
+ 
+   @Test
+   public void testIgnoresPartitionName() {
+-    Assert.assertEquals("10", convert.dirnameToValueString("10"));
+-    Assert.assertEquals("10", convert.dirnameToValueString("=10"));
+-    Assert.assertEquals("10", convert.dirnameToValueString("anything=10"));
++    Assert.assertEquals("10", PathConversion.dirnameToValueString("10"));
++    Assert.assertEquals("10", PathConversion.dirnameToValueString("=10"));
++    Assert.assertEquals("10", PathConversion.dirnameToValueString("anything=10"));
+     Assert.assertEquals(10, (int) convert.valueForDirname(
+         new MonthFieldPartitioner("timestamp", "month"), "10"));
+     Assert.assertEquals(10, (int) convert.valueForDirname(
+diff --git a/kite-data/kite-data-crunch/src/main/java/org/kitesdk/data/crunch/CrunchDatasets.java b/kite-data/kite-data-crunch/src/main/java/org/kitesdk/data/crunch/CrunchDatasets.java
+index f8efb1c..0db07ca 100644
+--- a/kite-data/kite-data-crunch/src/main/java/org/kitesdk/data/crunch/CrunchDatasets.java
++++ b/kite-data/kite-data-crunch/src/main/java/org/kitesdk/data/crunch/CrunchDatasets.java
+@@ -290,11 +290,10 @@ public class CrunchDatasets {
+       this.key = new StorageKey(strategy);
+     }
+ 
+-    @SuppressWarnings({"unchecked", "deprecation"})
+     public <E> AvroStorageKey reuseFor(E entity,
+                                        @Nullable Map<String, Object> provided,
+                                        EntityAccessor<E> accessor) {
+-      accessor.keyFor(entity, provided, key);
++      key.reuseFor(entity, provided, accessor);
+       return this;
+     }
+ 
+diff --git a/kite-data/kite-data-flume/pom.xml b/kite-data/kite-data-flume/pom.xml
+index 20acc1b..50807d5 100644
+--- a/kite-data/kite-data-flume/pom.xml
++++ b/kite-data/kite-data-flume/pom.xml
+@@ -105,6 +105,12 @@
+       <version>1.0.0-cdh5.5.0-SNAPSHOT</version>
+     </dependency>
+     <dependency>
++      <groupId>org.kitesdk</groupId>
++      <artifactId>${artifact.hadoop-deps}</artifactId>
++      <type>pom</type>
++      <scope>provided</scope>
++    </dependency>
++    <dependency>
+       <groupId>junit</groupId>
+       <artifactId>junit</artifactId>
+       <scope>test</scope>
+-- 
+1.7.0.4
+

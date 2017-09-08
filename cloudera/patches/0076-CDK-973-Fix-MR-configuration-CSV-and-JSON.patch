@@ -1,0 +1,157 @@
+From ce44758d63126491efa5814ae8ae62ea44d273d2 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Mon, 25 May 2015 18:03:37 -0700
+Subject: [PATCH 076/115] CDK-973: Fix MR configuration, CSV, and JSON.
+
+---
+ .../data/spi/filesystem/CSVInputFormat.java        |   11 ++---
+ .../filesystem/FileSystemViewKeyInputFormat.java   |   42 +++++++++++---------
+ .../data/spi/filesystem/JSONInputFormat.java       |   11 ++---
+ 3 files changed, 32 insertions(+), 32 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/CSVInputFormat.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/CSVInputFormat.java
+index c50ceb4..1aad126 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/CSVInputFormat.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/CSVInputFormat.java
+@@ -28,6 +28,8 @@ import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+ import org.apache.hadoop.mapreduce.lib.input.FileSplit;
+ import org.kitesdk.compat.Hadoop;
+ import org.kitesdk.data.DatasetDescriptor;
++import org.kitesdk.data.View;
++import org.kitesdk.data.spi.AbstractRefinableView;
+ import org.kitesdk.data.spi.DataModelUtil;
+ import org.kitesdk.data.spi.EntityAccessor;
+ 
+@@ -35,12 +37,9 @@ class CSVInputFormat<E> extends FileInputFormat<E, Void> {
+   private DatasetDescriptor descriptor = null;
+   private EntityAccessor<E> accessor = null;
+ 
+-  public void setDescriptor(DatasetDescriptor descriptor) {
+-    this.descriptor = descriptor;
+-  }
+-
+-  public void setType(Class<E> type) {
+-    this.accessor = DataModelUtil.accessor(type, descriptor.getSchema());
++  public void setView(View<E> view) {
++    this.descriptor = view.getDataset().getDescriptor();
++    this.accessor = DataModelUtil.accessor(view.getType(), view.getSchema());
+   }
+ 
+   @Override
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemViewKeyInputFormat.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemViewKeyInputFormat.java
+index bff5b5d..a382aea 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemViewKeyInputFormat.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemViewKeyInputFormat.java
+@@ -20,6 +20,8 @@ import com.google.common.collect.Lists;
+ import java.io.IOException;
+ import java.util.Iterator;
+ import java.util.List;
++import org.apache.avro.Schema;
++import org.apache.avro.generic.GenericData;
+ import org.apache.avro.hadoop.io.AvroSerialization;
+ import org.apache.avro.mapred.AvroKey;
+ import org.apache.avro.mapreduce.AvroJob;
+@@ -74,16 +76,7 @@ class FileSystemViewKeyInputFormat<E> extends InputFormat<E, Void> {
+ 
+     Format format = dataset.getDescriptor().getFormat();
+ 
+-    if (!DataModelUtil.isGeneric(dataset.getType())) {
+-      if (Formats.AVRO.equals(format)) {
+-        setModel.invoke(conf,
+-            DataModelUtil.getDataModelForType(dataset.getType()).getClass());
+-        conf.set(AVRO_SCHEMA_INPUT_KEY, dataset.getSchema().toString());
+-      } else if (Formats.PARQUET.equals(format)) {
+-        // TODO: when available, use AvroReadSupport.setDataModelSupplier
+-        AvroReadSupport.setAvroReadSchema(conf, dataset.getSchema());
+-      }
+-    }
++    setConfigProperties(conf, format, dataset.getSchema(), dataset.getType());
+   }
+ 
+   public FileSystemViewKeyInputFormat(FileSystemView<E> view, Configuration conf) {
+@@ -93,13 +86,21 @@ class FileSystemViewKeyInputFormat<E> extends InputFormat<E, Void> {
+ 
+     Format format = dataset.getDescriptor().getFormat();
+ 
++    setConfigProperties(conf, format, view.getSchema(), view.getType());
++  }
++
++  private static void setConfigProperties(Configuration conf, Format format,
++                                          Schema schema, Class<?> type) {
++    GenericData model = DataModelUtil.getDataModelForType(type);
+     if (Formats.AVRO.equals(format)) {
+-      setModel.invoke(conf,
+-          DataModelUtil.getDataModelForType(view.getType()).getClass());
+-      conf.set(AVRO_SCHEMA_INPUT_KEY, view.getSchema().toString());
++      setModel.invoke(conf, model.getClass());
++      conf.set(AVRO_SCHEMA_INPUT_KEY, schema.toString());
++
+     } else if (Formats.PARQUET.equals(format)) {
+-      // TODO: when available, use AvroReadSupport.setDataModelSupplier
+-      AvroReadSupport.setAvroReadSchema(conf, view.getSchema());
++      // TODO: update to a version of Parquet with setAvroDataSupplier
++      //AvroReadSupport.setAvroDataSupplier(conf,
++      //    DataModelUtil.supplierClassFor(model));
++      AvroReadSupport.setAvroReadSchema(conf, schema);
+     }
+   }
+ 
+@@ -172,20 +173,23 @@ class FileSystemViewKeyInputFormat<E> extends InputFormat<E, Void> {
+     Format format = dataset.getDescriptor().getFormat();
+     if (Formats.AVRO.equals(format)) {
+       return new AvroKeyReaderWrapper(new AvroKeyInputFormat<E>());
++
+     } else if (Formats.PARQUET.equals(format)) {
+       return new ValueReaderWrapper(new AvroParquetInputFormat());
++
+     } else if (Formats.JSON.equals(format)) {
+       JSONInputFormat<E> delegate = new JSONInputFormat<E>();
+-      delegate.setDescriptor(dataset.getDescriptor());
+-      delegate.setType(dataset.getType());
++      delegate.setView(view != null ? view : dataset);
+       return delegate.createRecordReader(inputSplit, taskAttemptContext);
++
+     } else if (Formats.CSV.equals(format)) {
+       CSVInputFormat<E> delegate = new CSVInputFormat<E>();
+-      delegate.setDescriptor(dataset.getDescriptor());
+-      delegate.setType(dataset.getType());
++      delegate.setView(view != null ? view : dataset);
+       return delegate.createRecordReader(inputSplit, taskAttemptContext);
++
+     } else if (Formats.INPUTFORMAT.equals(format)) {
+       return InputFormatUtil.newRecordReader(dataset.getDescriptor());
++
+     } else {
+       throw new UnsupportedOperationException(
+           "Not a supported format: " + format);
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/JSONInputFormat.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/JSONInputFormat.java
+index 3cd09b7..a72ea1b 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/JSONInputFormat.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/JSONInputFormat.java
+@@ -28,19 +28,16 @@ import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+ import org.apache.hadoop.mapreduce.lib.input.FileSplit;
+ import org.kitesdk.compat.Hadoop;
+ import org.kitesdk.data.DatasetDescriptor;
++import org.kitesdk.data.View;
++import org.kitesdk.data.spi.AbstractRefinableView;
+ import org.kitesdk.data.spi.DataModelUtil;
+ import org.kitesdk.data.spi.EntityAccessor;
+ 
+ class JSONInputFormat<E> extends FileInputFormat<E, Void> {
+-  private DatasetDescriptor descriptor = null;
+   private EntityAccessor<E> accessor = null;
+ 
+-  public void setDescriptor(DatasetDescriptor descriptor) {
+-    this.descriptor = descriptor;
+-  }
+-
+-  public void setType(Class<E> type) {
+-    this.accessor = DataModelUtil.accessor(type, descriptor.getSchema());
++  public void setView(View<E> view) {
++    this.accessor = DataModelUtil.accessor(view.getType(), view.getSchema());
+   }
+ 
+   @Override
+-- 
+1.7.0.4
+

@@ -32,29 +32,26 @@ import org.kitesdk.data.LocalFileSystem;
 import org.kitesdk.data.Syncable;
 
 public class TestParquetWriter extends TestFileSystemWriters {
-
-  private static final Schema SCHEMA = SchemaBuilder.record("test").fields()
-      .requiredString("s")
-      .endRecord();
-
   @Override
-  public FileSystemWriter<Record> newWriter(Path directory, Schema datasetSchema, Schema writerSchema) {
-    return FileSystemWriter.newWriter(fs, directory, 100, 2 * 1024 * 1024,
+  public FileSystemWriter<Record> newWriter(Path directory, Schema schema) {
+    return FileSystemWriter.newWriter(fs, directory, 1, getTargetFileSize(),
         new DatasetDescriptor.Builder()
             .property(
-                "kite.writer.roll-interval-seconds", String.valueOf(10))
-            .property(
-                "kite.writer.target-file-size",
-                String.valueOf(32 * 1024 * 1024)) // 32 MB
-            .schema(datasetSchema)
+                "kite.writer.roll-interval-seconds", String.valueOf(1))
+            .schema(schema)
             .format("parquet")
-            .build(), writerSchema);
+            .build());
   }
 
   @Override
   public DatasetReader<Record> newReader(Path path, Schema schema) {
     return new ParquetFileSystemDatasetReader<Record>(
         fs, path, schema, Record.class);
+  }
+
+  @Override
+  public long getTargetFileSize() {
+    return 5 * 1024 * 1024 / 2; // ~2.5MB
   }
 
   @Test
@@ -74,9 +71,11 @@ public class TestParquetWriter extends TestFileSystemWriters {
         fs, new Path("/tmp"), -1, -1,
         new DatasetDescriptor.Builder()
             .property("parquet.block.size", "34343434")
-            .schema(SCHEMA)
+            .schema(SchemaBuilder.record("test").fields()
+                .requiredString("s")
+                .endRecord())
             .format("parquet")
-            .build(), SCHEMA);
+            .build());
     Assert.assertEquals("Should copy properties to Configuration",
         34343434, writer.conf.getInt("parquet.block.size", -1));
   }
@@ -94,9 +93,11 @@ public class TestParquetWriter extends TestFileSystemWriters {
         fs, new Path("/tmp"), -1, -1,
         new DatasetDescriptor.Builder()
             .property(FileSystemProperties.NON_DURABLE_PARQUET_PROP, "false")
-            .schema(SCHEMA)
+            .schema(SchemaBuilder.record("test").fields()
+                .requiredString("s")
+                .endRecord())
             .format("parquet")
-            .build(), SCHEMA);
+            .build());
     Assert.assertEquals("Disabling the non-durable parquet appender should get us a durable appender",
         DurableParquetAppender.class, writer.newAppender(testDirectory).getClass());
   }
@@ -108,15 +109,12 @@ public class TestParquetWriter extends TestFileSystemWriters {
         fs, new Path("/tmp"), -1, -1,
         new DatasetDescriptor.Builder()
             .property(FileSystemProperties.NON_DURABLE_PARQUET_PROP, "true")
-            .schema(SCHEMA)
+            .schema(SchemaBuilder.record("test").fields()
+                .requiredString("s")
+                .endRecord())
             .format("parquet")
-            .build(), SCHEMA);
+            .build());
     Assert.assertEquals("Enabling the non-durable parquet appender should get us a non-durable appender",
         ParquetAppender.class, writer.newAppender(testDirectory).getClass());
-  }
-
-  @Override
-  @Ignore // Needs PARQUET-308 to estimate current file size
-  public void testTargetFileSize() throws IOException {
   }
 }

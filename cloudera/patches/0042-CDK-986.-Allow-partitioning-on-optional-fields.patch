@@ -1,0 +1,201 @@
+From 6c0f5d44e5bbc68590db241ce0d9d626babbbbca Mon Sep 17 00:00:00 2001
+From: Tom White <tom@cloudera.com>
+Date: Wed, 15 Apr 2015 16:16:05 +0100
+Subject: [PATCH 042/115] CDK-986. Allow partitioning on optional fields
+
+---
+ .../main/java/org/kitesdk/data/spi/SchemaUtil.java |   23 +++++++---
+ .../org/kitesdk/data/TestDescriptorValidation.java |   15 ------
+ .../data/spi/filesystem/DatasetTestUtilities.java  |    2 +
+ .../data/spi/filesystem/TestFileSystemDataset.java |   48 ++++++++++++++++++++
+ .../src/test/resources/schema/user_nullable.avsc   |   14 ++++++
+ 5 files changed, 81 insertions(+), 21 deletions(-)
+ create mode 100644 kite-data/kite-data-core/src/test/resources/schema/user_nullable.avsc
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/SchemaUtil.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/SchemaUtil.java
+index c6caf7b..fdb354c 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/SchemaUtil.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/SchemaUtil.java
+@@ -80,8 +80,7 @@ public class SchemaUtil {
+ 
+   @SuppressWarnings("unchecked")
+   public static <S> Class<? extends S> getSourceType(FieldPartitioner<S, ?> fp, Schema schema) {
+-    return (Class<S>) getClassForType(
+-        schema.getField(fp.getSourceName()).schema().getType());
++    return (Class<S>) getClassForType(fieldSchema(schema, fp.getSourceName()).getType());
+   }
+ 
+   @SuppressWarnings("unchecked")
+@@ -91,7 +90,7 @@ public class SchemaUtil {
+       return fp.getType();
+     }
+     Class<? extends S> inputType = (Class<S>) getClassForType(
+-        schema.getField(fp.getSourceName()).schema().getType());
++        fieldSchema(schema, fp.getSourceName()).getType());
+     return fp.getType(inputType);
+   }
+ 
+@@ -166,7 +165,7 @@ public class SchemaUtil {
+   public static Schema partitionFieldSchema(FieldPartitioner<?, ?> fp, Schema schema) {
+     if (fp instanceof IdentityFieldPartitioner) {
+       // copy the schema directly from the entity to preserve annotations
+-      return schema.getField(fp.getSourceName()).schema();
++      return fieldSchema(schema, fp.getSourceName());
+     } else {
+       Class<?> fieldType = getPartitionType(fp, schema);
+       if (fieldType == Integer.class) {
+@@ -231,7 +230,7 @@ public class SchemaUtil {
+    * @return the nested Schema for the field
+    */
+   public static Schema fieldSchema(Schema schema, String name) {
+-    Schema nested = schema;
++    Schema nested = unwrapNullable(schema);
+     List<String> levels = Lists.newArrayList();
+     for (String level : NAME_SPLITTER.split(name)) {
+       levels.add(level);
+@@ -242,11 +241,23 @@ public class SchemaUtil {
+       ValidationException.check(field != null,
+           "Cannot get schema for %s: %s is not a field",
+           name, NAME_JOINER.join(levels));
+-      nested = field.schema();
++      nested = unwrapNullable(field.schema());
+     }
+     return nested;
+   }
+ 
++  private static Schema unwrapNullable(Schema schema) {
++    if (schema.getType() == Schema.Type.UNION && schema.getTypes().size() == 2) {
++      List<Schema> types = schema.getTypes();
++      if (types.get(0).getType() == Schema.Type.NULL) {
++        return types.get(1);
++      } else if (types.get(1).getType() == Schema.Type.NULL) {
++        return types.get(0);
++      }
++    }
++    return schema;
++  }
++
+   /**
+    * Creates a {@link Schema} for the keys of a {@link PartitionStrategy} based
+    * on an entity {@code Schema}.
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/TestDescriptorValidation.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/TestDescriptorValidation.java
+index 47fbcd4..b7f2e18 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/TestDescriptorValidation.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/TestDescriptorValidation.java
+@@ -173,21 +173,6 @@ public class TestDescriptorValidation {
+             .build();
+       }
+     });
+-    // Null is not allowed when partitioning
+-    TestHelpers.assertThrows("Should reject optional int for int partitioner",
+-        ValidationException.class, new Runnable() {
+-      @Override
+-      public void run() {
+-        new DatasetDescriptor.Builder()
+-            .schema(SchemaBuilder.record("Record").fields()
+-                .optionalInt("number")
+-                .endRecord())
+-            .partitionStrategy(new PartitionStrategy.Builder()
+-                .range("number", 5, 10, 15)
+-                .build())
+-            .build();
+-      }
+-    });
+     // Cannot assign to a Long from an Integer
+     TestHelpers.assertThrows("Should reject int for long partitioner",
+         ValidationException.class, new Runnable() {
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/DatasetTestUtilities.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/DatasetTestUtilities.java
+index 54fd51a..2b82955 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/DatasetTestUtilities.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/DatasetTestUtilities.java
+@@ -41,6 +41,8 @@ public class DatasetTestUtilities {
+ 
+   public final static Schema STRING_SCHEMA = loadSchema("schema/string.avsc");
+   public final static Schema USER_SCHEMA = loadSchema("schema/user.avsc");
++  public final static Schema USER_NULLABLE_SCHEMA =
++      loadSchema("schema/user_nullable.avsc");
+   public final static Schema OLD_VALUE_SCHEMA = loadSchema("schema/old_value.avsc");
+   public final static URI USER_SCHEMA_URL = findSchemaURI("schema/user.avsc");
+ 
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDataset.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDataset.java
+index 4565696..cdf15e3 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDataset.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDataset.java
+@@ -175,6 +175,54 @@ public class TestFileSystemDataset extends MiniDFSTest {
+ 
+   @Test
+   @SuppressWarnings("deprecation")
++  public void testPartitionedWriterSingleNullableField() throws IOException {
++    PartitionStrategy partitionStrategy = new PartitionStrategy.Builder().hash(
++        "username", 2).build();
++
++    FileSystemDataset<Record> ds = new FileSystemDataset.Builder<Record>()
++        .namespace("ns")
++        .name("partitioned-users")
++        .configuration(getConfiguration())
++        .descriptor(new DatasetDescriptor.Builder()
++            .schema(USER_NULLABLE_SCHEMA)
++            .format(format)
++            .compressionType(compressionType)
++            .location(testDirectory)
++            .partitionStrategy(partitionStrategy)
++            .build())
++        .type(Record.class)
++        .build();
++
++    Assert.assertTrue("Dataset is partitioned", ds.getDescriptor()
++        .isPartitioned());
++    Assert.assertEquals(partitionStrategy, ds.getDescriptor()
++        .getPartitionStrategy());
++
++    writeTestUsers(ds, 10);
++    Assert.assertTrue("Partitioned directory 0 exists",
++        fileSystem.exists(new Path(testDirectory, "username_hash=0")));
++    Assert.assertTrue("Partitioned directory 1 exists",
++        fileSystem.exists(new Path(testDirectory, "username_hash=1")));
++    checkTestUsers(ds, 10);
++    PartitionKey key0 = new PartitionKey(0);
++    PartitionKey key1 = new PartitionKey(1);
++    int total = readTestUsersInPartition(ds, key0, null)
++        + readTestUsersInPartition(ds, key1, null);
++    Assert.assertEquals(10, total);
++
++    testPartitionKeysAreEqual(ds, key0, key1);
++
++    Set<Record> records = Sets.newHashSet();
++    for (Dataset dataset : ds.getPartitions()) {
++      Assert.assertFalse("Partitions should not have further partitions",
++          dataset.getDescriptor().isPartitioned());
++      records.addAll(materialize(ds));
++    }
++    checkTestUsers(records, 10);
++  }
++
++  @Test
++  @SuppressWarnings("deprecation")
+   public void testPartitionedWriterDouble() throws IOException {
+     PartitionStrategy partitionStrategy = new PartitionStrategy.Builder()
+       .hash("username", 2).hash("email", 3).build();
+diff --git a/kite-data/kite-data-core/src/test/resources/schema/user_nullable.avsc b/kite-data/kite-data-core/src/test/resources/schema/user_nullable.avsc
+new file mode 100644
+index 0000000..755a032
+--- /dev/null
++++ b/kite-data/kite-data-core/src/test/resources/schema/user_nullable.avsc
+@@ -0,0 +1,14 @@
++{
++  "type": "record",
++  "name": "user",
++  "fields": [
++    {
++      "type": ["null", "string"],
++      "name": "username"
++    },
++    {
++      "type": "string",
++      "name": "email"
++    }
++  ]
++}
+-- 
+1.7.0.4
+

@@ -80,8 +80,11 @@ public final class TokenizeTextBuilder implements CommandBuilder {
       }
       this.analyzer = fieldType.getIndexAnalyzer();
       Preconditions.checkNotNull(analyzer);
-      // register CharTermAttribute for later (implicit) reuse
-      this.token = analyzer.tokenStream("content", reader).addAttribute(CharTermAttribute.class);
+      try { // register CharTermAttribute for later (implicit) reuse
+        this.token = analyzer.tokenStream("content", reader).addAttribute(CharTermAttribute.class);
+      } catch (IOException e) {
+        throw new MorphlineCompilationException("Cannot create token stream", config, e);
+      }
       Preconditions.checkNotNull(token);
       validateArguments();
     }

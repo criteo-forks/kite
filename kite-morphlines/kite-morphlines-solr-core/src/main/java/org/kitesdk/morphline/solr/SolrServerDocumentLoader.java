@@ -19,14 +19,13 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.solr.client.solrj.SolrClient;
+import org.apache.solr.client.solrj.SolrServer;
 import org.apache.solr.client.solrj.SolrServerException;
-import org.apache.solr.client.solrj.impl.CloudSolrClient;
-import org.apache.solr.client.solrj.impl.ConcurrentUpdateSolrClient;
+import org.apache.solr.client.solrj.impl.CloudSolrServer;
+import org.apache.solr.client.solrj.impl.ConcurrentUpdateSolrServer;
 import org.apache.solr.client.solrj.request.UpdateRequest;
 import org.apache.solr.client.solrj.response.SolrPingResponse;
 import org.apache.solr.client.solrj.response.UpdateResponse;
-import org.apache.solr.client.solrj.retry.RetryingSolrServer;
 import org.apache.solr.common.SolrInputDocument;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,14 +38,14 @@ import com.google.common.base.Preconditions;
  */
 public class SolrServerDocumentLoader implements DocumentLoader {
 
-  private final SolrClient server; // proxy to local or remote solr server
+  private final SolrServer server; // proxy to local or remote solr server
   private long numSentItems = 0; // number of requests sent in the current transaction
   private final int batchSize;
   private final List batch = new ArrayList();
 
   private static final Logger LOGGER = LoggerFactory.getLogger(SolrServerDocumentLoader.class);
 
-  public SolrServerDocumentLoader(SolrClient server, int batchSize) {
+  public SolrServerDocumentLoader(SolrServer server, int batchSize) {
     if (server == null) {
       throw new IllegalArgumentException("solr server must not be null");
     }
@@ -62,9 +61,8 @@ public class SolrServerDocumentLoader implements DocumentLoader {
     LOGGER.trace("beginTransaction");
     batch.clear();
     numSentItems = 0;
-    SolrClient s = getNonRetryingSolrServer();
-    if (s instanceof SafeConcurrentUpdateSolrServer) {
-      ((SafeConcurrentUpdateSolrServer) s).clearException();
+    if (server instanceof SafeConcurrentUpdateSolrServer) {
+      ((SafeConcurrentUpdateSolrServer) server).clearException();
     }
   }
 
@@ -96,9 +94,8 @@ public class SolrServerDocumentLoader implements DocumentLoader {
       sendBatch();
     }
     if (numSentItems > 0) {
-      SolrClient s = getNonRetryingSolrServer();
-      if (s instanceof ConcurrentUpdateSolrClient) {
-        ((ConcurrentUpdateSolrClient) s).blockUntilFinished();
+      if (server instanceof ConcurrentUpdateSolrServer) {
+        ((ConcurrentUpdateSolrServer) server).blockUntilFinished();
       }
     }
   }
@@ -168,8 +165,7 @@ public class SolrServerDocumentLoader implements DocumentLoader {
   @Override
   public UpdateResponse rollbackTransaction() throws SolrServerException, IOException {
     LOGGER.trace("rollback");
-    SolrClient s = getNonRetryingSolrServer();
-    if (!(s instanceof CloudSolrClient)) {
+    if (!(server instanceof CloudSolrServer)) {
       return server.rollback();
     } else {
       return new UpdateResponse();
@@ -179,11 +175,7 @@ public class SolrServerDocumentLoader implements DocumentLoader {
   @Override
   public void shutdown() {
     LOGGER.trace("shutdown");
-    try {
-      server.close();
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
+    server.shutdown();
   }
 
   @Override
@@ -192,19 +184,7 @@ public class SolrServerDocumentLoader implements DocumentLoader {
     return server.ping();
   }
 
-  public int getBatchSize() {
-    return batchSize;
-  }
-  
-  private SolrClient getNonRetryingSolrServer() {
-    SolrClient s = server;
-    while (s instanceof RetryingSolrServer) {
-      s = ((RetryingSolrServer)s).getUnderlyingSolrServer();
-    }
-    return s;
-  }
-
-  public SolrClient getSolrServer() {
+  public SolrServer getSolrServer() {
     return server;
   }
   

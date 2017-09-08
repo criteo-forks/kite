@@ -1,0 +1,282 @@
+From 850e7a39c6030e56802ba9fff2ff0185b63b898c Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 15 Apr 2015 16:49:41 -0700
+Subject: [PATCH 056/115] CDK-843: Add replace, update merge based on PartitionView.
+
+---
+ .../data/spi/filesystem/FileSystemDataset.java     |  100 +++++++++++------
+ .../data/spi/filesystem/FileSystemUtil.java        |  113 ++++++++++++++++++++
+ .../data/spi/filesystem/FileSystemView.java        |    1 -
+ 3 files changed, 178 insertions(+), 36 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+index f58cb29..b4679cf 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+@@ -15,11 +15,7 @@
+  */
+ package org.kitesdk.data.spi.filesystem;
+ 
+-import com.google.common.collect.Iterators;
+-import com.google.common.collect.Sets;
+-
+ import java.util.Iterator;
+-import java.util.Set;
+ import org.apache.hadoop.mapreduce.InputFormat;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetIOException;
+@@ -27,6 +23,7 @@ import org.kitesdk.data.Signalable;
+ import org.kitesdk.data.PartitionView;
+ import org.kitesdk.data.View;
+ import org.kitesdk.data.spi.Compatibility;
++import org.kitesdk.data.spi.Pair;
+ import org.kitesdk.data.spi.PartitionKey;
+ import org.kitesdk.data.PartitionStrategy;
+ import org.kitesdk.data.RefinableView;
+@@ -352,43 +349,76 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+     // check that the dataset's descriptor can read the update
+     Compatibility.checkCompatible(updateDescriptor, descriptor);
+ 
+-    Set<String> addedPartitions = Sets.newHashSet();
+-    for (Path path : update.pathIterator()) {
+-      URI relativePath = update.getDirectory().toUri().relativize(path.toUri());
+-      Path newPath;
+-      if (relativePath.toString().isEmpty()) {
+-        newPath = directory;
++    for (PartitionView<E> src : update.getCoveringPartitions()) {
++      if (src instanceof FileSystemPartitionView) {
++        URI relative = ((FileSystemPartitionView<E>) src).getRelativeLocation();
++        PartitionView<E> dest = relative != null ?
++            getPartitionView(relative) : unbounded;
++
++        // We call this listener before we attempt to create any partition
++        // directories. This lets the listener decide how to create the
++        // directory, if desired. Hive managed datasets let the Hive
++        // metastore create them while external datasets create it
++        // locally
++        if (descriptor.isPartitioned() && partitionListener != null &&
++            relative != null) {
++          partitionListener.partitionAdded(namespace, name, relative.toString());
++        }
++
++        List<Pair<Path, Path>> staged = FileSystemUtil.stageMove(fileSystem,
++            new Path(src.getLocation()), new Path(dest.getLocation()),
++            "tmp" /* data should be added to recover from a failure */ );
++        FileSystemUtil.finishMove(fileSystem, staged);
++
+       } else {
+-        newPath = new Path(directory, new Path(relativePath));
++        throw new IllegalArgumentException(
++            "Incompatible PartitionView: " + src.getClass().getName());
+       }
++    }
++  }
+ 
+-      Path newPartitionDirectory = newPath.getParent();
+-
+-      // We call this listener before we attempt to create any partition
+-      // directories. This lets the listener decide how to create the
+-      // directory, if desired. Hive managed datasets let the Hive
+-      // metastore create them while external datasets create it
+-      // locally
+-      if (descriptor.isPartitioned() && partitionListener != null) {
+-        String partition = newPartitionDirectory.toString();
+-        if (!addedPartitions.contains(partition)) {
+-          partitionListener.partitionAdded(namespace, name, partition);
+-          addedPartitions.add(partition);
+-        }
+-      }
++  public void replace(FileSystemView<E> update) {
++    DatasetDescriptor updateDescriptor = update.getDataset().getDescriptor();
+ 
+-      try {
+-        if (!fileSystem.exists(newPartitionDirectory)) {
+-          fileSystem.mkdirs(newPartitionDirectory);
++    // check that the dataset's descriptor can read the update
++    Compatibility.checkCompatible(updateDescriptor, descriptor);
++
++    // replace leaf partitions one at a time
++    for (PartitionView<E> src : update.getCoveringPartitions()) {
++      if (src instanceof FileSystemPartitionView) {
++        FileSystemPartitionView<E> dest = getPartitionView(
++            ((FileSystemPartitionView<E>) src).getRelativeLocation());
++
++        // The destination partition view may not exist, if the source data was
++        // stored in directories with non-standard names. To account for this,
++        // find all of the directories that should be removed: those that match
++        // the partition constraints.
++        List<Path> removals = Lists.newArrayList();
++        Iterable<PartitionView<E>> existingPartitions = dest
++            .toConstraintsView()
++            .getCoveringPartitions();
++        for (PartitionView<E> toRemove : existingPartitions) {
++          Path path = new Path(toRemove.getUri());
++          removals.add(path);
++          if (partitionListener != null) {
++            partitionListener.partitionDeleted(
++                namespace, name, path.toString());
++          }
+         }
+-        LOG.debug("Renaming {} to {}", path, newPath);
+-        boolean renameOk = fileSystem.rename(path, newPath);
+-        if (!renameOk) {
+-          throw new IOException("Dataset merge failed during rename of " + path +
+-              " to " + newPath);
++
++        // replace the directory all at once
++        FileSystemUtil.replace(fileSystem, directory,
++            new Path(dest.getLocation()), new Path(src.getLocation()),
++            removals);
++
++        if (partitionListener != null) {
++          partitionListener.partitionAdded(
++              namespace, name, dest.getLocation().toString());
+         }
+-      } catch (IOException e) {
+-        throw new DatasetIOException("Dataset merge failed", e);
++
++      } else {
++        throw new IllegalArgumentException(
++            "Incompatible PartitionView: " + src.getClass().getName());
+       }
+     }
+   }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
+index bf73543..4cae78c 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
+@@ -80,6 +80,119 @@ public class FileSystemUtil {
+     }
+   }
+ 
++  static List<Pair<Path, Path>> stageMove(FileSystem fs, Path src,
++                                          Path dest, String ext) {
++    List<Pair<Path, Path>> staged;
++
++    try {
++      // make sure the destination exists
++      if (!fs.exists(dest)) {
++        fs.mkdirs(dest);
++      }
++
++      FileStatus[] stats = fs.listStatus(src);
++      staged = Lists.newArrayList();
++
++      for (FileStatus stat : stats) {
++        if (stat.isDir()) {
++          continue;
++        }
++
++        Path srcFile = stat.getPath();
++        Path dotFile = new Path(dest, "." + srcFile.getName() + "." + ext);
++        Path destFile = new Path(dest, srcFile.getName());
++
++        if (fs.rename(srcFile, dotFile)) {
++          staged.add(Pair.of(dotFile, destFile));
++        } else {
++          throw new IOException(
++              "Failed to rename " + srcFile + " to " + dotFile);
++        }
++      }
++
++    } catch (IOException e) {
++      throw new DatasetIOException(
++          "Could not move contents of " + src + " to " + dest, e);
++    }
++
++    return staged;
++  }
++
++  static void finishMove(FileSystem fs, List<Pair<Path, Path>> staged) {
++    try {
++      for (Pair<Path, Path> pair : staged) {
++        if (!fs.rename(pair.first(), pair.second())) {
++          throw new IOException(
++              "Failed to rename " + pair.first() + " to " + pair.second());
++        }
++      }
++    } catch (IOException e) {
++      throw new DatasetIOException("Could not finish replacement", e);
++    }
++  }
++
++  /**
++   * Replace {@code destination} with {@code replacement}.
++   * <p>
++   * If this method fails in any step, recover using these steps:
++   * <ol>
++   * <li>If {@code .name.replacement} exists, but {@code name} does not, move
++   * it to {@code name}</li>
++   * <li>If {@code .name.replacement} and {@code name} exist, run this method
++   * again with the same list of additional removals</li>
++   * </ol>
++   *
++   * @param fs the FileSystem
++   * @param destination a Path
++   * @param replacement a Path that replaces the destination
++   * @param removals a List of paths that should also be removed
++   */
++  static void replace(FileSystem fs, Path root, Path destination,
++                      Path replacement, List<Path> removals) {
++    try {
++      // Ensure the destination exists because it acts as a recovery signal. If
++      // the directory exists, then recovery must go through the entire
++      // replacement process again. If it does not, then the dir can be moved.
++      if (!fs.exists(destination)) {
++        fs.mkdirs(destination);
++      }
++
++      Path staged = new Path(destination.getParent(),
++          "." + destination.getName() + ".replacement");
++
++      // First move into the destination folder to ensure moves work. It is
++      // okay to run this method on the staged path
++      if (!staged.equals(replacement) && !fs.rename(replacement, staged)) {
++        throw new IOException(
++            "Failed to rename " + replacement + " to " + staged);
++      }
++
++      // Remove any additional directories included in the replacement. This
++      // handles the case where there are multiple directories for the same
++      // logical partition. For example, dataset/a=2/ and dataset/2/
++      for (Path toRemove : removals) {
++        if (toRemove.equals(destination)) {
++          // destination is deleted last
++          continue;
++        }
++        FileSystemUtil.cleanlyDelete(fs, root, toRemove);
++      }
++
++      // remove the directory that will be replaced with a move
++      fs.delete(destination, true /* recursively */ );
++
++      // move the replacement to the final location
++      if (!fs.rename(staged, destination)) {
++        throw new IOException(
++            "Failed to rename " + staged + " to " + destination);
++      }
++
++    } catch (IOException e) {
++      throw new DatasetIOException(
++          "Could not replace " + destination + " with " + replacement, e);
++    }
++  }
++
+   static boolean cleanlyDelete(FileSystem fs, Path root, Path path) {
+     Preconditions.checkNotNull(fs, "File system cannot be null");
+     Preconditions.checkNotNull(root, "Root path cannot be null");
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
+index f5df510..d872b1e 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
+@@ -16,7 +16,6 @@
+ 
+ package org.kitesdk.data.spi.filesystem;
+ 
+-import com.google.common.annotations.VisibleForTesting;
+ import com.google.common.base.Function;
+ import com.google.common.collect.Iterators;
+ import java.util.Iterator;
+-- 
+1.7.0.4
+

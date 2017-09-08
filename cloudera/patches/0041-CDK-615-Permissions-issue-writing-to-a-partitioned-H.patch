@@ -1,0 +1,280 @@
+From b60b64e27dc422514f6ba8e9b046c9c81ca491f3 Mon Sep 17 00:00:00 2001
+From: Joey Echeverria <joey42@gmail.com>
+Date: Wed, 15 Apr 2015 10:41:16 -0500
+Subject: [PATCH 041/115] CDK-615: Permissions issue writing to a partitioned Hive external dataset
+
+* This patch reverses course from the previous one. Depending on the
+  dataset implementation, you may or may not want Kite creating the
+  directories.
+* This patch moves the partitionAdded callback to happen before new
+  partition directories are created to give the listener a chance
+  to create them in Kite or externally.
+* In particular, external Hive datasets will create the directories on
+  the Kite side while managed Hive datasets will let the Hive metastore
+  create them.
+* This doesn't affect file system datasets as they don't have listeners
+  regisitered unless they're manulaly created with a custom
+  MetadataProvider
+* Added a test of `load()` methods of `DatasetWriterCacheLoader` and
+  `IncrementalDatasetWriterCacheLoader`.
+* Fixed a typo
+---
+ .../data/spi/filesystem/FileSystemDataset.java     |   26 +++--
+ .../spi/filesystem/PartitionedDatasetWriter.java   |   13 ++-
+ .../filesystem/TestDatasetWriterCacheLoader.java   |  114 ++++++++++++++++++++
+ .../spi/hive/HiveExternalMetadataProvider.java     |   13 +++
+ 4 files changed, 156 insertions(+), 10 deletions(-)
+ create mode 100644 kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestDatasetWriterCacheLoader.java
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+index 25d3833..a315f11 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+@@ -197,11 +197,14 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+     try {
+       if (!fileSystem.exists(partitionDirectory)) {
+         if (allowCreate) {
+-          fileSystem.mkdirs(partitionDirectory);
+           if (partitionListener != null) {
+             partitionListener.partitionAdded(namespace, name,
+                 toRelativeDirectory(key).toString());
+           }
++
++          // ensure that the directory exists, it may or may not have been
++          // created by the partitionListener
++          fileSystem.mkdirs(partitionDirectory);
+         } else {
+           return null;
+         }
+@@ -327,6 +330,20 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+       }
+ 
+       Path newPartitionDirectory = newPath.getParent();
++
++      // We call this listener before we attempt to create any partition
++      // directories. This lets the listener decide how to create the
++      // directory, if desired. Hive managed datasets let the Hive
++      // metastore create them while external datasets create it
++      // locally
++      if (descriptor.isPartitioned() && partitionListener != null) {
++        String partition = newPartitionDirectory.toString();
++        if (!addedPartitions.contains(partition)) {
++          partitionListener.partitionAdded(namespace, name, partition);
++          addedPartitions.add(partition);
++        }
++      }
++
+       try {
+         if (!fileSystem.exists(newPartitionDirectory)) {
+           fileSystem.mkdirs(newPartitionDirectory);
+@@ -340,13 +357,6 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+       } catch (IOException e) {
+         throw new DatasetIOException("Dataset merge failed", e);
+       }
+-      if (descriptor.isPartitioned() && partitionListener != null) {
+-        String partition = newPartitionDirectory.toString();
+-        if (!addedPartitions.contains(partition)) {
+-          partitionListener.partitionAdded(namespace, name, partition);
+-          addedPartitions.add(partition);
+-        }
+-      }
+     }
+   }
+ 
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/PartitionedDatasetWriter.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/PartitionedDatasetWriter.java
+index a86f2ed..70b100d 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/PartitionedDatasetWriter.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/PartitionedDatasetWriter.java
+@@ -15,6 +15,7 @@
+  */
+ package org.kitesdk.data.spi.filesystem;
+ 
++import com.google.common.annotations.VisibleForTesting;
+ import java.util.Map;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetWriter;
+@@ -186,7 +187,8 @@ abstract class PartitionedDatasetWriter<E, W extends FileSystemWriter<E>> extend
+         .toString();
+   }
+ 
+-  private static class DatasetWriterCacheLoader<E> extends
++  @VisibleForTesting
++  static class DatasetWriterCacheLoader<E> extends
+     CacheLoader<StorageKey, FileSystemWriter<E>> {
+ 
+     private final FileSystemView<E> view;
+@@ -216,6 +218,9 @@ abstract class PartitionedDatasetWriter<E, W extends FileSystemWriter<E>> extend
+             dataset.getNamespace(), dataset.getName(), partition.toString());
+       }
+ 
++      // initialize the writer after calling the listener
++      // this lets the listener decide if and how to create the
++      // partition directory
+       writer.initialize();
+ 
+       return writer;
+@@ -223,7 +228,8 @@ abstract class PartitionedDatasetWriter<E, W extends FileSystemWriter<E>> extend
+ 
+   }
+ 
+-  private static class IncrementalDatasetWriterCacheLoader<E> extends
++  @VisibleForTesting
++  static class IncrementalDatasetWriterCacheLoader<E> extends
+       CacheLoader<StorageKey, FileSystemWriter.IncrementalWriter<E>> {
+ 
+     private final FileSystemView<E> view;
+@@ -256,6 +262,9 @@ abstract class PartitionedDatasetWriter<E, W extends FileSystemWriter<E>> extend
+             dataset.getNamespace(), dataset.getName(), partition.toString());
+       }
+ 
++      // initialize the writer after calling the listener
++      // this lets the listener decide if and how to create the
++      // partition directory
+       writer.initialize();
+ 
+       return (FileSystemWriter.IncrementalWriter<E>) writer;
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestDatasetWriterCacheLoader.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestDatasetWriterCacheLoader.java
+new file mode 100644
+index 0000000..cf92492
+--- /dev/null
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestDatasetWriterCacheLoader.java
+@@ -0,0 +1,114 @@
++/*
++ * Copyright 2015 Cloudera, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.data.spi.filesystem;
++
++import com.google.common.io.Files;
++import java.io.IOException;
++import junit.framework.Assert;
++import org.apache.hadoop.conf.Configuration;
++import org.apache.hadoop.fs.FileSystem;
++import org.apache.hadoop.fs.Path;
++import org.junit.After;
++import org.junit.Before;
++import org.junit.Test;
++import org.kitesdk.data.DatasetDescriptor;
++import org.kitesdk.data.PartitionStrategy;
++import org.kitesdk.data.spi.PartitionListener;
++import org.kitesdk.data.spi.StorageKey;
++import static org.kitesdk.data.spi.filesystem.DatasetTestUtilities.USER_SCHEMA;
++
++public class TestDatasetWriterCacheLoader {
++
++  private Configuration conf;
++  private FileSystem fileSystem;
++  private Path testDirectory;
++  private FileSystemDatasetRepository repo;
++  private PartitionStrategy partitionStrategy;
++  private FileSystemView<Object> view;
++
++  @Before
++  public void setUp() throws IOException {
++    this.conf = new Configuration();
++    this.fileSystem = FileSystem.get(conf);
++    this.testDirectory = new Path(Files.createTempDir().getAbsolutePath());
++    this.repo = new FileSystemDatasetRepository(conf, testDirectory,
++      new EnusrePartitionPathDoesNotExistMetadataProvider(conf, testDirectory));
++
++    partitionStrategy = new PartitionStrategy.Builder()
++      .hash("username", 2).build();
++    FileSystemDataset<Object> users = (FileSystemDataset<Object>) repo.create(
++      "ns", "users",
++      new DatasetDescriptor.Builder()
++      .schema(USER_SCHEMA)
++      .partitionStrategy(partitionStrategy)
++      .build());
++    view = new FileSystemView<Object>(users, null, Object.class);
++  }
++
++  @After
++  public void tearDown() throws IOException {
++    fileSystem.delete(testDirectory, true);
++  }
++
++  @Test
++  public void testInitializeAfterParitionAddedCallback() throws Exception {
++    PartitionedDatasetWriter.DatasetWriterCacheLoader<Object> loader
++      = new PartitionedDatasetWriter.DatasetWriterCacheLoader<Object>(view);
++
++    StorageKey key = new StorageKey.Builder(partitionStrategy)
++      .add("username", "test1")
++      .build();
++    loader.load(key);
++  }
++
++  @Test
++  public void testIncrementatlInitializeAfterParitionAddedCallback() throws Exception {
++    PartitionedDatasetWriter.IncrementalDatasetWriterCacheLoader<Object> loader
++      = new PartitionedDatasetWriter.IncrementalDatasetWriterCacheLoader<Object>(view);
++
++    StorageKey key = new StorageKey.Builder(partitionStrategy)
++      .add("username", "test1")
++      .build();
++    loader.load(key);
++  }
++
++  private static class EnusrePartitionPathDoesNotExistMetadataProvider
++    extends FileSystemMetadataProvider implements PartitionListener {
++
++    public EnusrePartitionPathDoesNotExistMetadataProvider(Configuration conf, Path rootDirectory) {
++      super(conf, rootDirectory);
++    }
++
++    @Override
++    public void partitionAdded(String namespace, String name, String partition) {
++      Path root = getRootDirectory();
++      Path partitionPath = new Path(
++        FileSystemDatasetRepository.pathForDataset(root, namespace, name),
++        partition);
++      try {
++        Assert.assertFalse("Partition path " + partitionPath + " does not exist",
++          getFileSytem().exists(partitionPath));
++      } catch (IOException ex) {
++        Assert.fail(ex.getMessage());
++      }
++    }
++
++    @Override
++    public void partitionDeleted(String namespace, String name, String partition) {
++    }
++  }
++
++}
+diff --git a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveExternalMetadataProvider.java b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveExternalMetadataProvider.java
+index 3102361..07180ac 100644
+--- a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveExternalMetadataProvider.java
++++ b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveExternalMetadataProvider.java
+@@ -126,4 +126,17 @@ class HiveExternalMetadataProvider extends HiveAbstractMetadataProvider {
+     return rootFileSystem.makeQualified(
+         HiveUtils.pathForDataset(rootDirectory, namespace, name));
+   }
++
++  @Override
++  public void partitionAdded(String namespace, String name, String path) {
++    Path partitionPath = new Path(pathForDataset(namespace, name), path);
++    try {
++      rootFileSystem.mkdirs(partitionPath);
++    } catch (IOException ex) {
++      throw new DatasetIOException(
++        "Unable to create partition directory  " + partitionPath, ex);
++    }
++    super.partitionAdded(namespace, name, path);
++  }
++
+ }
+-- 
+1.7.0.4
+

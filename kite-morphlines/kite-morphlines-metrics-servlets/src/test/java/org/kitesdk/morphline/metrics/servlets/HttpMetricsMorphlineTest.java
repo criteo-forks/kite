@@ -21,7 +21,6 @@ import java.io.Reader;
 import java.net.ConnectException;
 import java.net.URL;
 import java.net.URLConnection;
-import java.net.SocketException;
 import java.util.Iterator;
 
 import org.junit.Test;
@@ -69,7 +68,7 @@ public class HttpMetricsMorphlineTest extends AbstractMorphlineTest {
     assertEquals("pong", response.trim());
     
     response = httpGet(port, "/threads");
-    assertTrue(response.startsWith("\"main\" id="));
+    assertTrue(response.startsWith("main id="));
     
     response = httpGet(port, "/healthcheck");
     assertTrue(response.startsWith("{\"deadlocks\":{\"healthy\":true}}"));
@@ -94,8 +93,6 @@ public class HttpMetricsMorphlineTest extends AbstractMorphlineTest {
         fail();
       } catch (ConnectException e) {
         ; // expected
-      } catch (SocketException e) {
-        ; // expected on some OSes
       }
     }    
   }

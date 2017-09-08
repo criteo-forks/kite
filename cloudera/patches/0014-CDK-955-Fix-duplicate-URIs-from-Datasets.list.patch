@@ -1,0 +1,51 @@
+From 873c0b971e31fe10c531f503d437c23cf05e25d2 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 11 Mar 2015 18:37:56 -0700
+Subject: [PATCH 014/115] CDK-955: Fix duplicate URIs from Datasets.list.
+
+The problem was that the FileSystem implementation was returning
+multiple "default" namespaces. The implementation now uses a Set to
+accumulate both namespaces and dataset names.
+
+The bug only happened when a repository namespace path was used instead
+of a repository. In that case, the single namespace appears to be a
+valid repository with tables in the default namespace. Each table in the
+default namespace would result in another "default" in the list of
+namespaces. When Datasets.list listed the tables in each namespace, all
+of the tables were present in each copy of default, which resulted in
+n^2 results.
+---
+ .../spi/filesystem/FileSystemMetadataProvider.java |    8 ++++----
+ 1 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemMetadataProvider.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemMetadataProvider.java
+index e62ec24..e8f6539 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemMetadataProvider.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemMetadataProvider.java
+@@ -295,8 +295,8 @@ public class FileSystemMetadataProvider extends AbstractMetadataProvider {
+ 
+   @SuppressWarnings("deprecation")
+   @Override
+-  public List<String> namespaces() {
+-    List<String> namespaces = Lists.newArrayList();
++  public Set<String> namespaces() {
++    Set<String> namespaces = Sets.newHashSet();
+     try {
+       FileStatus[] entries = rootFileSystem.listStatus(rootDirectory,
+           PathFilters.notHidden());
+@@ -323,10 +323,10 @@ public class FileSystemMetadataProvider extends AbstractMetadataProvider {
+ 
+   @SuppressWarnings("deprecation")
+   @Override
+-  public List<String> datasets(String namespace) {
++  public Set<String> datasets(String namespace) {
+     Preconditions.checkNotNull(namespace, "Namespace cannot be null");
+ 
+-    List<String> datasets = Lists.newArrayList();
++    Set<String> datasets = Sets.newHashSet();
+ 
+     try {
+       // if using the default namespace, add datasets with no namespace dir
+-- 
+1.7.0.4
+

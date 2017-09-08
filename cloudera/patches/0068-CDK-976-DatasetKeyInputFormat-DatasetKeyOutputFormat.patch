@@ -1,0 +1,55 @@
+From 9247c90721242bcef6cc96ec1316152a9791959d Mon Sep 17 00:00:00 2001
+From: Cole Skoviak <cole.skoviak@cerner.com>
+Date: Thu, 21 May 2015 11:34:27 -0500
+Subject: [PATCH 068/115] CDK-976: DatasetKeyInputFormat/DatasetKeyOutputFormat setting job configuration before loading dataset
+
+---
+ .../data/mapreduce/DatasetKeyInputFormat.java      |    3 +++
+ .../data/mapreduce/DatasetKeyOutputFormat.java     |    3 +++
+ 2 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java
+index ded5695..492e354 100644
+--- a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java
++++ b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java
+@@ -34,6 +34,7 @@ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetException;
+ import org.kitesdk.data.Datasets;
++import org.kitesdk.data.spi.DefaultConfiguration;
+ import org.kitesdk.data.spi.PartitionKey;
+ import org.kitesdk.data.spi.PartitionedDataset;
+ import org.kitesdk.data.TypeNotFoundException;
+@@ -258,6 +259,8 @@ public class DatasetKeyInputFormat<E> extends InputFormat<E, Void>
+   @edu.umd.cs.findbugs.annotations.SuppressWarnings(value="UWF_FIELD_NOT_INITIALIZED_IN_CONSTRUCTOR",
+       justification="Delegate set by setConf")
+   public RecordReader<E, Void> createRecordReader(InputSplit inputSplit, TaskAttemptContext taskAttemptContext) throws IOException, InterruptedException {
++    Configuration conf = Hadoop.TaskAttemptContext.getConfiguration.invoke(taskAttemptContext);
++    DefaultConfiguration.set(conf);
+     return delegate.createRecordReader(inputSplit, taskAttemptContext);
+   }
+ 
+diff --git a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyOutputFormat.java b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyOutputFormat.java
+index dc03ef7..e5464ac 100644
+--- a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyOutputFormat.java
++++ b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyOutputFormat.java
+@@ -47,6 +47,7 @@ import org.kitesdk.data.spi.Constraints;
+ import org.kitesdk.data.spi.DataModelUtil;
+ import org.kitesdk.data.spi.DatasetRepositories;
+ import org.kitesdk.data.spi.DatasetRepository;
++import org.kitesdk.data.spi.DefaultConfiguration;
+ import org.kitesdk.data.spi.Mergeable;
+ import org.kitesdk.data.spi.PartitionKey;
+ import org.kitesdk.data.spi.Registration;
+@@ -499,6 +500,8 @@ public class DatasetKeyOutputFormat<E> extends OutputFormat<E, Void> {
+ 
+   @Override
+   public OutputCommitter getOutputCommitter(TaskAttemptContext taskAttemptContext) {
++    Configuration conf = Hadoop.TaskAttemptContext.getConfiguration.invoke(taskAttemptContext);
++    DefaultConfiguration.set(conf);
+     View<E> view = load(taskAttemptContext);
+     return usePerTaskAttemptDatasets(view) ?
+         new MergeOutputCommitter<E>() : new NullOutputCommitter();
+-- 
+1.7.0.4
+

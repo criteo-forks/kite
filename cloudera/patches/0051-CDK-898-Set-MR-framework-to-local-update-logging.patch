@@ -1,0 +1,137 @@
+From 00c2d2de05f8bf4ce9c146e6be0d36afcf450a5b Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 22 Apr 2015 10:39:28 -0700
+Subject: [PATCH 051/115] CDK-898: Set MR framework to local, update logging.
+
+If either the source or target is local, then this explicitly sets the
+MR framework to local to ensure that the job won't run on the cluster
+where data is not available. This also updates the logging configuration
+to show errors in the MR tasks to the caller.
+---
+ .../src/main/java/org/kitesdk/cli/Main.java        |    5 +++++
+ .../main/java/org/kitesdk/tools/TransformTask.java |    8 ++++----
+ .../src/main/resources/kite-cli-logging.properties |    6 +++++-
+ .../kitesdk/cli/commands/TestCSVImportCommand.java |    7 ++++---
+ 4 files changed, 18 insertions(+), 8 deletions(-)
+
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
+index f18dc12..6315f6b 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
+@@ -26,6 +26,7 @@ import com.google.common.io.Closeables;
+ import java.io.InputStream;
+ import java.util.Properties;
+ import java.util.Set;
++import org.apache.commons.logging.LogFactory;
+ import org.apache.hadoop.conf.Configurable;
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.conf.Configured;
+@@ -255,6 +256,10 @@ public class Main extends Configured implements Tool {
+     PropertyConfigurator.configure(
+         Main.class.getResource("/kite-cli-logging.properties"));
+     Logger console = LoggerFactory.getLogger(Main.class);
++    // use Log4j for any libraries using commons-logging
++    LogFactory.getFactory().setAttribute(
++        "org.apache.commons.logging.Log",
++        "org.apache.commons.logging.impl.Log4JLogger");
+     int rc = ToolRunner.run(new Configuration(), new Main(console), args);
+     System.exit(rc);
+   }
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
+index 147bc45..d11da1d 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
+@@ -18,11 +18,9 @@ package org.kitesdk.tools;
+ 
+ import com.google.common.base.Preconditions;
+ import com.google.common.collect.Iterables;
+-import com.google.common.io.Closeables;
+ import java.io.IOException;
+ import java.net.URI;
+ import org.apache.avro.generic.GenericRecord;
+-import org.apache.avro.mapreduce.AvroKeyInputFormat;
+ import org.apache.crunch.DoFn;
+ import org.apache.crunch.MapFn;
+ import org.apache.crunch.PCollection;
+@@ -30,7 +28,6 @@ import org.apache.crunch.Pipeline;
+ import org.apache.crunch.PipelineResult;
+ import org.apache.crunch.PipelineResult.StageResult;
+ import org.apache.crunch.Target;
+-import org.apache.crunch.impl.mem.MemPipeline;
+ import org.apache.crunch.impl.mr.MRPipeline;
+ import org.apache.crunch.types.PType;
+ import org.apache.crunch.types.avro.AvroType;
+@@ -40,7 +37,6 @@ import org.apache.hadoop.hive.conf.HiveConf;
+ import org.kitesdk.compat.DynMethods;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetException;
+-import org.kitesdk.data.DatasetWriter;
+ import org.kitesdk.data.View;
+ import org.kitesdk.data.crunch.CrunchDatasets;
+ 
+@@ -96,6 +92,10 @@ public class TransformTask<S, T> extends Configured {
+   }
+ 
+   public PipelineResult run() throws IOException {
++    if (isLocal(from.getDataset()) || isLocal(to.getDataset())) {
++      getConf().set("mapreduce.framework.name", "local");
++    }
++
+     PType<T> toPType = ptype(to);
+     MapFn<T, T> validate = new CheckEntityClass<T>(to.getType());
+ 
+diff --git a/kite-tools-parent/kite-tools/src/main/resources/kite-cli-logging.properties b/kite-tools-parent/kite-tools/src/main/resources/kite-cli-logging.properties
+index 493501d..1261899 100644
+--- a/kite-tools-parent/kite-tools/src/main/resources/kite-cli-logging.properties
++++ b/kite-tools-parent/kite-tools/src/main/resources/kite-cli-logging.properties
+@@ -36,7 +36,7 @@ log4j.appender.component=org.apache.log4j.varia.NullAppender
+ 
+ # Define the layout for component appender
+ log4j.appender.component.layout=org.apache.log4j.PatternLayout
+-log4j.appender.component.layout.ConversionPattern=%d{yyyy-MM-dd HH:mm:ss} %-5p :: %m%n
++log4j.appender.component.layout.ConversionPattern=%d{yyyy-MM-dd HH:mm:ss} %-5p :: %m [%C]%n
+ 
+ # silence native code warnings
+ log4j.logger.org.apache.hadoop.util.NativeCodeLoader=ERROR
+@@ -45,3 +45,7 @@ log4j.logger.org.apache.hadoop.util.NativeCodeLoader=ERROR
+ log4j.logger.org.kitesdk.data.filesystem=INFO
+ log4j.logger.org.kitesdk.data.hcatalog=INFO
+ log4j.logger.org.kitesdk.data.hbase=INFO
++
++# set up logging levels for MR
++log4j.logger.org.apache.hadoop.mapred.LocalJobRunner=WARN, console
++log4j.logger.org.apache.hadoop.mapreduce.Job=INFO, console
+diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCSVImportCommand.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCSVImportCommand.java
+index de7d89a..751bbbb 100644
+--- a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCSVImportCommand.java
++++ b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCSVImportCommand.java
+@@ -23,7 +23,6 @@ import java.io.BufferedWriter;
+ import java.io.File;
+ import java.util.Set;
+ import java.util.concurrent.Callable;
+-import org.apache.avro.AvroRuntimeException;
+ import org.apache.avro.Schema;
+ import org.apache.avro.generic.GenericData;
+ import org.apache.avro.generic.GenericRecordBuilder;
+@@ -36,14 +35,16 @@ import org.junit.Test;
+ import org.kitesdk.cli.TestUtil;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetNotFoundException;
+-import org.kitesdk.data.DatasetRecordException;
+ import org.kitesdk.data.Datasets;
+ import org.kitesdk.data.TestHelpers;
+ import org.kitesdk.data.URIBuilder;
+ import org.kitesdk.data.spi.filesystem.DatasetTestUtilities;
+ import org.slf4j.Logger;
+ 
+-import static org.mockito.Mockito.*;
++import static org.mockito.Mockito.contains;
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoMoreInteractions;
+ 
+ public class TestCSVImportCommand {
+ 
+-- 
+1.7.0.4
+

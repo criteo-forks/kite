@@ -1,0 +1,27 @@
+From 252ce7a07f85d48b675ece6f0f0e5714cb5388fc Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Tue, 24 Feb 2015 16:14:52 -0800
+Subject: [PATCH 002/115] CLOUDERA-BUILD. Remove kite-data-flume.
+
+This is not needed in CDH.
+---
+ kite-data/pom.xml |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/kite-data/pom.xml b/kite-data/pom.xml
+index a400ede..08a7e05 100644
+--- a/kite-data/pom.xml
++++ b/kite-data/pom.xml
+@@ -26,7 +26,9 @@
+     <module>kite-data-core</module>
+     <module>kite-data-hive</module>
+     <module>kite-data-crunch</module>
++    <!-- Avoid circular dependency. CDH-14681
+     <module>kite-data-flume</module>
++    -->
+     <module>kite-data-hbase</module>
+     <module>kite-data-mapreduce</module>
+     <module>kite-data-spark</module>
+-- 
+1.7.0.4
+

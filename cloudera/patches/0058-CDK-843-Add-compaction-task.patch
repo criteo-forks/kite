@@ -1,0 +1,285 @@
+From 6e8c573ae5027d1525e3d3a156ba5e7b4be558f7 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 22 Apr 2015 18:11:02 -0700
+Subject: [PATCH 058/115] CDK-843: Add compaction task.
+
+---
+ .../src/main/java/org/kitesdk/cli/Main.java        |    2 +
+ .../kitesdk/cli/commands/BaseDatasetCommand.java   |   27 ++++++
+ .../org/kitesdk/cli/commands/CompactCommand.java   |   85 ++++++++++++++++++++
+ .../org/kitesdk/cli/commands/DeleteCommand.java    |   28 -------
+ .../java/org/kitesdk/tools/CompactionTask.java     |   75 +++++++++++++++++
+ 5 files changed, 189 insertions(+), 28 deletions(-)
+ create mode 100644 kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CompactCommand.java
+ create mode 100644 kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/CompactionTask.java
+
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
+index 6315f6b..c88ecce 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
+@@ -36,6 +36,7 @@ import org.apache.log4j.Level;
+ import org.apache.log4j.PropertyConfigurator;
+ import org.kitesdk.cli.commands.CSVImportCommand;
+ import org.kitesdk.cli.commands.CSVSchemaCommand;
++import org.kitesdk.cli.commands.CompactCommand;
+ import org.kitesdk.cli.commands.CopyCommand;
+ import org.kitesdk.cli.commands.CreateColumnMappingCommand;
+ import org.kitesdk.cli.commands.CreateDatasetCommand;
+@@ -98,6 +99,7 @@ public class Main extends Configured implements Tool {
+     jc.addCommand("create", new CreateDatasetCommand(console));
+     jc.addCommand("copy", new CopyCommand(console));
+     jc.addCommand("transform", new TransformCommand(console));
++    jc.addCommand("compact", new CompactCommand(console));
+     jc.addCommand("update", new UpdateDatasetCommand(console));
+     jc.addCommand("delete", new DeleteCommand(console));
+     jc.addCommand("schema", new SchemaCommand(console));
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/BaseDatasetCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/BaseDatasetCommand.java
+index 22d6d49..854ac0e 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/BaseDatasetCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/BaseDatasetCommand.java
+@@ -153,4 +153,31 @@ abstract class BaseDatasetCommand extends BaseCommand {
+     return new URIBuilder(buildRepoURI(), namespace, uriOrName).build().toString();
+   }
+ 
++  /**
++   * Verify that a view matches the URI that loaded it without extra options.
++   * <p>
++   * This is used to prevent mis-interpreted URIs from succeeding. For example,
++   * the URI: view:file:./table?year=2014&month=3&dy=14 resolves a view for
++   * all of March 2014 because "dy" wasn't recognized as "day" and was ignored.
++   * This works by verifying that all of the options are accounted for in the
++   * final view and would fail the above because "dy" is not in the view's
++   * options.
++   *
++   * @param view a View's URI
++   * @param requested the requested View URI
++   * @return true if the view's URI and the requested URI match exactly
++   */
++  @VisibleForTesting
++  static boolean viewMatches(URI view, String requested) {
++    // test that the requested options are a subset of the final options
++    Map<String, String> requestedOptions = optionsForUri(URI.create(requested));
++    Map<String, String> finalOptions = optionsForUri(view);
++    for (Map.Entry<String, String> entry : requestedOptions.entrySet()) {
++      if (!finalOptions.containsKey(entry.getKey()) ||
++          !finalOptions.get(entry.getKey()).equals(entry.getValue())) {
++        return false;
++      }
++    }
++    return true;
++  }
+ }
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CompactCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CompactCommand.java
+new file mode 100644
+index 0000000..9d92f6f
+--- /dev/null
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CompactCommand.java
+@@ -0,0 +1,85 @@
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.kitesdk.cli.commands;
++
++import com.beust.jcommander.Parameter;
++import com.beust.jcommander.Parameters;
++import com.google.common.base.Preconditions;
++import com.google.common.collect.Lists;
++import java.io.IOException;
++import java.util.List;
++import org.apache.crunch.PipelineResult;
++import org.kitesdk.data.View;
++import org.kitesdk.tools.CompactionTask;
++import org.slf4j.Logger;
++
++import static org.apache.avro.generic.GenericData.Record;
++
++@Parameters(commandDescription="Compact all or part of a dataset")
++public class CompactCommand extends BaseDatasetCommand {
++
++  public CompactCommand(Logger console) {
++    super(console);
++  }
++
++  @Parameter(description="<dataset-or-view>")
++  List<String> datasets;
++
++  @Parameter(names={"--num-writers"},
++      description="The number of writer processes to use")
++  int numWriters = -1;
++
++  @Override
++  public int run() throws IOException {
++    Preconditions.checkArgument(datasets.size() == 1,
++        "Cannot compact multiple datasets");
++
++    String uriOrName = datasets.get(0);
++    View<Record> view = load(uriOrName, Record.class);
++
++    if (isDatasetOrViewUri(uriOrName)) {
++      Preconditions.checkArgument(viewMatches(view.getUri(), uriOrName),
++          "Resolved view does not match requested view: " + view.getUri());
++    }
++
++    CompactionTask task = new CompactionTask<Record>(view);
++
++    task.setConf(getConf());
++
++    if (numWriters >= 0) {
++      task.setNumWriters(numWriters);
++    }
++
++    PipelineResult result = task.run();
++
++    if (result.succeeded()) {
++      console.info("Compacted {} records in \"{}\"",
++          task.getCount(), uriOrName);
++      return 0;
++    } else {
++      return 1;
++    }
++  }
++
++  @Override
++  public List<String> getExamples() {
++    return Lists.newArrayList(
++        "# Compact the contents of movies",
++        "movies"
++    );
++  }
++}
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/DeleteCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/DeleteCommand.java
+index 7eb0912..5bf3760 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/DeleteCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/DeleteCommand.java
+@@ -64,34 +64,6 @@ public class DeleteCommand extends BaseDatasetCommand {
+     return 0;
+   }
+ 
+-  /**
+-   * Verify that a view matches the URI that loaded it without extra options.
+-   * <p>
+-   * This is used to prevent mis-interpreted URIs from succeeding. For example,
+-   * the URI: view:file:./table?year=2014&month=3&dy=14 resolves a view for
+-   * all of March 2014 because "dy" wasn't recognized as "day" and was ignored.
+-   * This works by verifying that all of the options are accounted for in the
+-   * final view and would fail the above because "dy" is not in the view's
+-   * options.
+-   *
+-   * @param view a View's URI
+-   * @param requested the requested View URI
+-   * @return true if the view's URI and the requested URI match exactly
+-   */
+-  @VisibleForTesting
+-  static boolean viewMatches(URI view, String requested) {
+-    // test that the requested options are a subset of the final options
+-    Map<String, String> requestedOptions = optionsForUri(URI.create(requested));
+-    Map<String, String> finalOptions = optionsForUri(view);
+-    for (Map.Entry<String, String> entry : requestedOptions.entrySet()) {
+-      if (!finalOptions.containsKey(entry.getKey()) ||
+-          !finalOptions.get(entry.getKey()).equals(entry.getValue())) {
+-        return false;
+-      }
+-    }
+-    return true;
+-  }
+-
+   @Override
+   public List<String> getExamples() {
+     return Lists.newArrayList(
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/CompactionTask.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/CompactionTask.java
+new file mode 100644
+index 0000000..ed646be
+--- /dev/null
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/CompactionTask.java
+@@ -0,0 +1,75 @@
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.kitesdk.tools;
++
++import com.google.common.base.Preconditions;
++import java.io.IOException;
++import org.apache.crunch.PipelineResult;
++import org.apache.crunch.Target;
++import org.apache.hadoop.conf.Configurable;
++import org.apache.hadoop.conf.Configuration;
++import org.kitesdk.data.Dataset;
++import org.kitesdk.data.View;
++import org.kitesdk.data.spi.Replaceable;
++
++/**
++ * @since 1.1.0
++ */
++public class CompactionTask<T> implements Configurable {
++
++  private final CopyTask<T> task;
++
++  public CompactionTask(View<T> view) {
++    checkCompactable(view);
++    this.task = new CopyTask<T>(view, view);
++    task.setWriteMode(Target.WriteMode.OVERWRITE);
++  }
++
++  public long getCount() {
++    return task.getCount();
++  }
++
++  public CompactionTask setNumWriters(int numWriters) {
++    task.setNumWriters(numWriters);
++    return this;
++  }
++
++  public PipelineResult run() throws IOException {
++    return task.run();
++  }
++
++  @Override
++  public void setConf(Configuration configuration) {
++    task.setConf(configuration);
++  }
++
++  @Override
++  public Configuration getConf() {
++    return task.getConf();
++  }
++
++  @SuppressWarnings("unchecked")
++  private void checkCompactable(View<T> view) {
++    Dataset<T> dataset = view.getDataset();
++    if (!(dataset instanceof Replaceable)) {
++      throw new IllegalArgumentException("Cannot compact dataset: " + dataset);
++    }
++    Replaceable<View<T>> replaceable = ((Replaceable<View<T>>) dataset);
++    Preconditions.checkArgument(replaceable.canReplace(view),
++        "Cannot compact view: " + view);
++  }
++}
+-- 
+1.7.0.4
+

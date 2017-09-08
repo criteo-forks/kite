@@ -155,24 +155,6 @@ public class MorphlineTest extends AbstractMorphlineTest {
   }
   
   @Test
-  public void testParseInclude() throws Exception {
-    morphline = createMorphline("test-morphlines/parseInclude");  
-    Record input = new Record();
-    Record expected = new Record();
-    expected.put("result",  "bar");
-    processAndVerifySuccess(input, expected);
-  }
-  
-  @Test
-  public void testParseIncludeConstants() throws Exception {
-    morphline = createMorphline("test-morphlines/parseIncludeConstants");  
-    Record input = new Record();
-    Record expected = new Record();
-    expected.put("myField",  "foo");
-    processAndVerifySuccess(input, expected);
-  }
-  
-  @Test
   public void testParseVariables() throws Exception {
     System.setProperty("ENV_ZK_HOST", "zk.foo.com:2181/solr");
     System.setProperty("ENV_SOLR_URL", "http://foo.com:8983/solr/myCollection");
@@ -1963,12 +1945,10 @@ public class MorphlineTest extends AbstractMorphlineTest {
     record.put(Fields.TIMESTAMP, "2011-09-06T14:14:34.789Z");
     record.put(Fields.TIMESTAMP, "2012-09-06T14:14:34"); 
     record.put(Fields.TIMESTAMP, "2013-09-06");
-    record.put(Fields.TIMESTAMP, "Wednesday, 31-Dec-14 08:00:00 +0600");    
     Record expected = new Record();
     expected.put(Fields.TIMESTAMP, "2011-09-06T14:14:34.789Z");
     expected.put(Fields.TIMESTAMP, "2012-09-06T14:14:34.000Z");
     expected.put(Fields.TIMESTAMP, "2013-09-06T00:00:00.000Z");
-    expected.put(Fields.TIMESTAMP, "2014-12-31T02:00:00.000Z");
     processAndVerifySuccess(record, expected);
   }
   

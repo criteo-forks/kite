@@ -1,0 +1,125 @@
+From 22848ca06ac5d43f14da64215e8a6620e7c0a113 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 27 May 2015 18:51:44 -0700
+Subject: [PATCH 069/115] CDK-976: Fix test failures caused by default conf changes.
+
+The default conf needs to be set in MR tasks, but always setting the
+configuration in InputFormat and OutputFormat messages isn't correct
+because the methods aren't necessarily called in a new process. Using
+those methods within a test process, for example, broke several CLI
+tests because the DefaultConfiguration is shared.
+
+This fixes the problem by adding an init method to DefaultConfiguration
+that will set the default conf if it has not already been set. The set
+method will always set the conf and prevents init from setting it later.
+---
+ .../org/kitesdk/data/spi/DefaultConfiguration.java |   16 ++++++++++++++--
+ .../data/mapreduce/DatasetKeyInputFormat.java      |    2 +-
+ .../data/mapreduce/DatasetKeyOutputFormat.java     |    2 +-
+ .../kitesdk/data/mapreduce/FileSystemTestBase.java |   15 +++++++++++++++
+ 4 files changed, 31 insertions(+), 4 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DefaultConfiguration.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DefaultConfiguration.java
+index 4de3f29..e43a6b0 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DefaultConfiguration.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DefaultConfiguration.java
+@@ -34,6 +34,7 @@ import org.apache.hadoop.fs.Path;
+ public class DefaultConfiguration {
+ 
+   // initialize the default configuration from the environment
++  private static boolean initDone = false;
+   private static Configuration conf;
+ 
+   static{
+@@ -57,14 +58,25 @@ public class DefaultConfiguration {
+    * @return A {@code Configuration} based on the environment or set by
+    *          {@link #set(Configuration)}
+    */
+-  public static Configuration get() {
++  public static synchronized Configuration get() {
+     return new Configuration(conf);
+   }
+ 
+   /**
+    * Set the default Hadoop {@link Configuration}.
+    */
+-  public static void set(Configuration conf) {
++  public static synchronized void set(Configuration conf) {
+     DefaultConfiguration.conf = conf;
++    DefaultConfiguration.initDone = true;
++  }
++
++  /**
++   * Initialize the default Hadoop {@link Configuration} if it has not been set.
++   */
++  public static synchronized void init(Configuration conf) {
++    if (!initDone) {
++      DefaultConfiguration.conf = conf;
++      DefaultConfiguration.initDone = true;
++    }
+   }
+ }
+diff --git a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java
+index 492e354..aca03e4 100644
+--- a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java
++++ b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java
+@@ -260,7 +260,7 @@ public class DatasetKeyInputFormat<E> extends InputFormat<E, Void>
+       justification="Delegate set by setConf")
+   public RecordReader<E, Void> createRecordReader(InputSplit inputSplit, TaskAttemptContext taskAttemptContext) throws IOException, InterruptedException {
+     Configuration conf = Hadoop.TaskAttemptContext.getConfiguration.invoke(taskAttemptContext);
+-    DefaultConfiguration.set(conf);
++    DefaultConfiguration.init(conf);
+     return delegate.createRecordReader(inputSplit, taskAttemptContext);
+   }
+ 
+diff --git a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyOutputFormat.java b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyOutputFormat.java
+index e5464ac..ade5052 100644
+--- a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyOutputFormat.java
++++ b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyOutputFormat.java
+@@ -501,7 +501,7 @@ public class DatasetKeyOutputFormat<E> extends OutputFormat<E, Void> {
+   @Override
+   public OutputCommitter getOutputCommitter(TaskAttemptContext taskAttemptContext) {
+     Configuration conf = Hadoop.TaskAttemptContext.getConfiguration.invoke(taskAttemptContext);
+-    DefaultConfiguration.set(conf);
++    DefaultConfiguration.init(conf);
+     View<E> view = load(taskAttemptContext);
+     return usePerTaskAttemptDatasets(view) ?
+         new MergeOutputCommitter<E>() : new NullOutputCommitter();
+diff --git a/kite-data/kite-data-mapreduce/src/test/java/org/kitesdk/data/mapreduce/FileSystemTestBase.java b/kite-data/kite-data-mapreduce/src/test/java/org/kitesdk/data/mapreduce/FileSystemTestBase.java
+index 35db6f0..09195a1 100644
+--- a/kite-data/kite-data-mapreduce/src/test/java/org/kitesdk/data/mapreduce/FileSystemTestBase.java
++++ b/kite-data/kite-data-mapreduce/src/test/java/org/kitesdk/data/mapreduce/FileSystemTestBase.java
+@@ -25,15 +25,30 @@ import org.apache.avro.generic.GenericRecordBuilder;
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.fs.FileSystem;
+ import org.apache.hadoop.fs.Path;
++import org.junit.AfterClass;
+ import org.junit.Before;
++import org.junit.BeforeClass;
+ import org.junit.runners.Parameterized;
+ import org.kitesdk.data.Format;
+ import org.kitesdk.data.Formats;
+ import org.kitesdk.data.spi.DatasetRepository;
++import org.kitesdk.data.spi.DefaultConfiguration;
+ import org.kitesdk.data.spi.filesystem.FileSystemDatasetRepository;
+ 
+ public class FileSystemTestBase {
+ 
++  private static Configuration original = null;
++
++  @BeforeClass
++  public static void saveDefaultConfiguration() {
++    original = DefaultConfiguration.get();
++  }
++
++  @AfterClass
++  public static void restoreDefaultConfiguration() {
++    DefaultConfiguration.set(original);
++  }
++
+   public FileSystemTestBase(Format format) {
+     this.format = format;
+   }
+-- 
+1.7.0.4
+

@@ -317,8 +317,7 @@ public class HiveService implements Service {
       TProcessor processor;
       TTransportFactory transFactory;
 
-      IHMSHandler handler = (IHMSHandler) HiveMetaStore
-          .newRetryingHMSHandler("new db based metaserver", conf, true);
+      IHMSHandler handler = (IHMSHandler) HiveMetaStore.newRetryingHMSHandler("new db based metaserver", conf, true);
 
       if (conf.getBoolVar(HiveConf.ConfVars.METASTORE_EXECUTE_SET_UGI)) {
         transFactory = useFramedTransport ?

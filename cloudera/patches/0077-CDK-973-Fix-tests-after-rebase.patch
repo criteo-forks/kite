@@ -1,0 +1,59 @@
+From 11a0b3b674876f34ff3649524f937262a0d02d4b Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 10 Jun 2015 16:01:49 -0700
+Subject: [PATCH 077/115] CDK-973: Fix tests after rebase.
+
+The copy command tests were writing to 5 partitions but expecting 6
+files. This was caused by the writer cache getting rid of one of the
+writers before finishing. The solution is to set the writer cache size
+when creating the dataset to avoid inconsistent behavior.
+---
+ .../kitesdk/cli/commands/CreateDatasetCommand.java |    3 ++-
+ ...yCommandClusterChangedNameWithPartitioning.java |    6 ++++--
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CreateDatasetCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CreateDatasetCommand.java
+index 9db699b..b609965 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CreateDatasetCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CreateDatasetCommand.java
+@@ -21,6 +21,7 @@ import com.beust.jcommander.Parameters;
+ import com.google.common.collect.Lists;
+ import java.io.IOException;
+ import java.net.URI;
++import java.util.HashMap;
+ import java.util.List;
+ import java.util.Map;
+ import org.apache.avro.Schema;
+@@ -71,7 +72,7 @@ public class CreateDatasetCommand extends BaseDatasetCommand {
+ 
+   @DynamicParameter(names = {"--set", "--property"},
+       description = "Add a property pair: prop.name=value")
+-  Map<String, String> properties;
++  Map<String, String> properties = new HashMap<String, String>();
+ 
+   public CreateDatasetCommand(Logger console) {
+     super(console);
+diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterChangedNameWithPartitioning.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterChangedNameWithPartitioning.java
+index e6310b1..cda965c 100644
+--- a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterChangedNameWithPartitioning.java
++++ b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterChangedNameWithPartitioning.java
+@@ -52,12 +52,14 @@ public class TestCopyCommandClusterChangedNameWithPartitioning extends TestCopyC
+     psOut.write(partitionStrategy.toString(true).getBytes());
+     psOut.close();
+ 
+-    return ImmutableList.of("-p", partitionStrategyJson);
++    return ImmutableList.of(
++        "-p", partitionStrategyJson,
++        "--set", "kite.writer.cache-size=20");
+   }
+ 
+   @Override
+   public void testCopyWithoutCompaction() throws Exception {
+-    testCopyWithoutCompaction(6);
++    testCopyWithoutCompaction(5);
+   }
+ 
+   @Override
+-- 
+1.7.0.4
+

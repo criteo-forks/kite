@@ -106,7 +106,7 @@ public class JSONImportCommand extends BaseDatasetCommand {
     TemporaryFileSystemDatasetRepository repo =
         new TemporaryFileSystemDatasetRepository(getConf(),
             // ensure the same FS as the file source is used
-            sourceFS.makeQualified(new Path("/tmp/" + UUID.randomUUID().toString())),
+            sourceFS.makeQualified(new Path("/tmp")),
             target.getDataset().getNamespace(),
             UUID.randomUUID().toString());
 

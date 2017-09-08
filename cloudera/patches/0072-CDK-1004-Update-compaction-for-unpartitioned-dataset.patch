@@ -1,0 +1,218 @@
+From 20f824638cdc2672b130b07febb421a79b7dac31 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 27 May 2015 17:24:57 -0700
+Subject: [PATCH 072/115] CDK-1004: Update compaction for unpartitioned datasets.
+
+---
+ .../data/spi/filesystem/FileSystemDataset.java     |   86 +++++++++++---------
+ .../spi/filesystem/TestPartitionReplacement.java   |   65 ++++++++++++++-
+ 2 files changed, 110 insertions(+), 41 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+index 0760587..7acce63 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+@@ -16,7 +16,9 @@
+ package org.kitesdk.data.spi.filesystem;
+ 
+ import java.util.Iterator;
++import com.google.common.collect.Iterables;
+ import org.apache.hadoop.mapreduce.InputFormat;
++import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetIOException;
+ import org.kitesdk.data.Signalable;
+@@ -380,10 +382,7 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+ 
+   @Override
+   public boolean canReplace(View<E> part) {
+-    if (!descriptor.isPartitioned()) {
+-      // don't attempt to replace the root directory
+-      return false;
+-    } else if (part instanceof FileSystemView) {
++    if (part instanceof FileSystemView) {
+       return equals(part.getDataset()) &&
+           ((FileSystemView) part).getConstraints().alignedWithBoundaries();
+     } else if (part instanceof FileSystemDataset) {
+@@ -399,45 +398,56 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+     // check that the dataset's descriptor can read the update
+     Compatibility.checkCompatible(updateDescriptor, descriptor);
+ 
+-    // replace leaf partitions one at a time
+-    for (PartitionView<E> src : update.getCoveringPartitions()) {
+-      if (src instanceof FileSystemPartitionView) {
+-        FileSystemPartitionView<E> dest = getPartitionView(
+-            ((FileSystemPartitionView<E>) src).getRelativeLocation());
+-
+-        // The destination partition view may not exist, if the source data was
+-        // stored in directories with non-standard names. To account for this,
+-        // find all of the directories that should be removed: those that match
+-        // the partition constraints.
+-        List<Path> removals = Lists.newArrayList();
+-        Iterable<PartitionView<E>> existingPartitions = dest
+-            .toConstraintsView()
+-            .getCoveringPartitions();
+-        for (PartitionView<E> partition : existingPartitions) {
+-          FileSystemPartitionView<E> toRemove =
+-              (FileSystemPartitionView<E>) partition;
+-          Path path = new Path(toRemove.getLocation());
+-          removals.add(path);
+-          if (partitionListener != null && descriptor.isPartitioned()) {
+-            partitionListener.partitionDeleted(
+-                namespace, name, toRemove.getRelativeLocation().toString());
++    if (descriptor.isPartitioned()) {
++      // replace leaf partitions one at a time
++      for (PartitionView<E> src : update.getCoveringPartitions()) {
++        if (src instanceof FileSystemPartitionView) {
++          FileSystemPartitionView<E> dest = getPartitionView(
++              ((FileSystemPartitionView<E>) src).getRelativeLocation());
++
++          // The destination partition view may not exist, if the source data was
++          // stored in directories with non-standard names. To account for this,
++          // find all of the directories that should be removed: those that match
++          // the partition constraints.
++          List<Path> removals = Lists.newArrayList();
++          Iterable<PartitionView<E>> existingPartitions = dest
++              .toConstraintsView()
++              .getCoveringPartitions();
++          for (PartitionView<E> partition : existingPartitions) {
++            FileSystemPartitionView<E> toRemove =
++                (FileSystemPartitionView<E>) partition;
++            Path path = new Path(toRemove.getLocation());
++            removals.add(path);
++            if (partitionListener != null && descriptor.isPartitioned()) {
++              partitionListener.partitionDeleted(
++                  namespace, name, toRemove.getRelativeLocation().toString());
++            }
+           }
+-        }
+ 
+-        // replace the directory all at once
+-        FileSystemUtil.replace(fileSystem, directory,
+-            new Path(dest.getLocation()), new Path(src.getLocation()),
+-            removals);
++          // replace the directory all at once
++          FileSystemUtil.replace(fileSystem, directory,
++              new Path(dest.getLocation()), new Path(src.getLocation()),
++              removals);
+ 
+-        if (partitionListener != null && descriptor.isPartitioned()) {
+-          partitionListener.partitionAdded(
+-              namespace, name, dest.getRelativeLocation().toString());
+-        }
++          if (partitionListener != null && descriptor.isPartitioned()) {
++            partitionListener.partitionAdded(
++                namespace, name, dest.getRelativeLocation().toString());
++          }
+ 
+-      } else {
+-        throw new IllegalArgumentException(
+-            "Incompatible PartitionView: " + src.getClass().getName());
++        } else {
++          throw new IllegalArgumentException(
++              "Incompatible PartitionView: " + src.getClass().getName());
++        }
+       }
++    } else {
++      // stage data in the dataset, remove existing data, then finish the move
++      PartitionView<E> srcPartition = Iterables.getOnlyElement(
++          update.getCoveringPartitions());
++      List<Pair<Path, Path>> staged = FileSystemUtil.stageMove(fileSystem,
++          new Path(srcPartition.getLocation()), new Path(unbounded.getLocation()),
++          "replace" /* data should replace to recover from a failure */ );
++      deleteAll(); // remove all existing files
++      FileSystemUtil.finishMove(fileSystem, staged);
+     }
+   }
+ 
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestPartitionReplacement.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestPartitionReplacement.java
+index c1367d1..a741c66 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestPartitionReplacement.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestPartitionReplacement.java
+@@ -20,6 +20,7 @@ import com.google.common.base.Function;
+ import com.google.common.collect.Iterators;
+ import com.google.common.collect.Sets;
+ import java.io.IOException;
++import java.net.URI;
+ import java.util.Iterator;
+ import java.util.Set;
+ import org.apache.hadoop.fs.FileSystem;
+@@ -86,14 +87,72 @@ public class TestPartitionReplacement {
+ 
+   @Test
+   public void testUnpartitionedReplace() {
+-    Assert.assertFalse("Should not allow replacing an unpartitioned dataset",
++    // recreate temporary without a partition strategy
++    Datasets.delete("dataset:file:/tmp/datasets/temporary");
++    DatasetDescriptor descriptor = new DatasetDescriptor
++        .Builder(unpartitioned.getDescriptor())
++        .location((URI) null) // clear the location
++        .build();
++    temporary = Datasets.create("dataset:file:/tmp/datasets/temporary",
++        descriptor, TestRecord.class);
++
++    Assert.assertTrue("Should allow replacing an unpartitioned dataset",
+         unpartitioned.canReplace(unpartitioned));
++
++    // make sure there are multiple files
++    writeTestRecords(unpartitioned);
++    writeTestRecords(unpartitioned);
++    writeTestRecords(temporary);
++    writeTestRecords(temporary);
++
++    Set<String> originalFiles = Sets.newHashSet(
++        Iterators.transform(unpartitioned.pathIterator(), new GetFilename()));
++    Set<String> replacementFiles = Sets.newHashSet(
++        Iterators.transform(temporary.pathIterator(), new GetFilename()));
++
++    Iterators.transform(temporary.pathIterator(), new GetFilename());
++    Assert.assertFalse("Sanity check", originalFiles.equals(replacementFiles));
++
++    unpartitioned.replace(temporary);
++
++    Set<String> replacedFiles = Sets.newHashSet(
++        Iterators.transform(unpartitioned.pathIterator(), new GetFilename()));
++    Assert.assertEquals("Should contain the replacement files",
++        replacementFiles, replacedFiles);
++  }
++
++  @Test
++  public void testUnpartitionedReplaceDifferentStrategy() {
++    final FileSystemPartitionView<TestRecord> partition0 = partitioned
++        .getPartitionView(new Path("id_hash=0"));
++
++    Assert.assertFalse("Should not allow replacement with a different strategy",
++        unpartitioned.canReplace(partitioned));
++    Assert.assertFalse("Should not allow replacement with a different strategy",
++        unpartitioned.canReplace(partition0));
++
++    TestHelpers.assertThrows(
++        "Should not allow replacement with a different partition strategy",
++        ValidationException.class, new Runnable() {
++          @Override
++          public void run() {
++            unpartitioned.replace(partitioned);
++          }
++        });
++    TestHelpers.assertThrows(
++        "Should not allow replacement with a different partition strategy",
++        ValidationException.class, new Runnable() {
++          @Override
++          public void run() {
++            unpartitioned.replace(partition0);
++          }
++        });
+   }
+ 
+   @Test
+   public void testReplaceWithDifferentStrategy() {
+-    Assert.assertTrue("Should allow replacing a whole dataset",
+-        partitioned.canReplace(partitioned));
++    Assert.assertFalse("Should not allow replacement with a different strategy",
++        partitioned.canReplace(unpartitioned));
+ 
+     TestHelpers.assertThrows(
+         "Should not allow replacement with a different partition strategy",
+-- 
+1.7.0.4
+

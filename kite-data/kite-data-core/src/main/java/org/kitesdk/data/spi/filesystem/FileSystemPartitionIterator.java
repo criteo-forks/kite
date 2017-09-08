@@ -46,10 +46,6 @@ class FileSystemPartitionIterator implements
   private final FileSystem fs;
   private final Path rootDirectory;
   private final Iterator<StorageKey> iterator;
-  private final PartitionStrategy strategy;
-  private final Schema schema;
-  private final Predicate<StorageKey> predicate;
-  private final MakePartialKey makeKey;
 
   class FileSystemIterator extends MultiLevelIterator<String> {
     public FileSystemIterator(int depth) throws IOException {
@@ -66,28 +62,15 @@ class FileSystemPartitionIterator implements
         dir = new Path(dir, current.get(i));
       }
 
-      StorageKey key = makeKey.apply(dir);
-      boolean applies = true;
-      //if the key doesn't have any values then do not apply the predicate and assume it is ok.  The official
-      //predicate applied on the full path will exclude the details.
-      if(key.size() > 0){
-        applies = predicate.apply(key);
-      }else{
-        LOG.debug("Not applying predicate proactively because path {} does not have any key values.", dir);
-      }
-      if(applies) {
-        try {
-          for (FileStatus stat : fs.listStatus(dir, PathFilters.notHidden())) {
-            if (stat.isDir()) {
-              // TODO: add a check here for range.couldContain(Marker)
-              dirs.add(stat.getPath().getName());
-            }
+      try {
+        for (FileStatus stat : fs.listStatus(dir, PathFilters.notHidden())) {
+          if (stat.isDir()) {
+            // TODO: add a check here for range.couldContain(Marker)
+            dirs.add(stat.getPath().getName());
           }
-        } catch (IOException ex) {
-          throw new DatasetException("Cannot list directory:" + dir, ex);
         }
-      }else{
-        LOG.debug("Skipping exploring {} path as it did not match the predicate {}", dir, predicate);
+      } catch (IOException ex) {
+        throw new DatasetException("Cannot list directory:" + dir, ex);
       }
 
       return dirs;
@@ -114,37 +97,6 @@ class FileSystemPartitionIterator implements
     public StorageKey apply(List<String> dirs) {
       return reusableKey.reuseFor(dirs, convert);
     }
-
-    public StorageKey apply(Path path) {
-      return reusableKey.reuseFor(path, convert);
-    }
-  }
-
-  /**
-   * Function that will create a {@link StorageKey} based on the values available instead
-   * of requiring the entire path to create a key.
-   */
-  private static class MakePartialKey implements Function<List<String>, StorageKey> {
-    private final StorageKey reusableKey;
-    private final PathConversion convert;
-
-    public MakePartialKey(Path rootPath, PartitionStrategy strategy, Schema schema) {
-      this.reusableKey = new StorageKey(strategy);
-      this.convert = new PartialPathConversion(rootPath, schema);
-    }
-
-    @Override
-    @SuppressWarnings("unchecked")
-    @edu.umd.cs.findbugs.annotations.SuppressWarnings(
-            value="NP_PARAMETER_MUST_BE_NONNULL_BUT_MARKED_AS_NULLABLE",
-            justification="Non-null @Nullable parameter inherited from Function")
-    public StorageKey apply(List<String> dirs) {
-      return reusableKey.reuseFor(dirs, convert);
-    }
-
-    public StorageKey apply(Path path) {
-      return reusableKey.reuseFor(path, convert);
-    }
   }
 
   @SuppressWarnings("deprecation")
@@ -154,16 +106,12 @@ class FileSystemPartitionIterator implements
       throws IOException {
     Preconditions.checkArgument(fs.isDirectory(root));
     this.fs = fs;
-    this.strategy = strategy;
-    this.schema = schema;
-    this.predicate = predicate;
-
     this.rootDirectory = root;
-    this.makeKey = new MakePartialKey(rootDirectory, strategy, schema);
     this.iterator = Iterators.filter(
         Iterators.transform(
             new FileSystemIterator(
-                Accessor.getDefault().getFieldPartitioners(strategy).size()), new MakeKey(strategy, schema)),
+                Accessor.getDefault().getFieldPartitioners(strategy).size()),
+            new MakeKey(strategy, schema)),
         predicate);
   }
 

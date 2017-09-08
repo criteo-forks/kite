@@ -1,0 +1,30 @@
+From 020000718869dd79562a7c6481fe3475d1d03f94 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 16 Sep 2015 13:47:17 -0700
+Subject: [PATCH 109/115] KITE-1073: Remove work-around setting default FS in CLI.
+
+This removes the work-around added for KITE-898, where job submission
+was failing when importing local-to-HDFS unless the default FS was
+local. This is no longer needed and is causing a different failure.
+---
+ .../main/java/org/kitesdk/tools/TransformTask.java |    4 ----
+ 1 files changed, 0 insertions(+), 4 deletions(-)
+
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
+index 8da5326..bc88fdc 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
+@@ -148,10 +148,6 @@ public class TransformTask<S, T> extends Configured {
+       // copy to avoid making changes to the caller's configuration
+       Configuration conf = new Configuration(getConf());
+       conf.set("mapreduce.framework.name", "local");
+-      // replace the default FS for Crunch to avoid distributed cache errors.
+-      // this doesn't affect the source or target, they are fully-qualified.
+-      conf.set("fs.defaultFS", "file:/");
+-      conf.set("fs.default.name", "file:/");
+       setConf(conf);
+     }
+ 
+-- 
+1.7.0.4
+

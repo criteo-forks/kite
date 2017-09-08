@@ -1,0 +1,485 @@
+From b7ef72f4f9a759c8cff32eb468d179dcfb8f49fe Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 25 Mar 2015 10:26:29 -0700
+Subject: [PATCH 035/115] CDK-902: Merge wrap command into create.
+
+Wrap is almost identical to create, but fills in missing values when
+there is existing data. Rather than have two commands, this adds the
+inference for schemas, partition strategies, and formats to create.
+
+This also ensures that any datasets created with the CLI are valid for
+any existing data.
+---
+ .../data/spi/filesystem/FileSystemUtil.java        |   17 ++-
+ .../src/main/java/org/kitesdk/cli/Main.java        |    2 -
+ .../kitesdk/cli/commands/CreateDatasetCommand.java |  153 ++++++++++++++----
+ .../kitesdk/cli/commands/WrapDatasetCommand.java   |  170 --------------------
+ .../commands/TestLog4jConfigurationCommand.java    |    2 +-
+ 5 files changed, 139 insertions(+), 205 deletions(-)
+ delete mode 100644 kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/WrapDatasetCommand.java
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
+index db418a9..01367e2 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
+@@ -124,10 +124,18 @@ public class FileSystemUtil {
+   }
+ 
+   public static Schema schema(String name, FileSystem fs, Path location) throws IOException {
++    if (!fs.exists(location)) {
++      return null;
++    }
++
+     return visit(new GetSchema(name), fs, location);
+   }
+ 
+   public static PartitionStrategy strategy(FileSystem fs, Path location) throws IOException {
++    if (!fs.exists(location)) {
++      return null;
++    }
++
+     List<Pair<String, Class<? extends Comparable>>> pairs = visit(
+         new GetPartitionInfo(), fs, location);
+ 
+@@ -149,10 +157,11 @@ public class FileSystemUtil {
+   }
+ 
+   public static Format format(FileSystem fs, Path location) throws IOException {
+-    Format format = visit(new GetFormat(), fs, location);
+-    Preconditions.checkArgument(format != null,
+-        "Cannot determine format: found no data files in " + location);
+-    return format;
++    if (!fs.exists(location)) {
++      return null;
++    }
++
++    return visit(new GetFormat(), fs, location);
+   }
+ 
+   private static abstract class PathVisitor<T> {
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
+index 67e09f9..f18dc12 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
+@@ -53,7 +53,6 @@ import org.kitesdk.cli.commands.ShowRecordsCommand;
+ import org.kitesdk.cli.commands.TarImportCommand;
+ import org.kitesdk.cli.commands.TransformCommand;
+ import org.kitesdk.cli.commands.UpdateDatasetCommand;
+-import org.kitesdk.cli.commands.WrapDatasetCommand;
+ import org.kitesdk.data.DatasetIOException;
+ import org.kitesdk.data.DatasetNotFoundException;
+ import org.kitesdk.data.ValidationException;
+@@ -103,7 +102,6 @@ public class Main extends Configured implements Tool {
+     jc.addCommand("schema", new SchemaCommand(console));
+     jc.addCommand("info", new InfoCommand(console));
+     jc.addCommand("show", new ShowRecordsCommand(console));
+-    jc.addCommand("wrap", new WrapDatasetCommand(console));
+     jc.addCommand("obj-schema", new ObjectSchemaCommand(console));
+     jc.addCommand("inputformat-import", new InputFormatImportCommand(console));
+     jc.addCommand("csv-schema", new CSVSchemaCommand(console));
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CreateDatasetCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CreateDatasetCommand.java
+index 02f6362..114fd95 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CreateDatasetCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CreateDatasetCommand.java
+@@ -15,29 +15,44 @@
+  */
+ package org.kitesdk.cli.commands;
+ 
++import com.beust.jcommander.DynamicParameter;
+ import com.beust.jcommander.Parameter;
+ import com.beust.jcommander.Parameters;
+-import com.google.common.base.Splitter;
+-import com.google.common.collect.Iterators;
++import com.google.common.base.Preconditions;
+ import com.google.common.collect.Lists;
+ import java.io.IOException;
+-import java.util.Iterator;
++import java.net.URI;
+ import java.util.List;
++import java.util.Map;
++import org.apache.avro.Schema;
++import org.apache.hadoop.fs.FileSystem;
++import org.apache.hadoop.fs.Path;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.Datasets;
++import org.kitesdk.data.Format;
+ import org.kitesdk.data.Formats;
++import org.kitesdk.data.PartitionStrategy;
++import org.kitesdk.data.URIBuilder;
++import org.kitesdk.data.ValidationException;
++import org.kitesdk.data.spi.Compatibility;
++import org.kitesdk.data.spi.DatasetRepository;
++import org.kitesdk.data.spi.Pair;
++import org.kitesdk.data.spi.PartitionStrategyParser;
++import org.kitesdk.data.spi.Registration;
++import org.kitesdk.data.spi.SchemaValidationUtil;
++import org.kitesdk.data.spi.Schemas;
++import org.kitesdk.data.spi.filesystem.FileSystemDatasetRepository;
++import org.kitesdk.data.spi.filesystem.FileSystemUtil;
+ import org.slf4j.Logger;
+ 
+ @Parameters(commandDescription = "Create an empty dataset")
+ public class CreateDatasetCommand extends BaseDatasetCommand {
+ 
+-  private static final Splitter PROP_VALUE_SEP = Splitter.on('=').limit(2);
+-
+   @Parameter(description = "<dataset name>")
+   List<String> datasets;
+ 
+-  @Parameter(names = {"-s", "--schema"}, required=true,
++  @Parameter(names = {"-s", "--schema"},
+       description = "The file containing the Avro schema.")
+   String avroSchemaFile;
+ 
+@@ -53,9 +68,13 @@ public class CreateDatasetCommand extends BaseDatasetCommand {
+       description = "The file format: avro or parquet.")
+   String format = Formats.AVRO.getName();
+ 
+-  @Parameter(names = {"--set", "--property"},
++  @Parameter(names = {"--location"},
++      description = "Location where the data is stored")
++  String location;
++
++  @DynamicParameter(names = {"--set", "--property"},
+       description = "Add a property pair: prop.name=value")
+-  List<String> properties;
++  Map<String, String> properties;
+ 
+   public CreateDatasetCommand(Logger console) {
+     super(console);
+@@ -65,22 +84,107 @@ public class CreateDatasetCommand extends BaseDatasetCommand {
+   public int run() throws IOException {
+     if (datasets == null || datasets.size() != 1) {
+       throw new IllegalArgumentException(
+-          "Exactly one dataset name must be specified.");
++          "Exactly one dataset name or URI must be specified.");
++    }
++
++    String dataset = datasets.get(0);
++
++    DatasetRepository repo;
++    String namespace;
++    String name;
++
++    if (isDatasetOrViewUri(dataset)) {
++      URI uri = URI.create(URI.create(dataset).getSchemeSpecificPart());
++      Pair<DatasetRepository, Map<String, String>> reg = Registration
++          .lookupDatasetUri(uri);
++      repo = reg.first();
++      namespace = reg.second().get(URIBuilder.NAMESPACE_OPTION);
++      name = reg.second().get(URIBuilder.DATASET_NAME_OPTION);
++      if (location == null) {
++        location = reg.second().get("location");
++      }
++
++    } else {
++      repo = getDatasetRepository();
++      namespace = URIBuilder.NAMESPACE_DEFAULT;
++      name = dataset;
+     }
+ 
++    // for file-based datasets, try to infer schema, format, etc. from data
++    boolean isFileDataset = (repo instanceof FileSystemDatasetRepository);
++
+     DatasetDescriptor.Builder descriptorBuilder = new DatasetDescriptor.Builder();
+ 
+-    if (format.equals(Formats.AVRO.getName())) {
+-      descriptorBuilder.format(Formats.AVRO);
+-    } else if (format.equals(Formats.PARQUET.getName())) {
+-      descriptorBuilder.format(Formats.PARQUET);
++    Path dataPath = null;
++    if (location != null) {
++      dataPath = qualifiedPath(location);
++      descriptorBuilder.location(dataPath);
++    } else if (isFileDataset) {
++      dataPath = ((FileSystemDatasetRepository) repo)
++          .pathForDataset(namespace, name);
++    }
++
++    FileSystem fs = isFileDataset ? dataPath.getFileSystem(getConf()) : null;
++
++    Format existingFormat = null;
++    if (isFileDataset) {
++      existingFormat = FileSystemUtil.format(fs, dataPath);
++    }
++
++    if (existingFormat != null) {
++      ValidationException.check(format == null ||
++              Formats.fromString(format).equals(existingFormat),
++          "Found %s data, but --format is %s",
++          existingFormat.getName(), format);
++      descriptorBuilder.format(existingFormat);
++
++    } else if (format != null) {
++      descriptorBuilder.format(format);
++    }
++
++    Schema existingSchema = null;
++    if (isFileDataset) {
++      existingSchema = FileSystemUtil.schema("record", fs, dataPath);
++    }
++
++    Schema schema = existingSchema;
++    if (existingSchema != null) {
++      if (avroSchemaFile != null) {
++        schema = Schemas.fromAvro(open(avroSchemaFile));
++        ValidationException.check(
++            SchemaValidationUtil.canRead(existingSchema, schema),
++            "Schema from %s cannot read existing data schema: %s",
++            avroSchemaFile, existingSchema.toString(true));
++        descriptorBuilder.schemaUri(qualifiedURI(avroSchemaFile));
++      } else {
++        descriptorBuilder.schema(existingSchema);
++      }
++
++    } else if (avroSchemaFile != null) {
++      descriptorBuilder.schemaUri(qualifiedURI(avroSchemaFile));
++
+     } else {
+-      throw new IllegalArgumentException("Unrecognized format: " + format);
++      throw new ValidationException("Schema is missing: use --schema");
+     }
+ 
+-    descriptorBuilder.schemaUri(qualifiedURI(avroSchemaFile));
++    PartitionStrategy existingStrategy = null;
++    if (isFileDataset && existingSchema != null) {
++      // if there is existing data (there is a Schema), infer partitioning
++      existingStrategy = FileSystemUtil.strategy(fs, dataPath);
++    }
++
++    if (existingStrategy != null) {
++      if (partitionStrategyFile != null) {
++        // both are defined, so check that the new strategy is compatible
++        PartitionStrategy strategy = PartitionStrategyParser
++            .parse(open(partitionStrategyFile));
++        Compatibility.checkStrategyUpdate(existingStrategy, strategy, schema);
++        descriptorBuilder.partitionStrategy(strategy);
++      } else {
++        descriptorBuilder.partitionStrategy(existingStrategy);
++      }
+ 
+-    if (partitionStrategyFile != null) {
++    } else if (partitionStrategyFile != null) {
+       descriptorBuilder.partitionStrategyUri(qualifiedURI(partitionStrategyFile));
+     }
+ 
+@@ -89,21 +193,14 @@ public class CreateDatasetCommand extends BaseDatasetCommand {
+     }
+ 
+     if (properties != null) {
+-      for (String propValue : properties) {
+-        Iterator<String> parts = PROP_VALUE_SEP.split(propValue).iterator();
+-        descriptorBuilder.property(
+-            Iterators.getNext(parts, null),
+-            Iterators.getNext(parts, null));
++      for (Map.Entry<String, String> entry : properties.entrySet()) {
++        descriptorBuilder.property(entry.getKey(), entry.getValue());
+       }
+     }
+ 
+-    DatasetDescriptor descriptor = descriptorBuilder.build();
+-    if (isDatasetOrViewUri(datasets.get(0))) {
+-      Datasets.<Object, Dataset<Object>> create(datasets.get(0), descriptor, Object.class);
+-    } else {
+-      getDatasetRepository().create(namespace, datasets.get(0), descriptor);
+-    }
+-    console.debug("Created {}", datasets.get(0));
++    repo.create(namespace, name, descriptorBuilder.build());
++
++    console.debug("Created {}", dataset);
+ 
+     return 0;
+   }
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/WrapDatasetCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/WrapDatasetCommand.java
+deleted file mode 100644
+index b92be69..0000000
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/WrapDatasetCommand.java
++++ /dev/null
+@@ -1,170 +0,0 @@
+-/**
+- * Copyright 2013 Cloudera Inc.
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- * http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-package org.kitesdk.cli.commands;
+-
+-import com.beust.jcommander.DynamicParameter;
+-import com.beust.jcommander.Parameter;
+-import com.beust.jcommander.Parameters;
+-import com.google.common.base.Preconditions;
+-import com.google.common.collect.Lists;
+-import java.io.IOException;
+-import java.net.URI;
+-import java.util.List;
+-import java.util.Map;
+-import org.apache.hadoop.fs.FileSystem;
+-import org.apache.hadoop.fs.Path;
+-import org.kitesdk.data.DatasetDescriptor;
+-import org.kitesdk.data.Format;
+-import org.kitesdk.data.Formats;
+-import org.kitesdk.data.URIBuilder;
+-import org.kitesdk.data.ValidationException;
+-import org.kitesdk.data.spi.DatasetRepository;
+-import org.kitesdk.data.spi.Pair;
+-import org.kitesdk.data.spi.Registration;
+-import org.kitesdk.data.spi.filesystem.FileSystemDatasetRepository;
+-import org.kitesdk.data.spi.filesystem.FileSystemUtil;
+-import org.slf4j.Logger;
+-
+-@Parameters(commandDescription = "Turn directories of data into a dataset")
+-public class WrapDatasetCommand extends BaseDatasetCommand {
+-
+-  @Parameter(description = "<dataset>")
+-  List<String> datasets;
+-
+-  @Parameter(names = {"-s", "--schema"},
+-      description = "A file containing an Avro schema for the dataset.")
+-  String avroSchemaFile;
+-
+-  @Parameter(names = {"--location"},
+-      description = "Location where the data is stored")
+-  String location;
+-
+-  @Parameter(names = {"-p", "--partition-by"},
+-      description = "A file containing a JSON-formatted partition strategy.")
+-  String partitionStrategyFile;
+-
+-  @Parameter(names = {"-f", "--format"},
+-      description = "The file format: avro or parquet.")
+-  String formatFromArgs = null;
+-
+-  @DynamicParameter(names = {"--set", "--property"},
+-      description = "Add a property pair: prop.name=value")
+-  Map<String, String> properties;
+-
+-  public WrapDatasetCommand(Logger console) {
+-    super(console);
+-  }
+-
+-  @Override
+-  public int run() throws IOException {
+-    if (datasets == null || datasets.size() != 1) {
+-      throw new IllegalArgumentException(
+-          "Exactly one dataset name must be specified.");
+-    }
+-
+-    String dataset = datasets.get(0);
+-
+-    DatasetRepository repo;
+-    String namespace;
+-    String name;
+-
+-    if (isDatasetOrViewUri(dataset)) {
+-      URI uri = URI.create(URI.create(dataset).getSchemeSpecificPart());
+-      Pair<DatasetRepository, Map<String, String>> reg = Registration
+-          .lookupDatasetUri(uri);
+-      repo = reg.first();
+-      namespace = reg.second().get(URIBuilder.NAMESPACE_OPTION);
+-      name = reg.second().get(URIBuilder.DATASET_NAME_OPTION);
+-      if (location == null) {
+-        location = reg.second().get("location");
+-      }
+-
+-    } else {
+-      repo = getDatasetRepository();
+-      namespace = URIBuilder.NAMESPACE_DEFAULT;
+-      name = dataset;
+-    }
+-
+-    if (!(repo instanceof FileSystemDatasetRepository)) {
+-      throw new IllegalArgumentException(
+-          "Cannot wrap " + dataset + ": not a file system URI");
+-    }
+-
+-    Preconditions.checkArgument(repo.exists(namespace, name),
+-        "Cannot create " + dataset + ": already exists");
+-
+-    DatasetDescriptor.Builder descriptorBuilder = new DatasetDescriptor.Builder();
+-
+-    Path dataPath;
+-    if (location != null) {
+-      dataPath = qualifiedPath(location);
+-    } else {
+-      dataPath = ((FileSystemDatasetRepository) repo)
+-          .pathForDataset(namespace, name);
+-    }
+-
+-    descriptorBuilder.location(dataPath);
+-
+-    FileSystem fs = dataPath.getFileSystem(getConf());
+-
+-    Format format = FileSystemUtil.format(fs, dataPath);
+-    if (format != null) {
+-      ValidationException.check(formatFromArgs == null ||
+-              Formats.fromString(formatFromArgs).equals(format),
+-          "Found %s data, but --format is %s",
+-          format.getName(), formatFromArgs);
+-      descriptorBuilder.format(format);
+-    } else if (formatFromArgs != null) {
+-      descriptorBuilder.format(formatFromArgs);
+-    } else {
+-      throw new ValidationException(
+-          "Cannot determine the data format: use --format to set one");
+-    }
+-
+-    if (avroSchemaFile != null) {
+-      descriptorBuilder.schemaUri(qualifiedURI(avroSchemaFile));
+-    } else {
+-      descriptorBuilder.schema(FileSystemUtil.schema("record", fs, dataPath));
+-    }
+-
+-    if (partitionStrategyFile != null) {
+-      descriptorBuilder.partitionStrategyUri(qualifiedURI(partitionStrategyFile));
+-    } else {
+-      descriptorBuilder.partitionStrategy(FileSystemUtil.strategy(fs, dataPath));
+-    }
+-
+-    if (properties != null) {
+-      for (Map.Entry<String, String> entry : properties.entrySet()) {
+-        descriptorBuilder.property(entry.getKey(), entry.getValue());
+-      }
+-    }
+-
+-    repo.create(namespace, name, descriptorBuilder.build());
+-
+-    console.info("Created {}", dataset);
+-
+-    return 0;
+-  }
+-
+-  @Override
+-  public List<String> getExamples() {
+-    return Lists.newArrayList(
+-        "# Create dataset for data in hdfs:/data/example/movies:",
+-        "dataset:hdfs:/data/example/movies hdfs:/data/example/movies"
+-    );
+-  }
+-
+-}
+diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestLog4jConfigurationCommand.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestLog4jConfigurationCommand.java
+index c35f097..4c93c37 100644
+--- a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestLog4jConfigurationCommand.java
++++ b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestLog4jConfigurationCommand.java
+@@ -41,7 +41,7 @@ public class TestLog4jConfigurationCommand {
+ 
+   @BeforeClass
+   public static void createDatasets() throws Exception {
+-    String avsc = "src/test/resources/test-schemas/user.avsc";
++    String avsc = "resource:test-schemas/user.avsc";
+ 
+     TestUtil.run("delete", FILE_DATASET_URI);
+     TestUtil.run("-v", "create", FILE_DATASET_URI, "-s", avsc);
+-- 
+1.7.0.4
+

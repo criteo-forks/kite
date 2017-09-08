@@ -31,10 +31,6 @@ public class DeleteCommand extends BaseDatasetCommand {
   @Parameter(description = "<dataset or view>")
   List<String> targets;
 
-  @Parameter(names={"--skip-trash"},
-      description="Indicates that the deletion should skip using trash and just remove the data")
-  boolean skipTrash = false;
-
   public DeleteCommand(Logger console) {
     super(console);
   }
@@ -50,23 +46,11 @@ public class DeleteCommand extends BaseDatasetCommand {
         View view = Datasets.load(uriOrName);
         Preconditions.checkArgument(viewMatches(view.getUri(), uriOrName),
             "Resolved view does not match requested view: " + view.getUri());
-        if(skipTrash) {
-          view.deleteAll();
-        }else {
-          view.moveToTrash();
-        }
+        view.deleteAll();
       } else if (isDatasetUri(uriOrName)) {
-        if(skipTrash) {
-          Datasets.delete(uriOrName);
-        }else {
-          Datasets.moveToTrash(uriOrName);
-        }
+        Datasets.delete(uriOrName);
       } else {
-        if(skipTrash){
-          getDatasetRepository().delete(namespace, uriOrName);
-        }else {
-          getDatasetRepository().moveToTrash(namespace, uriOrName);
-        }
+        getDatasetRepository().delete(namespace, uriOrName);
       }
       console.debug("Deleted {}", uriOrName);
     }

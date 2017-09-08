@@ -1,0 +1,76 @@
+From 956333d8a0495818c3d56f214d7c5003aabe282e Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Wed, 16 Sep 2015 16:11:41 -0700
+Subject: [PATCH 107/115] KITE-1074: Partial updates aka Atomic updates with loadSolr aren't recognized with SolrCloud
+
+---
+ .../kitesdk/morphline/solr/LoadSolrBuilder.java    |    7 ++++++-
+ .../morphline/solr/SolrMorphlineZkTest.java        |   15 ++++++++-------
+ 2 files changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/kitesdk/morphline/solr/LoadSolrBuilder.java b/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/kitesdk/morphline/solr/LoadSolrBuilder.java
+index a3ba14b..fee95ea 100644
+--- a/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/kitesdk/morphline/solr/LoadSolrBuilder.java
++++ b/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/kitesdk/morphline/solr/LoadSolrBuilder.java
+@@ -189,7 +189,12 @@ public final class LoadSolrBuilder implements CommandBuilder {
+             }
+           }
+         } else {
+-          doc.setField(key, entry.getValue(), getBoost(key));
++          Collection<Object> values = entry.getValue();
++          if (values.size() == 1 && values.iterator().next() instanceof Map) {
++            doc.setField(key, values.iterator().next(), getBoost(key)); // it is an atomic update
++          } else {
++            doc.setField(key, values, getBoost(key));
++          }
+         }
+       }      
+       return doc;
+diff --git a/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/kitesdk/morphline/solr/SolrMorphlineZkTest.java b/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/kitesdk/morphline/solr/SolrMorphlineZkTest.java
+index 1fd5a73..29158b7 100644
+--- a/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/kitesdk/morphline/solr/SolrMorphlineZkTest.java
++++ b/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/kitesdk/morphline/solr/SolrMorphlineZkTest.java
+@@ -18,6 +18,7 @@
+ package org.kitesdk.morphline.solr;
+ 
+ import java.io.File;
++import java.util.Collections;
+ import java.util.Iterator;
+ 
+ import org.apache.lucene.util.LuceneTestCase.SuppressCodecs;
+@@ -58,7 +59,12 @@ public class SolrMorphlineZkTest extends AbstractSolrMorphlineZkTest {
+     assertEquals(1, collector.getNumStartEvents());
+     Notifications.notifyBeginTransaction(morphline);
+     assertTrue(morphline.process(record));
+-    
++
++    record = new Record();
++    record.put(Fields.ID, "id0-innsbruck");
++    record.put("user_screen_name", Collections.singletonMap("set", "bar"));
++    assertTrue(morphline.process(record));
++
+     record = new Record();
+     record.put(Fields.ID, "id1-innsbruck");
+     record.put("text", "mytext1");
+@@ -69,17 +75,12 @@ public class SolrMorphlineZkTest extends AbstractSolrMorphlineZkTest {
+     Record expected = new Record();
+     expected.put(Fields.ID, "id0-innsbruck");
+     expected.put("text", "mytext");
+-    expected.put("user_screen_name", "foo");
+-    Iterator<Record> citer = collector.getRecords().iterator();
+-    assertEquals(expected, citer.next());
++    expected.put("user_screen_name", "bar");
+     
+     Record expected2 = new Record();
+     expected2.put(Fields.ID, "id1-innsbruck");
+     expected2.put("text", "mytext1");
+     expected2.put("user_screen_name", "foo1");
+-    assertEquals(expected2, citer.next());
+-    
+-    assertFalse(citer.hasNext());
+     
+     commit();
+     
+-- 
+1.7.0.4
+

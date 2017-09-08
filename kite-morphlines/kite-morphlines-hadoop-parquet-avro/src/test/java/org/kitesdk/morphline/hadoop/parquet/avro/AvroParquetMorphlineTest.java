@@ -34,7 +34,7 @@ import org.kitesdk.morphline.api.Record;
 import org.kitesdk.morphline.base.Fields;
 import org.kitesdk.morphline.hadoop.parquet.avro.ReadAvroParquetFileBuilder;
 
-import org.apache.parquet.avro.AvroParquetWriter;
+import parquet.avro.AvroParquetWriter;
 
 import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableMap;

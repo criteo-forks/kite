@@ -1,0 +1,55 @@
+From 36b8f5fab8f4994cb069cc0e0f379d5384a39d19 Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Thu, 2 Jul 2015 13:37:32 -0700
+Subject: [PATCH 024/115] KITE-1030: readCSV WARN log msg on overly long lines where quoteChar is non-empty should print the whole record seen so far
+
+---
+ .../jcsv/fastreader/QuotedCSVTokenizer.java        |    8 ++++++--
+ .../kitesdk/morphline/stdio/ReadCSVBuilder.java    |    2 +-
+ 2 files changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/shaded/com/googlecode/jcsv/fastreader/QuotedCSVTokenizer.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/shaded/com/googlecode/jcsv/fastreader/QuotedCSVTokenizer.java
+index 077c03a..40d58e8 100644
+--- a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/shaded/com/googlecode/jcsv/fastreader/QuotedCSVTokenizer.java
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/shaded/com/googlecode/jcsv/fastreader/QuotedCSVTokenizer.java
+@@ -100,7 +100,7 @@ public final class QuotedCSVTokenizer implements CSVTokenizer {
+           }
+           numChars += line.length();
+           if (!verifyRecordLength(
+-              numChars, maxCharactersPerRecord, line, ignoreTooLongRecords, LOG)) {
++              numChars, maxCharactersPerRecord, sb, line, ignoreTooLongRecords, LOG)) {
+             return false; // attempt to ignore it
+           }
+         } else {
+@@ -142,10 +142,14 @@ public final class QuotedCSVTokenizer implements CSVTokenizer {
+     }
+   }
+ 
+-  public static boolean verifyRecordLength(int numChars, int maxChars, String line, boolean ignoreTooLongRecords, Logger LOG) {
++  public static boolean verifyRecordLength(int numChars, int maxChars, StringBuilder prefix, String line,
++      boolean ignoreTooLongRecords, Logger LOG) {
+     if (numChars <= maxChars) {
+       return true;
+     }
++    if (prefix != null && prefix.length() > 0) {
++      line = prefix.toString() + line;
++    }
+     if (line.length() > 10000) {
+       line = line.substring(0, 10000) + " ..."; // prevent gigantic messages
+     }
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdio/ReadCSVBuilder.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdio/ReadCSVBuilder.java
+index c105333..1784a4c 100644
+--- a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdio/ReadCSVBuilder.java
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdio/ReadCSVBuilder.java
+@@ -144,7 +144,7 @@ public final class ReadCSVBuilder implements CommandBuilder {
+         }
+ 
+         if (!QuotedCSVTokenizer.verifyRecordLength(
+-            line.length(), maxCharactersPerRecord, line, ignoreTooLongRecords, LOG)) {
++            line.length(), maxCharactersPerRecord, null, line, ignoreTooLongRecords, LOG)) {
+           continue; // ignore
+         }
+         
+-- 
+1.7.0.4
+

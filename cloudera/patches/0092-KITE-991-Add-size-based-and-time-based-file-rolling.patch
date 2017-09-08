@@ -1,0 +1,627 @@
+From 5502d5d80f9cc1cc2a48707d0d4e25ede97edcc5 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Mon, 15 Jun 2015 16:41:52 -0700
+Subject: [PATCH 092/115] KITE-991: Add size-based and time-based file rolling.
+
+File size-based rolling works and is passing a new test for Avro, but is
+disabled for Parquet because the appender has no reliable size estimate
+for Parquet.
+
+Time-based rolling uses a new SPI interface, ClockReady, which exposes a
+method for passing time signals to implementing classes. This removes
+the need for Kite to provide a thread-based check.
+---
+ .../main/java/org/kitesdk/data/spi/ClockReady.java |   32 ++++++
+ .../java/org/kitesdk/data/spi/DescriptorUtil.java  |   45 +++++++++
+ .../kitesdk/data/spi/filesystem/AvroAppender.java  |    5 +
+ .../kitesdk/data/spi/filesystem/CSVAppender.java   |    5 +
+ .../spi/filesystem/DurableParquetAppender.java     |    6 +
+ .../data/spi/filesystem/FileSystemProperties.java  |   12 +++
+ .../data/spi/filesystem/FileSystemWriter.java      |   89 ++++++++++++++++-
+ .../data/spi/filesystem/ParquetAppender.java       |   12 ++-
+ .../spi/filesystem/PartitionedDatasetWriter.java   |   33 ++++---
+ .../data/spi/filesystem/TestAvroWriter.java        |    5 +
+ .../data/spi/filesystem/TestFileSystemWriters.java |  101 ++++++++++++++++++++
+ .../data/spi/filesystem/TestParquetWriter.java     |    8 ++
+ 12 files changed, 330 insertions(+), 23 deletions(-)
+ create mode 100644 kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/ClockReady.java
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/ClockReady.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/ClockReady.java
+new file mode 100644
+index 0000000..058c874
+--- /dev/null
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/ClockReady.java
+@@ -0,0 +1,32 @@
++/*
++ * Copyright 2015 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.kitesdk.data.spi;
++
++/**
++ * Classes that can perform time-based operations implement this interface to
++ * accept clock ticks. Classes that are ClockReady do not perform clock-aware
++ * operations unless {@link #tick()} is called to provide a clock signal.
++ * <p>
++ * Implementing classes should document thread-safety guarantees, though none
++ * are required.
++ */
++public interface ClockReady {
++  /**
++   * Called to provide a clock signal to the implementing class.
++   */
++  void tick();
++}
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DescriptorUtil.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DescriptorUtil.java
+index 538b6fb..429f7b7 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DescriptorUtil.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DescriptorUtil.java
+@@ -49,4 +49,49 @@ public class DescriptorUtil {
+     }
+     return false;
+   }
++
++  /**
++   * Returns the value of the property parsed as a long, or the default value.
++   * <p>
++   * If the value cannot be parsed as a long, this will return the default
++   * value.
++   *
++   * @param prop a String property name
++   * @param descriptor a {@link DatasetDescriptor}
++   * @param defaultValue default value if prop is not present or is invalid
++   * @return the value of prop parsed as a long or the default value
++   */
++  public static long getLong(String prop, DatasetDescriptor descriptor,
++                             long defaultValue) {
++    if (descriptor.hasProperty(prop)) {
++      String asString = descriptor.getProperty(prop);
++      try {
++        return Long.parseLong(asString);
++      } catch (NumberFormatException e) {
++        // return the default value
++      }
++    }
++    return defaultValue;
++  }
++
++  /**
++   * Returns the value of the property parsed as an int, or the default value.
++   * <p>
++   * If the value cannot be parsed as an int or if the value is larger than the
++   * maximum value of an int, this will return the default value.
++   *
++   * @param prop a String property name
++   * @param descriptor a {@link DatasetDescriptor}
++   * @param defaultValue default value if prop is not present or is invalid
++   * @return the value of prop parsed as an int or the default value
++   */
++  public static int getInt(String prop, DatasetDescriptor descriptor,
++                            int defaultValue) {
++    long asLong = getLong(prop, descriptor, defaultValue);
++    if (asLong > Integer.MAX_VALUE) {
++      return defaultValue;
++    } else {
++      return (int) asLong;
++    }
++  }
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/AvroAppender.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/AvroAppender.java
+index b09c475..a32facd 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/AvroAppender.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/AvroAppender.java
+@@ -76,6 +76,11 @@ class AvroAppender<E> implements FileSystemWriter.FileAppender<E> {
+   }
+ 
+   @Override
++  public long pos() throws IOException {
++    return out.getPos();
++  }
++
++  @Override
+   public void flush() throws IOException {
+     // Avro sync forces the end of the current block so the data is recoverable
+     dataFileWriter.flush();
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/CSVAppender.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/CSVAppender.java
+index 518f55c..3b53815 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/CSVAppender.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/CSVAppender.java
+@@ -62,6 +62,11 @@ class CSVAppender<E> implements FileSystemWriter.FileAppender<E> {
+   }
+ 
+   @Override
++  public long pos() throws IOException {
++    return outgoing.getPos();
++  }
++
++  @Override
+   public void close() throws IOException {
+     writer.close();
+     outgoing.close();
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/DurableParquetAppender.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/DurableParquetAppender.java
+index ff22d39..e52daf4 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/DurableParquetAppender.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/DurableParquetAppender.java
+@@ -64,6 +64,12 @@ class DurableParquetAppender<E extends IndexedRecord> implements FileSystemWrite
+   }
+ 
+   @Override
++  public long pos() throws IOException {
++    // based on final Parquet file size, not temporary Avro size
++    return parquetAppender.pos();
++  }
++
++  @Override
+   public void flush() throws IOException {
+     avroAppender.flush();
+   }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemProperties.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemProperties.java
+index 6e13e23..07f4cbd 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemProperties.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemProperties.java
+@@ -48,4 +48,16 @@ public class FileSystemProperties {
+    * Used to enable record reuse, if supported by the implementation.
+    */
+   public static final String REUSE_RECORDS = "kite.reader.reuse-records";
++
++  /**
++   * Used to set the target size, in bytes, for data files. Data files will be
++   * closed and finalized once they reach this size.
++   */
++  public static final String TARGET_FILE_SIZE_PROP = "kite.writer.target-file-size";
++
++  /**
++   * Used to set the roll interval, in seconds, for data files. Data files will
++   * be closed and finalized once they reach this age.
++   */
++  public static final String ROLL_INTERVAL_S_PROP = "kite.writer.roll-interval-seconds";
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemWriter.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemWriter.java
+index 9210f81..16c746c 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemWriter.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemWriter.java
+@@ -42,12 +42,22 @@ import org.kitesdk.data.ValidationException;
+ import org.kitesdk.data.spi.AbstractDatasetWriter;
+ import org.kitesdk.data.spi.DescriptorUtil;
+ import org.kitesdk.data.spi.ReaderWriterState;
++import org.kitesdk.data.spi.ClockReady;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+-class FileSystemWriter<E> extends AbstractDatasetWriter<E> {
++import static org.kitesdk.data.spi.filesystem.FileSystemProperties.ROLL_INTERVAL_S_PROP;
++import static org.kitesdk.data.spi.filesystem.FileSystemProperties.TARGET_FILE_SIZE_PROP;
++
++class FileSystemWriter<E> extends AbstractDatasetWriter<E> implements ClockReady {
+ 
+   private static final Logger LOG = LoggerFactory.getLogger(FileSystemWriter.class);
++
++  // number of records to write before estimating the record size
++  private static final int MIN_RECORDS_BEFORE_ROLL_CHECK = 1000;
++  // minimum file size before estimating size check, accounts for block writes
++  private static final long MIN_SIZE_BEFORE_ROLL_CHECK = 5 * 1024; // 5 kB
++
+   private static final Set<Format> SUPPORTED_FORMATS = ImmutableSet
+       .<Format>builder()
+       .add(Formats.AVRO)
+@@ -61,18 +71,23 @@ class FileSystemWriter<E> extends AbstractDatasetWriter<E> {
+     ));
+   }
+ 
+-  static interface FileAppender<E> extends java.io.Flushable, Closeable {
+-    public void open() throws IOException;
+-    public void append(E entity) throws IOException;
+-    public void sync() throws IOException;
+-    public void cleanup() throws IOException;
++  interface FileAppender<E> extends java.io.Flushable, Closeable {
++    void open() throws IOException;
++    void append(E entity) throws IOException;
++    long pos() throws IOException;
++    void sync() throws IOException;
++    void cleanup() throws IOException;
+   }
+ 
+   private final Path directory;
+   private final DatasetDescriptor descriptor;
++  private final long targetFileSize;
++  private final long rollIntervalMillis;
+   private Path tempPath;
+   private Path finalPath;
+   private long count = 0;
++  private long nextRollCheck = MIN_RECORDS_BEFORE_ROLL_CHECK;
++  private long nextRollTime = Long.MAX_VALUE; // do not roll by default
+ 
+   protected final FileSystem fs;
+   protected FileAppender<E> appender;
+@@ -94,6 +109,16 @@ class FileSystemWriter<E> extends AbstractDatasetWriter<E> {
+     this.conf = new Configuration(fs.getConf());
+     this.state = ReaderWriterState.NEW;
+ 
++    // get file rolling properties
++    if (!Formats.PARQUET.equals(descriptor.getFormat())) {
++      this.targetFileSize = DescriptorUtil.getLong(
++          TARGET_FILE_SIZE_PROP, descriptor, -1);
++    } else {
++      targetFileSize = -1;
++    }
++    this.rollIntervalMillis = 1000 * DescriptorUtil.getLong(
++        ROLL_INTERVAL_S_PROP, descriptor, -1);
++
+     // copy file format settings from custom properties to the Configuration
+     for (String prop : descriptor.listProperties()) {
+       conf.set(prop, descriptor.getProperty(prop));
+@@ -143,6 +168,10 @@ class FileSystemWriter<E> extends AbstractDatasetWriter<E> {
+     }
+ 
+     this.count = 0;
++    this.nextRollCheck = MIN_RECORDS_BEFORE_ROLL_CHECK;
++    if (rollIntervalMillis > 0) {
++      this.nextRollTime = System.currentTimeMillis() + rollIntervalMillis;
++    }
+ 
+     LOG.info("Opened output appender {} for {}", appender, finalPath);
+ 
+@@ -157,6 +186,7 @@ class FileSystemWriter<E> extends AbstractDatasetWriter<E> {
+     try {
+       appender.append(entity);
+       count += 1;
++      checkSizeBasedFileRoll();
+     } catch (RuntimeException e) {
+       Throwables.propagateIfInstanceOf(e, DatasetRecordException.class);
+       this.state = ReaderWriterState.ERROR;
+@@ -240,6 +270,52 @@ class FileSystemWriter<E> extends AbstractDatasetWriter<E> {
+   }
+ 
+   @Override
++  public void tick() {
++    if (ReaderWriterState.OPEN == state) {
++      checkTimeBasedFileRoll();
++    }
++  }
++
++  private void roll() {
++    close();
++    this.state = ReaderWriterState.NEW;
++    // state used by roll checks are reset by initialize
++    initialize();
++  }
++
++  protected void checkSizeBasedFileRoll() throws IOException {
++    if (targetFileSize > 0 && count >= nextRollCheck) {
++      long pos = appender.pos();
++      // if not enough data has been written to estimate the record size, wait
++      if (pos < MIN_SIZE_BEFORE_ROLL_CHECK) {
++        nextRollCheck = count + MIN_RECORDS_BEFORE_ROLL_CHECK;
++        return;
++      }
++
++      // estimate the number of records left before reaching the target size
++      double recordSizeEstimate = ((double) pos) / count;
++      long recordsLeft = ((long) ((targetFileSize - pos) / recordSizeEstimate));
++
++      if (pos < targetFileSize && recordsLeft > 10) {
++        // set the next check for about half-way to the target size
++        this.nextRollCheck = count +
++            Math.max(MIN_RECORDS_BEFORE_ROLL_CHECK, recordsLeft / 2);
++      } else {
++        this.nextRollCheck = nextRollCheck / 2;
++        roll();
++      }
++    }
++  }
++
++  private void checkTimeBasedFileRoll() {
++    long now = System.currentTimeMillis();
++    if (now >= nextRollTime) {
++      // the next roll time is reset during initialize, called by roll
++      roll();
++    }
++  }
++
++  @Override
+   public final boolean isOpen() {
+     return state.equals(ReaderWriterState.OPEN);
+   }
+@@ -311,6 +387,7 @@ class FileSystemWriter<E> extends AbstractDatasetWriter<E> {
+       try {
+         appender.flush();
+         this.flushed = true;
++        checkSizeBasedFileRoll();
+       } catch (RuntimeException e) {
+         this.state = ReaderWriterState.ERROR;
+         throw new DatasetOperationException(e,
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/ParquetAppender.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/ParquetAppender.java
+index 3b31002..5f6478f 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/ParquetAppender.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/ParquetAppender.java
+@@ -29,6 +29,7 @@ import org.kitesdk.data.Formats;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ import parquet.avro.AvroParquetWriter;
++import parquet.hadoop.ParquetFileWriter;
+ import parquet.hadoop.ParquetWriter;
+ import parquet.hadoop.metadata.CompressionCodecName;
+ 
+@@ -36,7 +37,7 @@ class ParquetAppender<E extends IndexedRecord> implements FileSystemWriter.FileA
+ 
+   private static final Logger LOG = LoggerFactory
+     .getLogger(ParquetAppender.class);
+-  private static final int DEFAULT_BLOCK_SIZE = 50 * 1024 * 1024;
++  private static final int DEFAULT_ROW_GROUP_SIZE = 50 * 1024 * 1024;
+ 
+   private final Path path;
+   private final Schema schema;
+@@ -64,7 +65,7 @@ class ParquetAppender<E extends IndexedRecord> implements FileSystemWriter.FileA
+       codecName = getCompressionCodecName();
+     }
+     avroParquetWriter = new AvroParquetWriter<E>(fileSystem.makeQualified(path),
+-        schema, codecName, DEFAULT_BLOCK_SIZE,
++        schema, codecName, DEFAULT_ROW_GROUP_SIZE,
+         ParquetWriter.DEFAULT_PAGE_SIZE,
+         ParquetWriter.DEFAULT_IS_DICTIONARY_ENABLED, conf);
+   }
+@@ -75,6 +76,13 @@ class ParquetAppender<E extends IndexedRecord> implements FileSystemWriter.FileA
+   }
+ 
+   @Override
++  public long pos() throws IOException {
++    // TODO: add a callback to set the position when Parquet decides to flush
++    // this is not a good way to find out the current position
++    return fileSystem.getFileStatus(path).getLen();
++  }
++
++  @Override
+   public void flush() {
+     // Parquet doesn't (currently) expose a flush operation
+   }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/PartitionedDatasetWriter.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/PartitionedDatasetWriter.java
+index 70b100d..2346b99 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/PartitionedDatasetWriter.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/PartitionedDatasetWriter.java
+@@ -40,11 +40,14 @@ import com.google.common.cache.RemovalListener;
+ import com.google.common.cache.RemovalNotification;
+ import com.google.common.util.concurrent.UncheckedExecutionException;
+ import org.apache.hadoop.fs.Path;
++import org.kitesdk.data.spi.ClockReady;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+-abstract class PartitionedDatasetWriter<E, W extends FileSystemWriter<E>> extends
+-    AbstractDatasetWriter<E> {
++import static org.kitesdk.data.spi.filesystem.FileSystemProperties.WRITER_CACHE_SIZE_PROP;
++
++abstract class PartitionedDatasetWriter<E, W extends FileSystemWriter<E>>
++    extends AbstractDatasetWriter<E> implements ClockReady {
+ 
+   private static final Logger LOG = LoggerFactory
+     .getLogger(PartitionedDatasetWriter.class);
+@@ -89,19 +92,8 @@ abstract class PartitionedDatasetWriter<E, W extends FileSystemWriter<E>> extend
+     this.view = view;
+     this.partitionStrategy = descriptor.getPartitionStrategy();
+ 
+-    int maxWriters = DEFAULT_WRITER_CACHE_SIZE;
+-    if (descriptor.hasProperty(FileSystemProperties.WRITER_CACHE_SIZE_PROP)) {
+-      try {
+-        maxWriters = Integer.parseInt(
+-            descriptor.getProperty(FileSystemProperties.WRITER_CACHE_SIZE_PROP));
+-      } catch (NumberFormatException e) {
+-        LOG.warn("Not an integer: " + FileSystemProperties.WRITER_CACHE_SIZE_PROP + "=" +
+-            descriptor.getProperty(FileSystemProperties.WRITER_CACHE_SIZE_PROP));
+-      }
+-    } else if (partitionStrategy.getCardinality() != FieldPartitioner.UNKNOWN_CARDINALITY) {
+-        maxWriters = Math.min(maxWriters, partitionStrategy.getCardinality());
+-    }
+-    this.maxWriters = maxWriters;
++    this.maxWriters = DescriptorUtil.getInt(WRITER_CACHE_SIZE_PROP, descriptor,
++        Math.min(DEFAULT_WRITER_CACHE_SIZE, partitionStrategy.getCardinality()));
+ 
+     this.state = ReaderWriterState.NEW;
+     this.reusedKey = new StorageKey(partitionStrategy);
+@@ -173,6 +165,17 @@ abstract class PartitionedDatasetWriter<E, W extends FileSystemWriter<E>> extend
+   }
+ 
+   @Override
++  public void tick() {
++    if (ReaderWriterState.OPEN == state) {
++      for (DatasetWriter<E> writer : cachedWriters.asMap().values()) {
++        if (writer instanceof ClockReady) {
++          ((ClockReady) writer).tick();
++        }
++      }
++    }
++  }
++
++  @Override
+   public boolean isOpen() {
+     return state.equals(ReaderWriterState.OPEN);
+   }
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestAvroWriter.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestAvroWriter.java
+index 6a97e7d..8d4a865 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestAvroWriter.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestAvroWriter.java
+@@ -39,6 +39,11 @@ public class TestAvroWriter extends TestFileSystemWriters {
+   public FileSystemWriter<Record> newWriter(Path directory, Schema schema) {
+     return FileSystemWriter.newWriter(fs, directory,
+         new DatasetDescriptor.Builder()
++            .property(
++                "kite.writer.roll-interval-seconds", String.valueOf(1))
++            .property(
++                "kite.writer.target-file-size",
++                String.valueOf(2 * 1024 * 1024)) // 2 MB
+             .schema(schema)
+             .format("avro")
+             .build());
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemWriters.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemWriters.java
+index f6ae4c2..427ee70 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemWriters.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemWriters.java
+@@ -16,11 +16,13 @@
+ 
+ package org.kitesdk.data.spi.filesystem;
+ 
++import com.google.common.collect.Iterators;
+ import com.google.common.collect.Lists;
+ import com.google.common.io.Files;
+ import java.io.IOException;
+ import java.util.Iterator;
+ import java.util.List;
++import java.util.UUID;
+ import org.apache.avro.Schema;
+ import org.apache.avro.SchemaBuilder;
+ import org.apache.avro.generic.GenericData.Record;
+@@ -29,10 +31,12 @@ import org.apache.hadoop.fs.FileSystem;
+ import org.apache.hadoop.fs.Path;
+ import org.junit.After;
+ import org.junit.Assert;
++import org.junit.Assume;
+ import org.junit.Before;
+ import org.junit.Test;
+ import org.kitesdk.data.DatasetReader;
+ import org.kitesdk.data.MiniDFSTest;
++import org.kitesdk.data.spi.ClockReady;
+ import org.kitesdk.data.spi.InitializeAccessor;
+ import org.kitesdk.data.spi.ReaderWriterState;
+ 
+@@ -94,6 +98,103 @@ public abstract class TestFileSystemWriters extends MiniDFSTest {
+   }
+ 
+   @Test
++  public void testTargetFileSize() throws IOException {
++    init(fsWriter);
++
++    FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
++    Assert.assertEquals("Should contain no visible files", 0, stats.length);
++    stats = fs.listStatus(testDirectory);
++    Assert.assertEquals("Should contain a hidden file", 1, stats.length);
++
++    List<Record> written = Lists.newArrayList();
++    for (long i = 0; i < 100000; i += 1) {
++      // use a UUID to make the file size bigger
++      Record record = record(i, UUID.randomUUID().toString());
++      fsWriter.write(record);
++      written.add(record);
++    }
++
++    stats = fs.listStatus(testDirectory, PathFilters.notHidden());
++    Assert.assertEquals("Should contain a rolled file", 1, stats.length);
++    stats = fs.listStatus(testDirectory);
++    Assert.assertEquals("Should contain a hidden file and a rolled file",
++        2, stats.length);
++
++    fsWriter.close();
++
++    stats = fs.listStatus(testDirectory, PathFilters.notHidden());
++    Assert.assertEquals("Should contain a visible data file", 2, stats.length);
++
++    List<Record> actualContent = Lists.newArrayList();
++    DatasetReader<Record> reader = newReader(stats[0].getPath(), TEST_SCHEMA);
++    Iterators.addAll(actualContent, init(reader));
++    reader = newReader(stats[1].getPath(), TEST_SCHEMA);
++    Iterators.addAll(actualContent, init(reader));
++
++    Assert.assertTrue("Should match written records",
++        written.equals(actualContent));
++
++    double ratioToTarget = (((double) stats[0].getLen()) / 2 / 1024 / 1024);
++    Assert.assertTrue(
++        "Should be within 10% of target size: " + ratioToTarget * 100,
++        ratioToTarget > 0.90 && ratioToTarget < 1.10);
++  }
++
++  @Test
++  public void testTimeBasedRoll() throws Exception {
++    // time-based operations are done when clock ticks are passed to the writer
++    // with ClockReady#tick.
++    init(fsWriter);
++
++    FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
++    Assert.assertEquals("Should contain no visible files", 0, stats.length);
++    stats = fs.listStatus(testDirectory);
++    Assert.assertEquals("Should contain a hidden file", 1, stats.length);
++
++    // write the first half of the records
++    List<Record> firstHalf = Lists.newArrayList();
++    for (long i = 0; i < 50000; i += 1) {
++      // use a UUID to make the file size bigger
++      Record record = record(i, UUID.randomUUID().toString());
++      fsWriter.write(record);
++      firstHalf.add(record);
++    }
++
++    // the writer is configured to roll every 1 second, so this guarantees it
++    // will roll when tick is called
++    Thread.sleep(1000);
++    fsWriter.tick(); // send a clock signal to trigger the roll
++
++    // write the second half of the records
++    List<Record> secondHalf = Lists.newArrayList();
++    for (long i = 0; i < 50000; i += 1) {
++      // use a UUID to make the file size bigger
++      Record record = record(i, UUID.randomUUID().toString());
++      fsWriter.write(record);
++      secondHalf.add(record);
++    }
++
++    stats = fs.listStatus(testDirectory, PathFilters.notHidden());
++    Assert.assertEquals("Should contain a rolled file", 1, stats.length);
++    stats = fs.listStatus(testDirectory);
++    Assert.assertEquals("Should contain a hidden file and a rolled file",
++        2, stats.length);
++
++    fsWriter.close();
++
++    stats = fs.listStatus(testDirectory, PathFilters.notHidden());
++    Assert.assertEquals("Should contain a visible data file", 2, stats.length);
++
++    DatasetReader<Record> reader = newReader(stats[0].getPath(), TEST_SCHEMA);
++    Assert.assertEquals("First file should have half the records",
++        firstHalf, Lists.newArrayList((Iterable) init(reader)));
++
++    reader = newReader(stats[1].getPath(), TEST_SCHEMA);
++    Assert.assertEquals("Second file should have half the records",
++        secondHalf, Lists.newArrayList((Iterable) init(reader)));
++  }
++
++  @Test
+   public void testDiscardEmptyFiles() throws IOException {
+     init(fsWriter);
+     fsWriter.close();
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestParquetWriter.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestParquetWriter.java
+index 83feef7..318e4a0 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestParquetWriter.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestParquetWriter.java
+@@ -38,6 +38,8 @@ public class TestParquetWriter extends TestFileSystemWriters {
+   public FileSystemWriter<Record> newWriter(Path directory, Schema schema) {
+     return FileSystemWriter.newWriter(fs, directory,
+         new DatasetDescriptor.Builder()
++            .property(
++                "kite.writer.roll-interval-seconds", String.valueOf(1))
+             .schema(schema)
+             .format("parquet")
+             .build());
+@@ -112,4 +114,10 @@ public class TestParquetWriter extends TestFileSystemWriters {
+     Assert.assertEquals("Enabling the non-durable parquet appender should get us a non-durable appender",
+         ParquetAppender.class, writer.newAppender(testDirectory).getClass());
+   }
++
++  @Override
++  @Ignore // Needs PARQUET-308 to estimate current file size
++  public void testTargetFileSize() throws IOException {
++    super.testTargetFileSize();
++  }
+ }
+-- 
+1.7.0.4
+

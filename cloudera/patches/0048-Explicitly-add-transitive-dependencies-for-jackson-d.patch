@@ -1,0 +1,53 @@
+From 7b2ace5780d9510014f9f1a22e5004774407eb35 Mon Sep 17 00:00:00 2001
+From: Tom White <tom@cloudera.com>
+Date: Thu, 16 Apr 2015 15:45:35 +0100
+Subject: [PATCH 048/115] Explicitly add transitive dependencies for jackson-databind.
+
+---
+ kite-data/kite-data-core/pom.xml |    8 ++++++++
+ pom.xml                          |   10 ++++++++++
+ 2 files changed, 18 insertions(+), 0 deletions(-)
+
+diff --git a/kite-data/kite-data-core/pom.xml b/kite-data/kite-data-core/pom.xml
+index c250940..9e1648c 100644
+--- a/kite-data/kite-data-core/pom.xml
++++ b/kite-data/kite-data-core/pom.xml
+@@ -160,6 +160,14 @@
+       <groupId>com.fasterxml.jackson.core</groupId>
+       <artifactId>jackson-databind</artifactId>
+     </dependency>
++    <dependency>
++      <groupId>com.fasterxml.jackson.core</groupId>
++      <artifactId>jackson-annotations</artifactId>
++    </dependency>
++    <dependency>
++      <groupId>com.fasterxml.jackson.core</groupId>
++      <artifactId>jackson-core</artifactId>
++    </dependency>
+ 
+     <!-- Misc -->
+     <dependency>
+diff --git a/pom.xml b/pom.xml
+index b88215c..642fbad 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -1069,6 +1069,16 @@
+         <artifactId>jackson-databind</artifactId>
+         <version>${vers.jackson}</version>
+       </dependency>
++      <dependency>
++        <groupId>com.fasterxml.jackson.core</groupId>
++        <artifactId>jackson-annotations</artifactId>
++        <version>${vers.jackson}</version>
++      </dependency>
++      <dependency>
++        <groupId>com.fasterxml.jackson.core</groupId>
++        <artifactId>jackson-core</artifactId>
++        <version>${vers.jackson}</version>
++      </dependency>
+ 
+       <!-- Maven plugin -->
+       <dependency>
+-- 
+1.7.0.4
+

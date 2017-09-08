@@ -1,0 +1,112 @@
+From a8cffef31905a4af7d774350b55abb394ff4cd6a Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Thu, 25 Jun 2015 15:20:26 -0700
+Subject: [PATCH 090/115] KITE-1024: Fix kite-tools tarball dependencies.
+
+The CDH5 HBase dependency bundle was transitively pulling in the MR1
+version of hadoop-core. That was conflicting with Yarn MR classes and
+causing a runtime VerifyError.
+
+This also updates to use the right CDH5 crunch version.
+
+Conflicts:
+	kite-hbase-dependencies/cdh5-test/pom.xml
+Resolution:
+    Use CDH version property.
+---
+ kite-hbase-dependencies/cdh5-test/pom.xml |    8 ++++++++
+ kite-hbase-dependencies/cdh5/pom.xml      |   12 ++++++++++++
+ kite-tools-parent/kite-tools-cdh5/pom.xml |   28 ++++++++++++++++++++++++++++
+ 3 files changed, 48 insertions(+), 0 deletions(-)
+
+diff --git a/kite-hbase-dependencies/cdh5-test/pom.xml b/kite-hbase-dependencies/cdh5-test/pom.xml
+index e834a4a..3ee3b0b 100644
+--- a/kite-hbase-dependencies/cdh5-test/pom.xml
++++ b/kite-hbase-dependencies/cdh5-test/pom.xml
+@@ -37,6 +37,14 @@
+       <groupId>org.apache.hbase</groupId>
+       <artifactId>hbase-testing-util</artifactId>
+       <version>${vers.hbase}</version>
++      <exclusions>
++        <!-- Pulls in the mr1 dependency, which causes a runtime VerifyError.
++             Hadoop must be provided anyway. -->
++        <exclusion>
++          <groupId>org.apache.hadoop</groupId>
++          <artifactId>hadoop-core</artifactId>
++        </exclusion>
++      </exclusions>
+     </dependency>
+   </dependencies>
+ 
+diff --git a/kite-hbase-dependencies/cdh5/pom.xml b/kite-hbase-dependencies/cdh5/pom.xml
+index c6304bc..91267f0 100644
+--- a/kite-hbase-dependencies/cdh5/pom.xml
++++ b/kite-hbase-dependencies/cdh5/pom.xml
+@@ -67,6 +67,12 @@
+           <groupId>org.mortbay.jetty</groupId>
+           <artifactId>jetty-util</artifactId>
+         </exclusion>
++        <!-- Pulls in the mr1 dependency, which causes a runtime VerifyError.
++             Hadoop must be provided anyway. -->
++        <exclusion>
++          <groupId>org.apache.hadoop</groupId>
++          <artifactId>hadoop-core</artifactId>
++        </exclusion>
+       </exclusions>
+     </dependency>
+     <!-- needed for MR classes -->
+@@ -140,6 +146,12 @@
+           <groupId>tomcat</groupId>
+           <artifactId>jasper-runtime</artifactId>
+         </exclusion>
++        <!-- Pulls in the mr1 dependency, which causes a runtime VerifyError.
++             Hadoop must be provided anyway. -->
++        <exclusion>
++          <groupId>org.apache.hadoop</groupId>
++          <artifactId>hadoop-core</artifactId>
++        </exclusion>
+       </exclusions>
+     </dependency>
+   </dependencies>
+diff --git a/kite-tools-parent/kite-tools-cdh5/pom.xml b/kite-tools-parent/kite-tools-cdh5/pom.xml
+index 6586d5e..2f84185 100644
+--- a/kite-tools-parent/kite-tools-cdh5/pom.xml
++++ b/kite-tools-parent/kite-tools-cdh5/pom.xml
+@@ -148,6 +148,34 @@
+     </dependency>
+ 
+     <dependency>
++      <!-- not usually provided -->
++      <groupId>org.apache.crunch</groupId>
++      <artifactId>crunch-core</artifactId>
++      <scope>compile</scope>
++      <version>${vers.crunch-cdh5}</version>
++      <exclusions>
++        <exclusion>
++          <!-- Avro is provided
++               This is excluded because this pulls in the hadoop1 version
++               because the crunch pom selects the dependency using a profile
++               -->
++          <groupId>org.apache.avro</groupId>
++          <artifactId>avro-mapred</artifactId>
++        </exclusion>
++        <exclusion>
++          <!-- kite doesn't use trevni -->
++          <groupId>org.apache.avro</groupId>
++          <artifactId>trevni-avro</artifactId>
++        </exclusion>
++        <exclusion>
++          <!-- kite doesn't use trevni -->
++          <groupId>org.apache.avro</groupId>
++          <artifactId>trevni-core</artifactId>
++        </exclusion>
++      </exclusions>
++    </dependency>
++
++    <dependency>
+       <groupId>commons-configuration</groupId>
+       <artifactId>commons-configuration</artifactId>
+       <version>1.6</version>
+-- 
+1.7.0.4
+

@@ -1,0 +1,1164 @@
+From 46051bd242b21a7d1c095d554731c2afdc5a5e26 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 20 May 2015 17:44:54 -0700
+Subject: [PATCH 075/115] CDK-973: Add View#asType for projection.
+
+This updates Joey's addition of View#asSchema for record/column
+projection and adds View#asType. The asSchema changes needed the ability
+to create a new backing Dataset instance with a different type.
+
+This also fixes the review items I posted on #346.
+---
+ .../src/main/java/org/kitesdk/data/View.java       |   21 ++-
+ .../java/org/kitesdk/data/spi/AbstractDataset.java |   24 +++-
+ .../kitesdk/data/spi/AbstractRefinableView.java    |   76 +++++++++-
+ .../java/org/kitesdk/data/spi/DataModelUtil.java   |   68 +++++----
+ .../java/org/kitesdk/data/spi/EntityAccessor.java  |   14 ++-
+ .../kitesdk/data/spi/filesystem/CSVFileReader.java |    2 +-
+ .../data/spi/filesystem/FileSystemDataset.java     |   33 ++++-
+ .../data/spi/filesystem/FileSystemView.java        |   13 +-
+ .../filesystem/FileSystemViewKeyInputFormat.java   |   56 +++-----
+ .../data/spi/filesystem/JSONFileReader.java        |    2 +-
+ .../spi/filesystem/MultiFileDatasetReader.java     |    4 +-
+ .../TestFileSystemDatasetRepository.java           |    7 +-
+ .../data/spi/filesystem/TestProjection.java        |  158 ++++++++++++++++++--
+ .../main/java/org/kitesdk/data/hbase/DaoView.java  |   12 +-
+ .../data/hbase/avro/AvroEntityComposer.java        |    4 +-
+ .../data/mapreduce/DatasetKeyInputFormat.java      |   34 ++++-
+ .../kitesdk/cli/commands/BaseDatasetCommand.java   |    9 +
+ .../java/org/kitesdk/cli/commands/CopyCommand.java |   11 +-
+ .../kitesdk/cli/commands/UpdateDatasetCommand.java |    3 +-
+ 19 files changed, 423 insertions(+), 128 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/View.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/View.java
+index 76170e5..5cd5b88 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/View.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/View.java
+@@ -170,11 +170,24 @@ public interface View<E> {
+    * <p>
+    * This method always returns a {@code View} with type {@link GenericRecord}.
+    *
+-   * @param <T> the type of {@code GenericRecord} to use
+    * @param schema an Avro schema to project entities to
+    * @return a copy of this view that projects entities to the given schema
+-   * @throws IncompatibleSchemaException the given {@code schema} is incompatible
+-   * with the underlying dataset.
++   * @throws IncompatibleSchemaException
++   *          If the given {@code schema} is incompatible with the underlying
++   *          dataset.
+    */
+-  <T extends GenericRecord> View<T> asSchema(Schema schema);
++  View<GenericRecord> asSchema(Schema schema);
++
++  /**
++   * Creates a copy of this {@code View} that reads and writes entities of the
++   * given type class.
++   *
++   * @param <T> the type of entities that will be read or written by this view
++   * @param type an entity class to use
++   * @return a copy of this view that projects entities to the given type
++   * @throws IncompatibleSchemaException
++   *          If the given {@code type} is incompatible with the underlying
++   *          dataset.
++   */
++  <T> View<T> asType(Class<T> type);
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractDataset.java
+index 3094723..80119e7 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractDataset.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractDataset.java
+@@ -20,6 +20,7 @@ import com.google.common.base.Objects;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetReader;
+ import org.kitesdk.data.DatasetWriter;
++import org.kitesdk.data.Datasets;
+ import org.kitesdk.data.PartitionView;
+ import org.kitesdk.data.RefinableView;
+ import javax.annotation.concurrent.Immutable;
+@@ -56,6 +57,27 @@ public abstract class AbstractDataset<E> implements Dataset<E>, RefinableView<E>
+ 
+   public abstract AbstractRefinableView<E> filter(Constraints c);
+ 
++  /**
++   * Creates a copy of this {@code Dataset} that reads and writes entities of
++   * the given type class.
++   *
++   * @param <T>
++   *          The type of entities that will be read or written by this
++   *          dataset.
++   * @param type an entity class to use
++   * @return a copy of this view that projects entities to the given type
++   * @throws org.kitesdk.data.IncompatibleSchemaException
++   *          If the given {@code type} is incompatible with the underlying
++   *          dataset.
++   */
++  @Override
++  @SuppressWarnings("unchecked")
++  public <T> Dataset<T> asType(Class<T> type) {
++    if (getType().equals(type)) {
++      return (Dataset<T>) this;
++    }
++    return Datasets.load(getUri(), type);
++  }
+   @Override
+   public DatasetWriter<E> newWriter() {
+     LOG.debug("Getting writer to dataset:{}", this);
+@@ -117,7 +139,7 @@ public abstract class AbstractDataset<E> implements Dataset<E>, RefinableView<E>
+   }
+ 
+   @Override
+-  public <T extends GenericRecord> View<T> asSchema(Schema schema) {
++  public View<GenericRecord> asSchema(Schema schema) {
+     return asRefinableView().asSchema(schema);
+   }
+ 
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractRefinableView.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractRefinableView.java
+index 9aa3a70..c290f8e 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractRefinableView.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractRefinableView.java
+@@ -22,12 +22,16 @@ import java.net.URI;
+ import java.util.Map;
+ import javax.annotation.concurrent.Immutable;
+ import org.apache.avro.Schema;
++import org.apache.avro.generic.GenericRecord;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetReader;
++import org.kitesdk.data.Datasets;
++import org.kitesdk.data.IncompatibleSchemaException;
+ import org.kitesdk.data.PartitionView;
+ import org.kitesdk.data.RefinableView;
+ import org.kitesdk.data.URIBuilder;
++import org.kitesdk.data.View;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+@@ -49,6 +53,8 @@ public abstract class AbstractRefinableView<E> implements RefinableView<E> {
+   protected final Constraints constraints;
+   protected final EntityAccessor<E> accessor;
+   protected final Predicate<E> entityTest;
++  protected final boolean canRead;
++  protected final boolean canWrite;
+ 
+   // This class is Immutable and must be thread-safe
+   protected final ThreadLocal<StorageKey> keys;
+@@ -59,6 +65,7 @@ public abstract class AbstractRefinableView<E> implements RefinableView<E> {
+     if (descriptor.isPartitioned()) {
+       this.constraints = new Constraints(
+           descriptor.getSchema(), descriptor.getPartitionStrategy());
++      // TODO: is comparator used anywhere?
+       this.comparator = new MarkerComparator(descriptor.getPartitionStrategy());
+       this.keys = new ThreadLocal<StorageKey>() {
+         @Override
+@@ -73,17 +80,43 @@ public abstract class AbstractRefinableView<E> implements RefinableView<E> {
+     }
+     this.accessor = DataModelUtil.accessor(type, descriptor.getSchema());
+     this.entityTest = constraints.toEntityPredicate(accessor);
++
++    Schema datasetSchema = descriptor.getSchema();
++    this.canRead = SchemaValidationUtil.canRead(
++        datasetSchema, accessor.getReadSchema());
++    this.canWrite = SchemaValidationUtil.canRead(
++        accessor.getWriteSchema(), datasetSchema);
++
++    IncompatibleSchemaException.check(canRead || canWrite,
++        "The type cannot be used to read from or write to the dataset:\n" +
++        "Type schema: %s\nDataset schema: %s",
++        getSchema(), descriptor.getSchema());
+   }
+ 
+-  protected AbstractRefinableView(AbstractRefinableView<?> view, Schema schema) {
+-    this.dataset = (Dataset<E>) view.dataset;
++  protected AbstractRefinableView(AbstractRefinableView<?> view, Schema schema, Class<E> type) {
++    if (view.dataset instanceof AbstractDataset) {
++      this.dataset = ((AbstractDataset<?>) view.dataset).asType(type);
++    } else {
++      this.dataset = Datasets.load(view.dataset.getUri(), type);
++    }
+     this.comparator = view.comparator;
+     this.constraints = view.constraints;
+     // thread-safe, so okay to reuse when views share a partition strategy
+     this.keys = view.keys;
+     // Resolve our type according to the given schema
+-    this.accessor = DataModelUtil.accessor(schema);
++    this.accessor = DataModelUtil.accessor(type, schema);
+     this.entityTest = constraints.toEntityPredicate(accessor);
++
++    Schema datasetSchema = dataset.getDescriptor().getSchema();
++    this.canRead = SchemaValidationUtil.canRead(
++        datasetSchema, accessor.getReadSchema());
++    this.canWrite = SchemaValidationUtil.canRead(
++        accessor.getWriteSchema(), datasetSchema);
++
++    IncompatibleSchemaException.check(canRead || canWrite,
++        "The type cannot be used to read from or write to the dataset:\n" +
++        "Type schema: %s\nDataset schema: %s",
++        getSchema(), datasetSchema);
+   }
+ 
+   protected AbstractRefinableView(AbstractRefinableView<E> view, Constraints constraints) {
+@@ -96,6 +129,8 @@ public abstract class AbstractRefinableView<E> implements RefinableView<E> {
+     // view
+     this.accessor = view.accessor;
+     this.entityTest = constraints.toEntityPredicate(accessor);
++    this.canRead = view.canRead;
++    this.canWrite = view.canWrite;
+   }
+ 
+   public Constraints getConstraints() {
+@@ -104,6 +139,8 @@ public abstract class AbstractRefinableView<E> implements RefinableView<E> {
+ 
+   protected abstract AbstractRefinableView<E> filter(Constraints c);
+ 
++  protected abstract <T> AbstractRefinableView<T> project(Schema schema, Class<T> type);
++
+   @Override
+   public Dataset<E> getDataset() {
+     return dataset;
+@@ -122,7 +159,7 @@ public abstract class AbstractRefinableView<E> implements RefinableView<E> {
+ 
+   @Override
+   public Schema getSchema() {
+-    return accessor.getEntitySchema();
++    return accessor.getReadSchema();
+   }
+ 
+   public EntityAccessor<E> getAccessor() {
+@@ -170,6 +207,22 @@ public abstract class AbstractRefinableView<E> implements RefinableView<E> {
+   }
+ 
+   @Override
++  @SuppressWarnings("unchecked")
++  public AbstractRefinableView<GenericRecord> asSchema(Schema schema) {
++    return project(schema, GenericRecord.class);
++  }
++
++  @Override
++  public <T> View<T> asType(Class<T> type) {
++    if (DataModelUtil.isGeneric(type)) {
++      // if the type is generic, don't reset the schema
++      return project(getSchema(), type);
++    }
++    // otherwise, the type determines the schema
++    return project(getDataset().getDescriptor().getSchema(), type);
++  }
++
++  @Override
+   public boolean isEmpty() {
+     DatasetReader<E> reader = null;
+     try {
+@@ -223,4 +276,19 @@ public abstract class AbstractRefinableView<E> implements RefinableView<E> {
+   protected Predicate<StorageKey> getKeyPredicate() {
+     return constraints.toKeyPredicate();
+   }
++
++  protected void checkSchemaForWrite() {
++    IncompatibleSchemaException.check(canWrite,
++        "Cannot write data with this view's schema, " +
++        "it cannot be read with the dataset's schema:\n" +
++        "Current schema: %s\nDataset schema: %s",
++        getSchema(), dataset.getDescriptor().getSchema());
++  }
++
++  protected void checkSchemaForRead() {
++    IncompatibleSchemaException.check(canRead,
++        "Cannot read data with this view's schema:\n" +
++        "Current schema: %s\nDataset schema: %s",
++        dataset.getDescriptor().getSchema(), getSchema());
++  }
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DataModelUtil.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DataModelUtil.java
+index 70aa347..14dba20 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DataModelUtil.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DataModelUtil.java
+@@ -33,7 +33,6 @@ import org.apache.avro.reflect.ReflectDatumReader;
+ import org.apache.avro.specific.SpecificData;
+ import org.apache.avro.specific.SpecificDatumReader;
+ import org.apache.avro.specific.SpecificRecord;
+-import org.kitesdk.data.IncompatibleSchemaException;
+ 
+ /**
+  * Utilities for determining the appropriate data model at runtime.
+@@ -101,22 +100,20 @@ public class DataModelUtil {
+   }
+ 
+   /**
+-   * Returns true if the type implements GenericRecord but not SpecificRecord
++   * Test whether the class is a generic {@link GenericRecord} and not a
++   * {@link SpecificRecord}. This is necessary instead of testing if
++   * {@code GenericRecord} is assignable from the class because
++   * {@link org.apache.avro.specific.SpecificRecordBase} implements
++   * {@code GenericRecord}.
+    *
+-   * @param <E> The entity type
+-   * @param type The Java class of the entity type
+-   * @return true if the type implements GenericRecord but not SpecificRecord
++   * @param type a Java class
++   * @return true if the class is an Avro generic and not specific
+    */
+-  public static <E> boolean isGeneric(Class<E> type) {
+-    // Need to check if SpecificRecord first because specific records also
+-    // implement GenericRecord
+-    if (SpecificRecord.class.isAssignableFrom(type)) {
+-      return false;
+-    } else if (IndexedRecord.class.isAssignableFrom(type)) {
+-      return true;
+-    } else {
+-      return false;
+-    }
++  public static boolean isGeneric(Class<?> type) {
++    return (
++        !SpecificRecord.class.isAssignableFrom(type) &&
++            GenericRecord.class.isAssignableFrom(type)
++    );
+   }
+ 
+   /**
+@@ -151,8 +148,6 @@ public class DataModelUtil {
+    * @param type The Java class of the entity type
+    * @param schema The {@link Schema} for the entity
+    * @return The resolved Java class object
+-   * @throws IncompatibleSchemaException The schema for the resolved type is not
+-   * compatible with the schema that was given.
+    */
+   @SuppressWarnings("unchecked")
+   public static <E> Class<E> resolveType(Class<E> type, Schema schema) {
+@@ -164,13 +159,6 @@ public class DataModelUtil {
+       type = (Class<E>) GenericData.Record.class;
+     }
+ 
+-    Schema readerSchema = getReaderSchema(type, schema);
+-    if (false == SchemaValidationUtil.canRead(schema, readerSchema)) {
+-      throw new IncompatibleSchemaException(
+-          String.format("The reader schema derived from %s is not compatible "
+-          + "with the dataset's given writer schema.", type.toString()));
+-    }
+-
+     return type;
+   }
+ 
+@@ -194,6 +182,29 @@ public class DataModelUtil {
+   }
+ 
+   /**
++   * Get the writer schema based on the given type and dataset schema.
++   *
++   * @param <E> The entity type
++   * @param type The Java class of the entity type
++   * @param schema The {@link Schema} for the entity
++   * @return The reader schema based on the given type and writer schema
++   */
++  public static <E> Schema getWriterSchema(Class<E> type, Schema schema) {
++    Schema writerSchema = schema;
++    GenericData dataModel = getDataModelForType(type);
++    if (dataModel instanceof AllowNulls) {
++      // assume fields are non-null by default to avoid schema conflicts
++      dataModel = ReflectData.get();
++    }
++
++    if (dataModel instanceof SpecificData) {
++      writerSchema = ((SpecificData)dataModel).getSchema(type);
++    }
++
++    return writerSchema;
++  }
++
++  /**
+    * If E implements GenericRecord, but does not implement SpecificRecord, then
+    * create a new instance of E using reflection so that GenericDataumReader
+    * will use the expected type.
+@@ -210,9 +221,7 @@ public class DataModelUtil {
+   @SuppressWarnings("unchecked")
+   public static <E> E createRecord(Class<E> type, Schema schema) {
+     // Don't instantiate SpecificRecords or interfaces.
+-    if (!SpecificRecord.class.isAssignableFrom(type) &&
+-        GenericRecord.class.isAssignableFrom(type) &&
+-        !type.isInterface()) {
++    if (isGeneric(type) && !type.isInterface()) {
+       if (GenericData.Record.class.equals(type)) {
+         return (E) GenericData.get().newRecord(null, schema);
+       }
+@@ -225,9 +234,4 @@ public class DataModelUtil {
+   public static <E> EntityAccessor<E> accessor(Class<E> type, Schema schema) {
+     return new EntityAccessor<E>(type, schema);
+   }
+-
+-  public static <E> EntityAccessor<E> accessor(Schema schema) {
+-    Class<E> type = resolveType(null, schema);
+-    return new EntityAccessor<E>(type, schema);
+-  }
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/EntityAccessor.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/EntityAccessor.java
+index 6d3674b..03300d4 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/EntityAccessor.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/EntityAccessor.java
+@@ -34,13 +34,15 @@ import org.kitesdk.data.spi.partition.ProvidedFieldPartitioner;
+ public class EntityAccessor<E> {
+ 
+   private final Schema schema;
++  private final Schema writeSchema;
+   private final Class<E> type;
+   private final GenericData model;
+   private final Map<String, List<Schema.Field>> cache = Maps.newHashMap();
+ 
+-  EntityAccessor(Class<E> type, Schema readerSchema) {
+-    this.type = DataModelUtil.resolveType(type, readerSchema);
+-    this.schema = DataModelUtil.getReaderSchema(this.type, readerSchema);
++  EntityAccessor(Class<E> type, Schema schema) {
++    this.type = DataModelUtil.resolveType(type, schema);
++    this.schema = DataModelUtil.getReaderSchema(this.type, schema);
++    this.writeSchema = DataModelUtil.getWriterSchema(this.type, this.schema);
+     this.model = DataModelUtil.getDataModelForType(this.type);
+   }
+ 
+@@ -48,10 +50,14 @@ public class EntityAccessor<E> {
+     return type;
+   }
+ 
+-  public Schema getEntitySchema() {
++  public Schema getReadSchema() {
+     return schema;
+   }
+ 
++  public Schema getWriteSchema() {
++    return writeSchema;
++  }
++
+   public Object get(E object, String name) {
+     List<Schema.Field> fields = cache.get(name);
+ 
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/CSVFileReader.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/CSVFileReader.java
+index 3dc254f..95b3a0d 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/CSVFileReader.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/CSVFileReader.java
+@@ -74,7 +74,7 @@ public class CSVFileReader<E> extends AbstractDatasetReader<E> {
+                        EntityAccessor<E> accessor) {
+     this.fs = fileSystem;
+     this.path = path;
+-    this.schema = accessor.getEntitySchema();
++    this.schema = accessor.getReadSchema();
+     this.recordClass = accessor.getType();
+     this.state = ReaderWriterState.NEW;
+     this.props = CSVProperties.fromDescriptor(descriptor);
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+index 7acce63..aba40c6 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+@@ -82,6 +82,7 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+ 
+   // reusable path converter, has no relevant state
+   private final PathConversion convert;
++  private final SignalManager signalManager;
+ 
+   FileSystemDataset(FileSystem fileSystem, Path directory,
+                     String namespace, String name,
+@@ -108,9 +109,9 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+     this.uri = uri;
+ 
+     Path signalsPath = new Path(directory, SIGNALS_DIRECTORY_NAME);
+-    SignalManager signalManager = new SignalManager(fileSystem, signalsPath);
+-
+-    this.unbounded = new FileSystemPartitionView<E>(this, partitionListener, signalManager, type);
++    this.signalManager = new SignalManager(fileSystem, signalsPath);
++    this.unbounded = new FileSystemPartitionView<E>(
++        this, partitionListener, signalManager, type);
+ 
+     // remove this.partitionKey for 0.14.0
+     this.partitionKey = null;
+@@ -127,6 +128,32 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+     this.partitionKey = partitionKey;
+   }
+ 
++  private FileSystemDataset(FileSystemDataset<?> toCopy, Class<E> type) {
++    super(type, toCopy.descriptor.getSchema());
++    this.fileSystem = toCopy.fileSystem;
++    this.directory = toCopy.directory;
++    this.namespace = toCopy.namespace;
++    this.name = toCopy.name;
++    this.descriptor = toCopy.descriptor;
++    this.partitionStrategy = toCopy.partitionStrategy;
++    this.partitionListener = toCopy.partitionListener;
++    this.convert = toCopy.convert;
++    this.uri = toCopy.uri;
++    this.signalManager = toCopy.signalManager;
++    this.unbounded = new FileSystemPartitionView<E>(
++        this, partitionListener, signalManager, type);
++    this.partitionKey = null;
++  }
++
++  @Override
++  @SuppressWarnings("unchecked")
++  public <T> Dataset<T> asType(Class<T> type) {
++    if (getType().equals(type)) {
++      return (Dataset<T>) this;
++    }
++    return new FileSystemDataset<T>(this, type);
++  }
++
+   @Override
+   public URI getUri() {
+     return uri;
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
+index d46c51b..958af3a 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
+@@ -44,9 +44,7 @@ import javax.annotation.Nullable;
+ import javax.annotation.concurrent.Immutable;
+ import java.io.IOException;
+ import org.apache.avro.Schema;
+-import org.apache.avro.generic.GenericRecord;
+ import org.apache.hadoop.conf.Configuration;
+-import org.kitesdk.data.RefinableView;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+@@ -85,11 +83,12 @@ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatA
+     this.signalManager = view.signalManager;
+   }
+ 
+-  private FileSystemView(FileSystemView<?> view, Schema schema) {
+-    super(view, schema);
++  private FileSystemView(FileSystemView<?> view, Schema schema, Class<E> type) {
++    super(view, schema, type);
+     this.fs = view.fs;
+     this.root = view.root;
+     this.listener = view.listener;
++    this.signalManager = view.signalManager;
+   }
+ 
+   @Override
+@@ -98,12 +97,13 @@ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatA
+   }
+ 
+   @Override
+-  public <T extends GenericRecord> RefinableView<T> asSchema(Schema schema) {
+-    return new FileSystemView<T>(this, schema);
++  protected <T> AbstractRefinableView<T> project(Schema schema, Class<T> type) {
++    return new FileSystemView<T>(this, schema, type);
+   }
+ 
+   @Override
+   public DatasetReader<E> newReader() {
++    checkSchemaForRead();
+     AbstractDatasetReader<E> reader = new MultiFileDatasetReader<E>(fs,
+         pathIterator(), dataset.getDescriptor(), constraints, getAccessor());
+     reader.initialize();
+@@ -112,6 +112,7 @@ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatA
+ 
+   @Override
+   public DatasetWriter<E> newWriter() {
++    checkSchemaForWrite();
+     AbstractDatasetWriter<E> writer;
+     if (dataset.getDescriptor().isPartitioned()) {
+       writer = PartitionedDatasetWriter.newWriter(this);
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemViewKeyInputFormat.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemViewKeyInputFormat.java
+index df1a1e4..bff5b5d 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemViewKeyInputFormat.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemViewKeyInputFormat.java
+@@ -15,19 +15,15 @@
+  */
+ package org.kitesdk.data.spi.filesystem;
+ 
+-import com.google.common.base.Preconditions;
+ import com.google.common.collect.ImmutableList;
+ import com.google.common.collect.Lists;
+ import java.io.IOException;
+ import java.util.Iterator;
+ import java.util.List;
+-import org.apache.avro.Schema;
+ import org.apache.avro.hadoop.io.AvroSerialization;
+ import org.apache.avro.mapred.AvroKey;
+ import org.apache.avro.mapreduce.AvroJob;
+ import org.apache.avro.mapreduce.AvroKeyInputFormat;
+-import org.apache.avro.specific.SpecificData;
+-import org.apache.avro.specific.SpecificRecord;
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.fs.Path;
+ import org.apache.hadoop.io.NullWritable;
+@@ -59,7 +55,6 @@ class FileSystemViewKeyInputFormat<E> extends InputFormat<E, Void> {
+   // Constant from AvroJob copied here so we can set it on the Configuration
+   // given to this class.
+   private static final String AVRO_SCHEMA_INPUT_KEY = "avro.schema.input.key";
+-  private static final String KITE_READER_SCHEMA = "kite.readerSchema";
+ 
+   // this is required for 1.7.4 because setDataModelClass is not available
+   private static final DynMethods.StaticMethod setModel =
+@@ -74,45 +69,38 @@ class FileSystemViewKeyInputFormat<E> extends InputFormat<E, Void> {
+   public FileSystemViewKeyInputFormat(FileSystemDataset<E> dataset,
+       Configuration conf) {
+     this.dataset = dataset;
++    this.view = null;
+     LOG.debug("Dataset: {}", dataset);
+ 
+     Format format = dataset.getDescriptor().getFormat();
+ 
+-    boolean isSpecific = SpecificRecord.class.isAssignableFrom(dataset.getType());
+-    String readerSchema = conf.get(KITE_READER_SCHEMA);
+-
+-    Preconditions.checkState(!isSpecific || readerSchema == null,
+-      "Illegal configuration: {} must not be set if dataset uses a specific type {}",
+-      KITE_READER_SCHEMA, dataset.getType());
+-
+-    if (isSpecific) {
+-      readerSchema = SpecificData.get().getSchema(dataset.getType()).toString();
+-    }
+-
+-    if (Formats.AVRO.equals(format)) {
+-      setModel.invoke(conf,
+-          DataModelUtil.getDataModelForType(dataset.getType()).getClass());
+-
+-      // Use the reader's schema type if provided.
+-      if (readerSchema != null) {
+-
+-        conf.set(AVRO_SCHEMA_INPUT_KEY, readerSchema);
+-      }
+-    } else if (Formats.PARQUET.equals(format)) {
+-
+-      // Use the reader's schema type if provided.
+-      if (readerSchema != null) {
+-
+-        AvroReadSupport.setAvroReadSchema(conf,
+-          new Schema.Parser().parse(readerSchema));
++    if (!DataModelUtil.isGeneric(dataset.getType())) {
++      if (Formats.AVRO.equals(format)) {
++        setModel.invoke(conf,
++            DataModelUtil.getDataModelForType(dataset.getType()).getClass());
++        conf.set(AVRO_SCHEMA_INPUT_KEY, dataset.getSchema().toString());
++      } else if (Formats.PARQUET.equals(format)) {
++        // TODO: when available, use AvroReadSupport.setDataModelSupplier
++        AvroReadSupport.setAvroReadSchema(conf, dataset.getSchema());
+       }
+     }
+   }
+ 
+   public FileSystemViewKeyInputFormat(FileSystemView<E> view, Configuration conf) {
+-    this((FileSystemDataset<E>) view.getDataset(), conf);
++    this.dataset = (FileSystemDataset<E>) view.getDataset();
+     this.view = view;
+     LOG.debug("View: {}", view);
++
++    Format format = dataset.getDescriptor().getFormat();
++
++    if (Formats.AVRO.equals(format)) {
++      setModel.invoke(conf,
++          DataModelUtil.getDataModelForType(view.getType()).getClass());
++      conf.set(AVRO_SCHEMA_INPUT_KEY, view.getSchema().toString());
++    } else if (Formats.PARQUET.equals(format)) {
++      // TODO: when available, use AvroReadSupport.setDataModelSupplier
++      AvroReadSupport.setAvroReadSchema(conf, view.getSchema());
++    }
+   }
+ 
+   @Override
+@@ -128,8 +116,6 @@ class FileSystemViewKeyInputFormat<E> extends InputFormat<E, Void> {
+         AvroKeyInputFormat<E> delegate = new AvroKeyInputFormat<E>();
+         return delegate.getSplits(jobContext);
+       } else if (Formats.PARQUET.equals(format)) {
+-        // TODO: use later version of parquet (with https://github.com/Parquet/parquet-mr/pull/282) so we can set the schema correctly
+-        // AvroParquetInputFormat.setReadSchema(job, view.getDescriptor().getSchema());
+         AvroParquetInputFormat delegate = new AvroParquetInputFormat();
+         return delegate.getSplits(jobContext);
+       } else if (Formats.JSON.equals(format)) {
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/JSONFileReader.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/JSONFileReader.java
+index e103c99..134e6ac 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/JSONFileReader.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/JSONFileReader.java
+@@ -63,7 +63,7 @@ public class JSONFileReader<E> extends AbstractDatasetReader<E> {
+                         EntityAccessor<E> accessor) {
+     this.fs = fileSystem;
+     this.path = path;
+-    this.schema = accessor.getEntitySchema();
++    this.schema = accessor.getReadSchema();
+     this.model = DataModelUtil.getDataModelForType(accessor.getType());
+     this.state = ReaderWriterState.NEW;
+   }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/MultiFileDatasetReader.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/MultiFileDatasetReader.java
+index e8d295e..d13b89b 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/MultiFileDatasetReader.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/MultiFileDatasetReader.java
+@@ -90,7 +90,7 @@ class MultiFileDatasetReader<E> extends AbstractDatasetReader<E> {
+   private void openNextReader() {
+     if (Formats.PARQUET.equals(descriptor.getFormat())) {
+       this.reader = new ParquetFileSystemDatasetReader(fileSystem,
+-          filesIter.next(), accessor.getEntitySchema(), accessor.getType());
++          filesIter.next(), accessor.getReadSchema(), accessor.getType());
+     } else if (Formats.JSON.equals(descriptor.getFormat())) {
+       this.reader = new JSONFileReader<E>(
+           fileSystem, filesIter.next(), accessor);
+@@ -101,7 +101,7 @@ class MultiFileDatasetReader<E> extends AbstractDatasetReader<E> {
+       this.reader = new InputFormatReader(fileSystem, filesIter.next(), descriptor);
+     } else {
+       this.reader = new FileSystemDatasetReader<E>(fileSystem, filesIter.next(),
+-          accessor.getEntitySchema(), accessor.getType());
++          accessor.getReadSchema(), accessor.getType());
+     }
+     reader.initialize();
+     this.readerIterator = Iterators.filter(reader,
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDatasetRepository.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDatasetRepository.java
+index 5b8805b..6cf097a 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDatasetRepository.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDatasetRepository.java
+@@ -295,11 +295,14 @@ public class TestFileSystemDatasetRepository extends TestDatasetRepositories {
+           .schema(ReflectData.AllowNull.get().getSchema(ObjectPoJo.class))
+           .build(), ObjectPoJo.class);
+ 
+-      TestHelpers.assertThrows("AllowNull primitives should not accept null",
++      // should load the dataset because PrimitivePoJo can be used to write
++      final Dataset<PrimitivePoJo> dataset = repo.load(
++          NAMESPACE, name, PrimitivePoJo.class);
++      TestHelpers.assertThrows("AllowNull primitives cannot read nullable type",
+           IncompatibleSchemaException.class, new Runnable() {
+             @Override
+             public void run() {
+-              repo.load(NAMESPACE, name, PrimitivePoJo.class);
++              dataset.newReader();
+             }
+           });
+ 
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestProjection.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestProjection.java
+index bae058e..48040ec 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestProjection.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestProjection.java
+@@ -20,19 +20,26 @@ import com.google.common.io.Closeables;
+ import java.io.IOException;
+ import java.net.URI;
+ import java.util.Set;
++import org.apache.avro.Schema;
++import org.apache.avro.generic.GenericRecord;
++import org.apache.avro.generic.GenericRecordBuilder;
+ import org.apache.hadoop.fs.Path;
+ import org.junit.After;
+ import org.junit.Test;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetWriter;
++import org.kitesdk.data.Datasets;
+ import org.kitesdk.data.IncompatibleSchemaException;
++import org.kitesdk.data.TestHelpers;
++import org.kitesdk.data.View;
+ import org.kitesdk.data.event.IncompatibleEvent;
+ import org.kitesdk.data.event.ReflectSmallEvent;
+ import org.kitesdk.data.event.ReflectStandardEvent;
+ import org.kitesdk.data.event.SmallEvent;
+ import org.kitesdk.data.event.StandardEvent;
+ import org.kitesdk.data.spi.DatasetRepository;
++import org.kitesdk.data.spi.Schemas;
+ import org.kitesdk.data.spi.TestRefinableViews;
+ 
+ public class TestProjection extends TestRefinableViews {
+@@ -55,7 +62,74 @@ public class TestProjection extends TestRefinableViews {
+   }
+ 
+   @Test
+-  public void testSpecificProjection() throws IOException {
++  public void testGenericProjectionAsSchema() throws IOException {
++    Dataset<StandardEvent> original = Datasets.load(
++        unbounded.getUri(), StandardEvent.class);
++    Schema standardEvent = Schemas.fromAvsc(conf,
++        URI.create("resource:standard_event.avsc"));
++    final Schema smallEvent = Schemas.fromAvsc(conf,
++        URI.create("resource:small_event.avsc"));
++
++    DatasetWriter<GenericRecord> writer = null;
++    try {
++      writer = original.asSchema(standardEvent).newWriter();
++      writer.write(toGeneric(sepEvent, standardEvent));
++      writer.write(toGeneric(octEvent, standardEvent));
++      writer.write(toGeneric(novEvent, standardEvent));
++    } finally {
++      Closeables.close(writer, false);
++    }
++
++    final View<GenericRecord> smallEvents = original.asSchema(smallEvent);
++
++    Set<GenericRecord> expected = Sets.newHashSet(
++        toGeneric(toSmallEvent(sepEvent), smallEvent),
++        toGeneric(toSmallEvent(octEvent), smallEvent),
++        toGeneric(toSmallEvent(novEvent), smallEvent));
++
++    assertContentEquals(expected, smallEvents);
++
++    TestHelpers.assertThrows("Should not be able to write small events",
++        IncompatibleSchemaException.class, new Runnable() {
++          @Override
++          public void run() {
++            smallEvents.newWriter();
++          }
++        });
++  }
++
++  @Test
++  public void testSpecificProjectionAsType() throws IOException {
++    Dataset<GenericRecord> original = Datasets.load(unbounded.getUri());
++
++    DatasetWriter<StandardEvent> writer = null;
++    try {
++      writer = original.asType(StandardEvent.class).newWriter();
++      writer.write(sepEvent);
++      writer.write(octEvent);
++      writer.write(novEvent);
++    } finally {
++      Closeables.close(writer, false);
++    }
++
++    final View<SmallEvent> smallEvents = original.asType(SmallEvent.class);
++
++    Set<SmallEvent> expected = Sets.newHashSet(toSmallEvent(sepEvent),
++        toSmallEvent(octEvent), toSmallEvent(novEvent));
++
++    assertContentEquals(expected, smallEvents);
++
++    TestHelpers.assertThrows("Should not be able to write small events",
++        IncompatibleSchemaException.class, new Runnable() {
++          @Override
++          public void run() {
++            smallEvents.newWriter();
++          }
++        });
++  }
++
++  @Test
++  public void testSpecificProjectionLoad() throws IOException {
+     DatasetWriter<StandardEvent> writer = null;
+     try {
+       writer = unbounded.newWriter();
+@@ -77,12 +151,49 @@ public class TestProjection extends TestRefinableViews {
+   }
+ 
+   @Test
+-  public void testReflectProjection() throws IOException {
++  public void testReflectProjectionAsType() throws IOException {
++    Dataset<StandardEvent> original = repo.create(
++        "ns", "reflectProjection",
++        new DatasetDescriptor.Builder()
++            .schema(StandardEvent.class)
++            .build(),
++        StandardEvent.class);
++
++    DatasetWriter<ReflectStandardEvent> writer = null;
++    try {
++      writer = original.asType(ReflectStandardEvent.class).newWriter();
++      writer.write(new ReflectStandardEvent(sepEvent));
++      writer.write(new ReflectStandardEvent(octEvent));
++      writer.write(new ReflectStandardEvent(novEvent));
++    } finally {
++      Closeables.close(writer, false);
++    }
++
++    final View<ReflectSmallEvent> smallEvents = original.asType(ReflectSmallEvent.class);
++
++    Set<ReflectSmallEvent> expected = Sets.newHashSet(
++        new ReflectSmallEvent(sepEvent), new ReflectSmallEvent(octEvent),
++        new ReflectSmallEvent(novEvent));
++
++    assertContentEquals(expected, smallEvents);
++
++    TestHelpers.assertThrows("Should not be able to write small events",
++        IncompatibleSchemaException.class, new Runnable() {
++          @Override
++          public void run() {
++            smallEvents.newWriter();
++          }
++        });
++  }
++
++  @Test
++  public void testReflectProjectionLoad() throws IOException {
+     Dataset<ReflectStandardEvent> original = repo.create(
+         "ns", "reflectProjection",
+         new DatasetDescriptor.Builder()
+             .schema(ReflectStandardEvent.class)
+-            .build(), ReflectStandardEvent.class);
++            .build(),
++        ReflectStandardEvent.class);
+ 
+     DatasetWriter<ReflectStandardEvent> writer = null;
+     try {
+@@ -94,7 +205,7 @@ public class TestProjection extends TestRefinableViews {
+       Closeables.close(writer, false);
+     }
+ 
+-    Dataset<ReflectSmallEvent> dataset = repo.load("ns", original.getName(),
++    View<ReflectSmallEvent> dataset = repo.load("ns", original.getName(),
+         ReflectSmallEvent.class);
+ 
+     Set<ReflectSmallEvent> expected = Sets.newHashSet(
+@@ -131,7 +242,7 @@ public class TestProjection extends TestRefinableViews {
+     assertContentEquals(expected, dataset);
+   }
+ 
+-  @Test(expected=IncompatibleSchemaException.class)
++  @Test
+   public void testIncompatibleProjection() throws IOException {
+     DatasetWriter<StandardEvent> writer = null;
+     try {
+@@ -143,7 +254,31 @@ public class TestProjection extends TestRefinableViews {
+       Closeables.close(writer, false);
+     }
+ 
+-    repo.load("ns", unbounded.getDataset().getName(), IncompatibleEvent.class);
++    TestHelpers.assertThrows(
++        "Should not load a dataset with an incompatible class",
++        IncompatibleSchemaException.class, new Runnable() {
++          @Override
++          public void run() {
++            repo.load("ns", unbounded.getDataset().getName(),
++                IncompatibleEvent.class);
++          }
++        });
++
++    TestHelpers.assertThrows("Should reject a schema that can't read or write",
++        IncompatibleSchemaException.class, new Runnable() {
++          @Override
++          public void run() {
++            unbounded.asType(IncompatibleEvent.class);
++          }
++        });
++
++    TestHelpers.assertThrows("Should reject a schema that can't read or write",
++        IncompatibleSchemaException.class, new Runnable() {
++          @Override
++          public void run() {
++            unbounded.getDataset().asType(IncompatibleEvent.class);
++          }
++        });
+   }
+ 
+   private static SmallEvent toSmallEvent(StandardEvent event) {
+@@ -153,10 +288,11 @@ public class TestProjection extends TestRefinableViews {
+         .build();
+   }
+ 
+-  private static IncompatibleEvent toIncompatibleEvent(StandardEvent event) {
+-    return IncompatibleEvent.newBuilder()
+-        .setUserId(String.valueOf(event.getUserId()))
+-        .setSessionId(event.getSessionId())
+-        .build();
++  private static GenericRecord toGeneric(GenericRecord rec, Schema schema) {
++    GenericRecordBuilder builder = new GenericRecordBuilder(schema);
++    for (Schema.Field field : schema.getFields()) {
++      builder.set(field, rec.get(field.name()));
++    }
++    return builder.build();
+   }
+ }
+diff --git a/kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/DaoView.java b/kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/DaoView.java
+index c63a5e9..911233b 100644
+--- a/kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/DaoView.java
++++ b/kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/DaoView.java
+@@ -39,9 +39,7 @@ import org.kitesdk.data.spi.Marker;
+ import org.kitesdk.data.spi.MarkerRange;
+ import java.util.List;
+ import org.apache.avro.Schema;
+-import org.apache.avro.generic.GenericRecord;
+ import org.apache.hadoop.conf.Configuration;
+-import org.kitesdk.data.RefinableView;
+ 
+ class DaoView<E> extends AbstractRefinableView<E> implements InputFormatAccessor<E> {
+ 
+@@ -57,9 +55,9 @@ class DaoView<E> extends AbstractRefinableView<E> implements InputFormatAccessor
+     this.dataset = view.dataset;
+   }
+ 
+-  private DaoView(DaoView<?> view, Schema schema) {
+-    super(view, schema);
+-    this.dataset = (DaoDataset<E>) view.dataset;
++  private DaoView(DaoView<?> view, Schema schema, Class<E> type) {
++    super(view, schema, type);
++    this.dataset = (DaoDataset<E>) view.dataset.asType(type);
+   }
+ 
+   @Override
+@@ -68,8 +66,8 @@ class DaoView<E> extends AbstractRefinableView<E> implements InputFormatAccessor
+   }
+ 
+   @Override
+-  public <T extends GenericRecord> RefinableView<T> asSchema(Schema schema) {
+-    return new DaoView<T>(this, schema);
++  protected <T> AbstractRefinableView<T> project(Schema schema, Class<T> type) {
++    return new DaoView<T>(this, schema, type);
+   }
+ 
+   EntityScanner<E> newEntityScanner() {
+diff --git a/kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/avro/AvroEntityComposer.java b/kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/avro/AvroEntityComposer.java
+index 61b09cf..fa8c273 100644
+--- a/kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/avro/AvroEntityComposer.java
++++ b/kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/avro/AvroEntityComposer.java
+@@ -116,8 +116,8 @@ public class AvroEntityComposer<E extends IndexedRecord> implements
+   public Object extractField(E entity, String fieldName) {
+     // make sure the field is a direct child of the schema
+     ValidationException.check(
+-        accessor.getEntitySchema().getField(fieldName) != null,
+-        "No field named %s in schema %s", fieldName, accessor.getEntitySchema());
++        accessor.getReadSchema().getField(fieldName) != null,
++        "No field named %s in schema %s", fieldName, accessor.getReadSchema());
+     return accessor.get(entity, fieldName);
+   }
+ 
+diff --git a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java
+index fca0703..fbc98c4 100644
+--- a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java
++++ b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java
+@@ -22,7 +22,7 @@ import java.util.List;
+ import java.util.Map;
+ import org.apache.avro.Schema;
+ import org.apache.avro.generic.GenericData;
+-import org.apache.avro.specific.SpecificRecord;
++import org.apache.avro.generic.GenericRecord;
+ import org.apache.hadoop.conf.Configurable;
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.fs.Path;
+@@ -111,7 +111,11 @@ public class DatasetKeyInputFormat<E> extends InputFormat<E, Void>
+       }
+ 
+       if (DataModelUtil.isGeneric(view.getType())) {
+-        withSchema(view.getSchema());
++        Schema datasetSchema = view.getDataset().getDescriptor().getSchema();
++        // only set the read schema if the view is a projection
++        if (!datasetSchema.equals(view.getSchema())) {
++          withSchema(view.getSchema());
++        }
+       } else {
+         withType(view.getType());
+       }
+@@ -147,16 +151,21 @@ public class DatasetKeyInputFormat<E> extends InputFormat<E, Void>
+      */
+     public <E> ConfigBuilder withType(Class<E> type) {
+       String readerSchema = conf.get(KITE_READER_SCHEMA);
+-      Preconditions.checkArgument(DataModelUtil.isGeneric(type) || readerSchema == null,
+-        "Can't configure a type when a reader schema is already set: {}", readerSchema);
++      Preconditions.checkArgument(
++          DataModelUtil.isGeneric(type) || readerSchema == null,
++          "Can't configure a type when a reader schema is already set: {}",
++          readerSchema);
++
+       conf.setClass(KITE_TYPE, type, type);
+       return this;
+     }
+ 
+     public ConfigBuilder withSchema(Schema readerSchema) {
+       Class<?> type = conf.getClass(KITE_TYPE, null);
+-      Preconditions.checkArgument(type == null,
+-        "Can't configure a reader schema when a type is already set: {}", type);
++      Preconditions.checkArgument(
++          type == null || DataModelUtil.isGeneric(type),
++          "Can't configure a reader schema when a type is already set: {}",
++          type);
+ 
+       conf.set(KITE_READER_SCHEMA, readerSchema.toString());
+       return this;
+@@ -267,8 +276,19 @@ public class DatasetKeyInputFormat<E> extends InputFormat<E, Void>
+         throw e;
+       }
+     }
++
++    String schemaStr = conf.get(KITE_READER_SCHEMA);
++    Schema projection = null;
++    if (schemaStr != null) {
++      projection = new Schema.Parser().parse(schemaStr);
++    }
++
+     String inputUri = conf.get(KITE_INPUT_URI);
+-    return Datasets.<E, View<E>>load(inputUri, type);
++    if (projection != null) {
++      return Datasets.load(inputUri).asSchema(projection).asType(type);
++    } else {
++      return Datasets.load(inputUri, type);
++    }
+   }
+ 
+   @Override
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/BaseDatasetCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/BaseDatasetCommand.java
+index 854ac0e..e4ae0a0 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/BaseDatasetCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/BaseDatasetCommand.java
+@@ -23,6 +23,7 @@ import com.google.common.base.Preconditions;
+ import java.net.URI;
+ import java.util.List;
+ import java.util.Map;
++import org.apache.avro.generic.GenericRecord;
+ import org.kitesdk.data.Datasets;
+ import org.kitesdk.data.URIBuilder;
+ import org.kitesdk.data.View;
+@@ -107,6 +108,14 @@ abstract class BaseDatasetCommand extends BaseCommand {
+     if (isDatasetOrViewUri(uriOrName)) {
+       return Datasets.<E, View<E>>load(uriOrName, type);
+     } else {
++      return getDatasetRepository().load(namespace, uriOrName, type);
++    }
++  }
++
++  protected View<GenericRecord> load(String uriOrName) {
++    if (isDatasetOrViewUri(uriOrName)) {
++      return Datasets.load(uriOrName);
++    } else {
+       return getDatasetRepository().load(namespace, uriOrName);
+     }
+   }
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
+index 93752dd..84484ee 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
+@@ -22,13 +22,13 @@ import com.google.common.base.Preconditions;
+ import com.google.common.collect.Lists;
+ import java.io.IOException;
+ import java.util.List;
++import org.apache.avro.generic.GenericRecord;
+ import org.apache.crunch.PipelineResult;
+ import org.apache.crunch.Target;
+ import org.kitesdk.data.View;
+ import org.kitesdk.tools.CopyTask;
+ import org.slf4j.Logger;
+ 
+-import static org.apache.avro.generic.GenericData.Record;
+ import org.apache.hadoop.hive.conf.HiveConf;
+ import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
+ import org.apache.hadoop.hive.thrift.DelegationTokenIdentifier;
+@@ -67,10 +67,11 @@ public class CopyCommand extends BaseDatasetCommand {
+     Preconditions.checkArgument(datasets.size() == 2,
+         "Cannot copy multiple datasets");
+ 
+-    View<Record> dest = load(datasets.get(1), Record.class);
+-    View<Record> source = load(datasets.get(0), Record.class).asSchema(dest.getSchema());
++    View<GenericRecord> dest = load(datasets.get(1));
++    View<GenericRecord> source = load(datasets.get(0))
++        .asSchema(dest.getSchema());
+ 
+-    CopyTask task = new CopyTask<Record>(source, dest);
++    CopyTask task = new CopyTask<GenericRecord>(source, dest);
+ 
+     JobConf conf = new JobConf(getConf());
+ 
+@@ -123,7 +124,7 @@ public class CopyCommand extends BaseDatasetCommand {
+     );
+   }
+ 
+-  private boolean isHiveView(View<Record> view) {
++  private boolean isHiveView(View<?> view) {
+     return view.getDataset().getUri().toString().startsWith("dataset:hive:");
+   }
+ }
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/UpdateDatasetCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/UpdateDatasetCommand.java
+index 46ecf13..7fe967f 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/UpdateDatasetCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/UpdateDatasetCommand.java
+@@ -24,6 +24,7 @@ import java.io.IOException;
+ import java.util.Iterator;
+ import java.util.List;
+ import org.apache.avro.generic.GenericData;
++import org.apache.avro.generic.GenericRecord;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.Datasets;
+@@ -61,7 +62,7 @@ public class UpdateDatasetCommand extends BaseDatasetCommand {
+     }
+ 
+     String dataset = datasets.remove(0);
+-    Dataset<GenericData.Record> currentDataset = load(dataset, GenericData.Record.class).getDataset();
++    Dataset<GenericRecord> currentDataset = load(dataset).getDataset();
+ 
+     DatasetDescriptor.Builder descriptorBuilder = new DatasetDescriptor
+         .Builder(currentDataset.getDescriptor());
+-- 
+1.7.0.4
+

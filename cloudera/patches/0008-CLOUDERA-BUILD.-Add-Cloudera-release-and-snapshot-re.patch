@@ -1,0 +1,39 @@
+From a1f3d4d219bf3b52caae35bc9e2c883256265a3b Mon Sep 17 00:00:00 2001
+From: Joey Echeverria <joey@cloudera.com>
+Date: Fri, 24 Oct 2014 09:45:57 -0700
+Subject: [PATCH 008/115] CLOUDERA-BUILD. Add Cloudera release and snapshot repos to the pom
+
+---
+ pom.xml |   16 ++++++++++++++++
+ 1 files changed, 16 insertions(+), 0 deletions(-)
+
+diff --git a/pom.xml b/pom.xml
+index e2d6e05..6b07146 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -212,6 +212,22 @@
+         <enabled>false</enabled>
+       </snapshots>
+     </repository>
++    <repository>
++      <snapshots>
++        <enabled>false</enabled>
++      </snapshots>
++      <id>cloudera-central</id>
++      <name>libs-release</name>
++      <url>https://repository.cloudera.com/artifactory/libs-release</url>
++    </repository>
++    <repository>
++      <snapshots>
++        <enabled>true</enabled>
++      </snapshots>
++      <id>cloudera-snapshots</id>
++      <name>libs-snapshot</name>
++      <url>https://repository.cloudera.com/artifactory/libs-snapshot</url>
++    </repository>
+   </repositories>
+ 
+   <build>
+-- 
+1.7.0.4
+

@@ -1,0 +1,70 @@
+From c1511c12488a0037f7f18646e3382b166bb87f52 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 16 Sep 2015 12:03:52 -0700
+Subject: [PATCH 108/115] KITE-1057: Fix signal path for single data file.
+
+The CLI will create a dataset around a single data file, but the
+FileSystemDataset code assumed that the path it uses is a directory.
+This caused errors because the signal manager attempted to use the
+incoming data file path as a directory that potentially contained the
+signals folder. This updates the FileSystemDataset to use the data
+file's parent for the signal path.
+---
+ .../data/spi/filesystem/FileSystemDataset.java     |   22 +++++++++++++++++++-
+ .../kitesdk/data/spi/filesystem/SignalManager.java |    2 +-
+ 2 files changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+index 09d68ad..d22efd8 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+@@ -110,7 +110,8 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+     this.convert = new PathConversion(descriptor.getSchema());
+     this.uri = uri;
+ 
+-    Path signalsPath = new Path(directory, SIGNALS_DIRECTORY_NAME);
++    Path signalsPath = new Path(getDirectory(fileSystem, directory),
++        SIGNALS_DIRECTORY_NAME);
+     this.signalManager = new SignalManager(fileSystem, signalsPath);
+     this.unbounded = new FileSystemPartitionView<E>(
+         this, partitionListener, signalManager, type);
+@@ -698,4 +699,23 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+     }
+   }
+ 
++  /**
++   * Returns the closest directory for the given {@code path}.
++   *
++   * @param fs a {@link FileSystem} to search
++   * @param path a {@link Path} to resolve
++   * @return the closest directory to {@link Path}
++   */
++  private static Path getDirectory(FileSystem fs, Path path) {
++    try {
++      if (!fs.exists(path) || fs.isDirectory(path)) {
++        return path;
++      } else {
++        return path.getParent();
++      }
++
++    } catch (IOException e) {
++      throw new DatasetIOException("Cannot access path: " + path, e);
++    }
++  }
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/SignalManager.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/SignalManager.java
+index b0b502b..a678609 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/SignalManager.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/SignalManager.java
+@@ -45,7 +45,7 @@ public class SignalManager {
+   /**
+    * Creates a new signal manager using the given signal directory.
+    *
+-   * @param conf the Hadoop configuration
++   * @param fileSystem a FileSystem that holds the signalDirectory
+    * @param signalDirectory directory in which the manager
+    *                        stores signals.
+    *
+-- 
+1.7.0.4
+

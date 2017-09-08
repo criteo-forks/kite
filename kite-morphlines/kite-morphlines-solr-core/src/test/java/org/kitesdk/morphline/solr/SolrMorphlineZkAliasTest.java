@@ -1,10 +1,11 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
+/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
@@ -17,32 +18,43 @@
 package org.kitesdk.morphline.solr;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.Iterator;
 
-import com.carrotsearch.randomizedtesting.annotations.ThreadLeakFilters;
-import org.apache.lucene.util.LuceneTestCase.Slow;
+import org.apache.lucene.util.LuceneTestCase.SuppressCodecs;
 import org.apache.solr.client.solrj.SolrQuery;
-import org.apache.solr.client.solrj.request.CollectionAdminRequest;
-import org.apache.solr.client.solrj.request.UpdateRequest;
+import org.apache.solr.client.solrj.SolrServerException;
+import org.apache.solr.client.solrj.request.QueryRequest;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.SolrDocument;
-import org.apache.solr.util.BadHdfsThreadsFilter;
-import org.junit.Test;
+import org.apache.solr.common.params.CollectionParams.CollectionAction;
+import org.apache.solr.common.params.ModifiableSolrParams;
+import org.apache.solr.common.util.NamedList;
 import org.kitesdk.morphline.api.Record;
 import org.kitesdk.morphline.base.Fields;
 import org.kitesdk.morphline.base.Notifications;
 
-@ThreadLeakFilters(defaultFilters = true, filters = {
-    BadHdfsThreadsFilter.class // hdfs currently leaks thread(s)
-})
-@Slow
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakAction;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakAction.Action;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakLingering;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakScope.Scope;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakZombies;
+import com.carrotsearch.randomizedtesting.annotations.ThreadLeakZombies.Consequence;
+
+@ThreadLeakAction({Action.WARN})
+@ThreadLeakLingering(linger = 0)
+@ThreadLeakZombies(Consequence.CONTINUE)
+@ThreadLeakScope(Scope.NONE)
+@SuppressCodecs({"Lucene3x", "Lucene40"})
 public class SolrMorphlineZkAliasTest extends AbstractSolrMorphlineZkTest {
-
-  @Test
-  public void test() throws Exception {
-
-    CollectionAdminRequest.createAlias("aliascollection", "collection1")
-        .process(cluster.getSolrClient());
+    
+  @Override
+  public void doTest() throws Exception {
+    
+    waitForRecoveriesToFinish(false);
+    
+    createAlias("aliascollection", "collection1");
     
     morphline = parse("test-morphlines" + File.separator + "loadSolrBasic", "aliascollection");
     Record record = new Record();
@@ -77,11 +89,9 @@ public class SolrMorphlineZkAliasTest extends AbstractSolrMorphlineZkTest {
     
     assertFalse(citer.hasNext());
     
-    Notifications.notifyCommitTransaction(morphline);
-    new UpdateRequest().commit(cluster.getSolrClient(), COLLECTION);
+    commit();
     
-    QueryResponse rsp = cluster.getSolrClient()
-        .query(COLLECTION, new SolrQuery("*:*").setRows(100000).addSort(Fields.ID, SolrQuery.ORDER.asc));
+    QueryResponse rsp = cloudClient.query(new SolrQuery("*:*").setRows(100000).addSort(Fields.ID, SolrQuery.ORDER.asc));
     //System.out.println(rsp);
     Iterator<SolrDocument> iter = rsp.getResults().iterator();
     assertEquals(expected.getFields(), next(iter));
@@ -90,17 +100,26 @@ public class SolrMorphlineZkAliasTest extends AbstractSolrMorphlineZkTest {
     
     Notifications.notifyRollbackTransaction(morphline);
     Notifications.notifyShutdown(morphline);
-
-    CollectionAdminRequest.createAlias("aliascollection", "collection1,collection2")
-        .processAndWait(cluster.getSolrClient(), TIMEOUT);
-
-//    try {
-//      parse("test-morphlines" + File.separator + "loadSolrBasic", "aliascollection");
-//      fail("Expected IAE because update alias maps to multiple collections");
-//    } catch (IllegalArgumentException e) {
-//      
-//    }
-
+    
+    
+    createAlias("aliascollection", "collection1,collection2");
+    
+    try {
+      parse("test-morphlines" + File.separator + "loadSolrBasic", "aliascollection");
+      fail("Expected IAE because update alias maps to multiple collections");
+    } catch (IllegalArgumentException e) {
+      
+    }
+  }
+  
+  private NamedList<Object> createAlias(String alias, String collections) throws SolrServerException, IOException {
+    ModifiableSolrParams params = new ModifiableSolrParams();
+    params.set("collections", collections);
+    params.set("name", alias);
+    params.set("action", CollectionAction.CREATEALIAS.toString());
+    QueryRequest request = new QueryRequest(params);
+    request.setPath("/admin/collections");
+    return cloudClient.request(request);
   }
 
 }

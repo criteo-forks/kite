@@ -1,0 +1,57 @@
+From 35ac102bf15b8eb997b54abe4cdc0dae52644578 Mon Sep 17 00:00:00 2001
+From: Tom White <tom@cloudera.com>
+Date: Tue, 26 May 2015 16:46:58 +0100
+Subject: [PATCH 064/115] CDK-988. Address Ryan's feedback.
+
+---
+ .../LongFixedSizeRangeFieldPartitioner.java        |    2 +-
+ .../java/org/kitesdk/data/spi/predicates/In.java   |    2 +-
+ .../spi/partition/TestPartitionerProjection.java   |    6 ++++++
+ 3 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/LongFixedSizeRangeFieldPartitioner.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/LongFixedSizeRangeFieldPartitioner.java
+index f62c598..2cbb853 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/LongFixedSizeRangeFieldPartitioner.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/LongFixedSizeRangeFieldPartitioner.java
+@@ -80,7 +80,7 @@ public class LongFixedSizeRangeFieldPartitioner extends FieldPartitioner<Long, L
+     } else if (predicate instanceof In) {
+       Set<Long> possibleValues = Sets.newHashSet();
+       In<Long> in = ((In<Long>) predicate).transform(this);
+-      for (Long val : in.getSet()) {
++      for (Long val : Predicates.asSet(in)) {
+         boolean matchedAll = true;
+         for (long i = 0; i < size; i++) {
+           matchedAll = matchedAll && predicate.apply(val + i);
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java
+index 8575b71..e22b878 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java
+@@ -89,7 +89,7 @@ public class In<T> extends RegisteredPredicate<T> {
+     return new In<V>(Iterables.transform(set, function));
+   }
+ 
+-  public Set<T> getSet() {
++  Set<T> getSet() {
+     return set;
+   }
+ 
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestPartitionerProjection.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestPartitionerProjection.java
+index c061f2f..34aeb64 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestPartitionerProjection.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestPartitionerProjection.java
+@@ -283,6 +283,12 @@ public class TestPartitionerProjection {
+         fp.project(Ranges.closed(4L, 15L)));
+     Assert.assertEquals(Ranges.closed(5L, 20L),
+         fp.project(Ranges.openClosed(5L, 21L)));
++    Assert.assertEquals(Ranges.atMost(15L),
++        fp.project(Ranges.atMost(15L)));
++    Assert.assertEquals(Ranges.atMost(20L),
++        fp.project(Ranges.lessThan(21L)));
++    Assert.assertEquals(Ranges.atLeast(10L),
++        fp.project(Ranges.atLeast(14L)));
+ 
+     Assert.assertEquals(Ranges.singleton(10L),
+         fp.projectStrict(Ranges.open(5L, 15L)));
+-- 
+1.7.0.4
+

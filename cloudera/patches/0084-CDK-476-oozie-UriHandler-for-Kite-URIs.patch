@@ -1,0 +1,851 @@
+From 1f3dca785fea6c30505e5c4fb00faf6efb2fbb12 Mon Sep 17 00:00:00 2001
+From: Ben Brown <benjamin.l.brown@gmail.com>
+Date: Thu, 11 Jun 2015 17:45:15 -0400
+Subject: [PATCH 084/115] CDK-476 oozie UriHandler for Kite URIs
+
+---
+ kite-data/kite-data-oozie/pom.xml                  |  194 ++++++++++
+ .../kitesdk/data/oozie/KiteLauncherURIHandler.java |   46 +++
+ .../org/kitesdk/data/oozie/KiteURIHandler.java     |  157 ++++++++
+ .../org/kitesdk/data/oozie/TestKiteURIHandler.java |  392 ++++++++++++++++++++
+ kite-data/pom.xml                                  |    2 +-
+ 5 files changed, 790 insertions(+), 1 deletions(-)
+ create mode 100644 kite-data/kite-data-oozie/pom.xml
+ create mode 100644 kite-data/kite-data-oozie/src/main/java/org/kitesdk/data/oozie/KiteLauncherURIHandler.java
+ create mode 100644 kite-data/kite-data-oozie/src/main/java/org/kitesdk/data/oozie/KiteURIHandler.java
+ create mode 100644 kite-data/kite-data-oozie/src/test/java/org/kitesdk/data/oozie/TestKiteURIHandler.java
+
+diff --git a/kite-data/kite-data-oozie/pom.xml b/kite-data/kite-data-oozie/pom.xml
+new file mode 100644
+index 0000000..6691ac2
+--- /dev/null
++++ b/kite-data/kite-data-oozie/pom.xml
+@@ -0,0 +1,194 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!--
++~ Copyright 2015 Cloudera Inc.
++~
++~ Licensed under the Apache License, Version 2.0 (the "License");
++~ you may not use this file except in compliance with the License.
++~ You may obtain a copy of the License at
++~
++~ http://www.apache.org/licenses/LICENSE-2.0
++~
++~ Unless required by applicable law or agreed to in writing, software
++~ distributed under the License is distributed on an "AS IS" BASIS,
++~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++~ See the License for the specific language governing permissions and
++~ limitations under the License.
++-->
++<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
++
++  <modelVersion>4.0.0</modelVersion>
++  <artifactId>kite-data-oozie</artifactId>
++
++  <parent>
++    <groupId>org.kitesdk</groupId>
++    <artifactId>kite-data</artifactId>
++    <version>1.0.1-SNAPSHOT</version>
++  </parent>
++
++  <name>Kite Data Oozie Module</name>
++  <description>
++    The Kite Data Oozie module provides Oozie support for working with Kite datasets.
++  </description>
++
++  <properties>
++    <vers.oozie4>4.1.0</vers.oozie4>
++  </properties>
++
++  <build>
++    <plugins>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-compiler-plugin</artifactId>
++      </plugin>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-source-plugin</artifactId>
++      </plugin>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-javadoc-plugin</artifactId>
++        <configuration>
++          <excludePackageNames>org.kitesdk.data.oozie</excludePackageNames>
++        </configuration>
++      </plugin>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-surefire-plugin</artifactId>
++      </plugin>
++      <plugin>
++        <groupId>org.apache.rat</groupId>
++        <artifactId>apache-rat-plugin</artifactId>
++      </plugin>
++      <plugin>
++        <groupId>org.codehaus.mojo</groupId>
++        <artifactId>findbugs-maven-plugin</artifactId>
++      </plugin>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-antrun-plugin</artifactId>
++        <executions>
++          <execution>
++            <phase>compile</phase>
++            <goals>
++              <goal>run</goal>
++            </goals>
++            <configuration>
++              <tasks>
++                <echo message="Create empty javadoc JAR to satisfy Maven central" />
++                <mkdir dir="target/apidocs" />
++              </tasks>
++            </configuration>
++          </execution>
++        </executions>
++      </plugin>
++    </plugins>
++  </build>
++
++  <reporting>
++    <plugins>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-project-info-reports-plugin</artifactId>
++        <reportSets>
++          <reportSet>
++            <inherited>false</inherited>
++            <reports>
++              <report>index</report>
++              <report>summary</report>
++              <report>dependency-info</report>
++              <report>dependencies</report>
++            </reports>
++          </reportSet>
++        </reportSets>
++      </plugin>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-javadoc-plugin</artifactId>
++      </plugin>
++    </plugins>
++  </reporting>
++
++  <dependencies>
++    <!-- Kite -->
++    <dependency>
++      <groupId>org.kitesdk</groupId>
++      <artifactId>kite-data-core</artifactId>
++      <version>${project.parent.version}</version>
++    </dependency>
++
++    <!-- Hadoop -->
++    <dependency>
++      <groupId>org.kitesdk</groupId>
++      <artifactId>${artifact.hadoop-deps}</artifactId>
++      <type>pom</type>
++      <scope>provided</scope>
++      <exclusions>
++        <exclusion>
++          <!-- conflicts with jetty included with HBase -->
++          <groupId>tomcat</groupId>
++          <artifactId>jasper-runtime</artifactId>
++        </exclusion>
++      </exclusions>
++    </dependency>
++    <dependency>
++      <groupId>org.kitesdk</groupId>
++      <artifactId>kite-hadoop-compatibility</artifactId>
++    </dependency>
++
++    <!-- custom URI handlers require Oozie 4.x -->
++    <dependency>
++      <groupId>org.apache.oozie</groupId>
++      <artifactId>oozie-core</artifactId>
++      <version>${vers.oozie4}</version>
++    </dependency>
++
++    <!-- Misc -->
++    <dependency>
++      <groupId>com.google.code.findbugs</groupId>
++      <artifactId>jsr305</artifactId>
++      <scope>provided</scope>
++      <optional>true</optional>
++    </dependency>
++    <dependency>
++      <groupId>com.google.code.findbugs</groupId>
++      <artifactId>annotations</artifactId>
++      <scope>provided</scope>
++    </dependency>
++
++    <!-- Test Dependencies -->
++    <dependency>
++      <groupId>junit</groupId>
++      <artifactId>junit</artifactId>
++      <scope>test</scope>
++    </dependency>
++    <dependency>
++      <groupId>org.kitesdk</groupId>
++      <artifactId>kite-data-core</artifactId>
++      <version>${project.parent.version}</version>
++      <type>test-jar</type>
++      <scope>test</scope>
++    </dependency>
++    <dependency>
++      <groupId>org.kitesdk</groupId>
++      <artifactId>${artifact.hadoop-test-deps}</artifactId>
++      <type>pom</type>
++      <scope>test</scope>
++    </dependency>
++  </dependencies>
++
++  <profiles>
++    <profile>
++      <id>cdh5</id>
++      <activation>
++        <property>
++          <name>hadoop.profile</name>
++          <value>cdh5</value>
++        </property>
++      </activation>
++      <properties>
++        <vers.oozie4>${vers.oozie}</vers.oozie4>
++      </properties>
++    </profile>
++  </profiles>
++
++</project>
+diff --git a/kite-data/kite-data-oozie/src/main/java/org/kitesdk/data/oozie/KiteLauncherURIHandler.java b/kite-data/kite-data-oozie/src/main/java/org/kitesdk/data/oozie/KiteLauncherURIHandler.java
+new file mode 100644
+index 0000000..72f4b65
+--- /dev/null
++++ b/kite-data/kite-data-oozie/src/main/java/org/kitesdk/data/oozie/KiteLauncherURIHandler.java
+@@ -0,0 +1,46 @@
++/**
++ * Copyright 2015 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.data.oozie;
++
++import java.net.URI;
++import java.util.Collections;
++import java.util.List;
++import org.apache.hadoop.conf.Configuration;
++import org.apache.oozie.action.hadoop.LauncherException;
++import org.apache.oozie.action.hadoop.LauncherURIHandler;
++
++public class KiteLauncherURIHandler implements LauncherURIHandler {
++
++  @Override
++  public boolean create(final URI uri, final Configuration conf)
++      throws LauncherException {
++    throw new UnsupportedOperationException(
++        "Creation of resources is not supported for Kite URIs.");
++  }
++
++  @Override
++  public boolean delete(final URI uri, final Configuration conf)
++      throws LauncherException {
++    throw new UnsupportedOperationException(
++        "Deletion of resources is not supported for Kite URIs.");
++  }
++
++  @Override
++  public List<Class<?>> getClassesForLauncher() {
++    return Collections.emptyList();
++  }
++
++}
+diff --git a/kite-data/kite-data-oozie/src/main/java/org/kitesdk/data/oozie/KiteURIHandler.java b/kite-data/kite-data-oozie/src/main/java/org/kitesdk/data/oozie/KiteURIHandler.java
+new file mode 100644
+index 0000000..bce6798
+--- /dev/null
++++ b/kite-data/kite-data-oozie/src/main/java/org/kitesdk/data/oozie/KiteURIHandler.java
+@@ -0,0 +1,157 @@
++/**
++ * Copyright 2015 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.data.oozie;
++
++import java.net.URI;
++import java.util.Arrays;
++import java.util.HashSet;
++import java.util.List;
++import java.util.Set;
++import org.apache.avro.generic.GenericRecord;
++import org.apache.hadoop.conf.Configuration;
++import org.apache.oozie.ErrorCode;
++import org.apache.oozie.XException;
++import org.apache.oozie.action.hadoop.LauncherURIHandler;
++import org.apache.oozie.dependency.URIHandler;
++import org.apache.oozie.dependency.URIHandlerException;
++import org.apache.oozie.service.HadoopAccessorException;
++import org.apache.oozie.service.URIHandlerService;
++import org.apache.oozie.util.XLog;
++import org.kitesdk.data.DatasetException;
++import org.kitesdk.data.DatasetNotFoundException;
++import org.kitesdk.data.Datasets;
++import org.kitesdk.data.Signalable;
++import org.kitesdk.data.URIBuilder;
++import org.kitesdk.data.View;
++
++/**
++ * A Kite URI handler that works with {@link Signalable} views.
++ *
++ * To be considered as {@link #exists(URI, Configuration, String) existing} the
++ * view must have been signaled as ready.
++ */
++public class KiteURIHandler implements URIHandler {
++
++  private static final XLog LOG = XLog.getLog(KiteURIHandler.class);
++
++  private Set<String> supportedSchemes;
++  private List<Class<?>> classesToShip;
++
++  @Override
++  public void init(final Configuration conf) {
++    supportedSchemes = new HashSet<String>();
++    final String[] schemes = conf.getStrings(
++        URIHandlerService.URI_HANDLER_SUPPORTED_SCHEMES_PREFIX
++            + this.getClass().getSimpleName()
++            + URIHandlerService.URI_HANDLER_SUPPORTED_SCHEMES_SUFFIX, "view", "dataset");
++    supportedSchemes.addAll(Arrays.asList(schemes));
++    classesToShip = new KiteLauncherURIHandler().getClassesForLauncher();
++  }
++
++  @Override
++  public Set<String> getSupportedSchemes() {
++    return supportedSchemes;
++  }
++
++  @Override
++  public Class<? extends LauncherURIHandler> getLauncherURIHandlerClass() {
++    return KiteLauncherURIHandler.class;
++  }
++
++  @Override
++  public List<Class<?>> getClassesForLauncher() {
++    return classesToShip;
++  }
++
++  @Override
++  public DependencyType getDependencyType(final URI uri)
++      throws URIHandlerException {
++    return DependencyType.PULL;
++  }
++
++  @Override
++  public void registerForNotification(final URI uri, final Configuration conf,
++      final String user, final String actionID) throws URIHandlerException {
++    throw new UnsupportedOperationException(
++        "Notifications are not supported for " + uri);
++  }
++
++  @Override
++  public boolean unregisterFromNotification(final URI uri, final String actionID) {
++    throw new UnsupportedOperationException(
++        "Notifications are not supported for " + uri);
++  }
++
++  @Override
++  public Context getContext(final URI uri, final Configuration conf,
++      final String user) throws URIHandlerException {
++    return null;
++  }
++
++  @SuppressWarnings("rawtypes")
++  @Override
++  public boolean exists(final URI uri, final Context context) throws URIHandlerException {
++    try {
++      View<GenericRecord> view = Datasets.load(uri);
++      if(view instanceof Signalable) {
++        return ((Signalable)view).isReady();
++      }
++    } catch (IllegalArgumentException ex) {
++      LOG.error("the URI " + uri + " was not a view or dataset");
++    } catch (DatasetNotFoundException ex) {
++      LOG.error("the dataset for the URI "+ uri +" did not actually exist");
++    } catch (DatasetException e) {
++      throw new HadoopAccessorException(ErrorCode.E0902, e);
++    }
++    // didn't meet all the requirements for a URI/view that we want to use with oozie
++    return false;
++  }
++
++  @Override
++  public boolean exists(final URI uri, final Configuration conf, final String user)
++      throws URIHandlerException {
++    // currently does not handle access limitations between the oozie user and
++    // a potential dataset owner
++    return exists(uri, null);
++  }
++
++  @Override
++  public String getURIWithDoneFlag(final String uri, final String doneFlag)
++      throws URIHandlerException {
++    return uri;
++  }
++
++  @Override
++  public void validate(final String uri) throws URIHandlerException {
++    try {
++      URI uriParsed = URI.create(uri);
++      String scheme = uriParsed.getScheme();
++      if(!(URIBuilder.VIEW_SCHEME.equals(scheme) || URIBuilder.DATASET_SCHEME.equals(scheme))) {
++        LOG.error("Unexpected scheme: view, uri was "+ uri);
++        XException xException = new XException(ErrorCode.E0904, scheme, uri);
++        throw new URIHandlerException(xException);
++      }
++    } catch (IllegalArgumentException iae) {
++      XException xException = new XException(ErrorCode.E0906, iae);
++      throw new URIHandlerException(xException);
++    }
++  }
++
++  @Override
++  public void destroy() {
++  }
++
++}
+diff --git a/kite-data/kite-data-oozie/src/test/java/org/kitesdk/data/oozie/TestKiteURIHandler.java b/kite-data/kite-data-oozie/src/test/java/org/kitesdk/data/oozie/TestKiteURIHandler.java
+new file mode 100644
+index 0000000..af33ea9
+--- /dev/null
++++ b/kite-data/kite-data-oozie/src/test/java/org/kitesdk/data/oozie/TestKiteURIHandler.java
+@@ -0,0 +1,392 @@
++/**
++ * Copyright 2015 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.data.oozie;
++
++import org.kitesdk.data.PartitionView;
++import java.io.IOException;
++import java.net.URI;
++import java.net.URISyntaxException;
++import java.util.Arrays;
++import java.util.Collection;
++import java.util.HashSet;
++import java.util.Map;
++import java.util.Set;
++import org.apache.avro.Schema;
++import org.apache.avro.SchemaBuilder;
++import org.apache.avro.generic.GenericRecord;
++import org.apache.hadoop.conf.Configuration;
++import org.apache.hadoop.fs.FileSystem;
++import org.apache.hadoop.fs.Path;
++import org.apache.oozie.ErrorCode;
++import org.apache.oozie.XException;
++import org.apache.oozie.dependency.URIHandlerException;
++import org.junit.After;
++import org.junit.Assert;
++import org.junit.Before;
++import org.junit.Test;
++import org.junit.runner.RunWith;
++import org.junit.runners.Parameterized;
++import org.kitesdk.data.Dataset;
++import org.kitesdk.data.DatasetDescriptor;
++import org.kitesdk.data.DatasetReader;
++import org.kitesdk.data.DatasetWriter;
++import org.kitesdk.data.Formats;
++import org.kitesdk.data.MiniDFSTest;
++import org.kitesdk.data.PartitionStrategy;
++import org.kitesdk.data.Signalable;
++import org.kitesdk.data.RefinableView;
++import org.kitesdk.data.View;
++import org.kitesdk.data.oozie.KiteURIHandler;
++import org.kitesdk.data.spi.DatasetRepository;
++import org.kitesdk.data.spi.OptionBuilder;
++import org.kitesdk.data.spi.Registration;
++import org.kitesdk.data.spi.URIPattern;
++import org.kitesdk.data.spi.filesystem.FileSystemDatasetRepository;
++
++@RunWith(Parameterized.class)
++public class TestKiteURIHandler extends MiniDFSTest {
++
++  protected static final String NAMESPACE = "ns1";
++  protected static final String NAME = "provider_test1";
++
++  @Parameterized.Parameters
++  public static Collection<Object[]> data() {
++    Object[][] data = new Object[][] {
++        { false },  // default to local FS
++        { true } }; // default to distributed FS
++    return Arrays.asList(data);
++  }
++
++  // whether this should use the DFS provided by MiniDFSTest
++  protected boolean distributed;
++
++  protected Configuration conf;
++  protected DatasetDescriptor testDescriptor;
++  protected FileSystem fs;
++
++  public TestKiteURIHandler(boolean distributed) {
++    this.distributed = distributed;
++  }
++
++  public DatasetRepository newRepo() {
++    return new FileSystemDatasetRepository.Builder()
++        .configuration(conf)
++        .rootDirectory(URI.create("target/data"))
++        .build();
++  }
++
++  @After
++  public void removeDataPath() throws IOException {
++    fs.delete(new Path("target/data"), true);
++  }
++
++  @Before
++  public void setUp() throws IOException, URISyntaxException {
++    this.conf = (distributed ?
++        MiniDFSTest.getConfiguration() :
++        new Configuration());
++
++    this.fs = FileSystem.get(conf);
++
++    this.testDescriptor = new DatasetDescriptor.Builder()
++        .format(Formats.AVRO)
++        .schema(SchemaBuilder.record("Event").fields()
++            .requiredLong("timestamp")
++            .requiredString("message")
++            .endRecord())
++        .partitionStrategy(new PartitionStrategy.Builder()
++            .year("timestamp")
++            .month("timestamp")
++            .day("timestamp")
++            .build())
++        .build();
++
++    uriHandler = new KiteURIHandler();
++
++  }
++
++  private KiteURIHandler uriHandler;
++
++  @Test
++  public void uriToNonExistantDatasetsView() throws URIHandlerException, URISyntaxException {
++    URI uri = new URI("view:file:target/data/data/nomailbox?message=hello");
++    Assert.assertFalse("URIs to datasets that don't exist should return false",
++        uriHandler.exists(uri, null));
++  }
++
++  @Test
++  public void supportedSchemes() {
++    uriHandler.init(new Configuration());
++    Set<String> scheme = new HashSet<String>();
++    scheme.add("view");
++    scheme.add("dataset");
++    Assert.assertEquals(scheme, uriHandler.getSupportedSchemes());
++  }
++
++  @Test (expected = UnsupportedOperationException.class)
++  public void registerNotifications() throws URISyntaxException, URIHandlerException {
++    URI uri = new URI("view:hdfs://localhost:9083/default/person?version=201404240000");
++
++    uriHandler.registerForNotification(uri,new Configuration(), "user","234");
++  }
++
++  @Test (expected = UnsupportedOperationException.class)
++  public void unregisterNotifications() throws URISyntaxException {
++    URI uri = new URI("view:hdfs://localhost:9083/default/person?version=201404240000");
++
++    uriHandler.unregisterFromNotification(uri, "2324");
++  }
++
++  @Test
++  public void checkURIDoesNotExist() throws URIHandlerException, IOException{
++    DatasetRepository repository = newRepo();
++    Dataset<GenericRecord> dataset = repository.create("data","notreadymailbox", testDescriptor);
++
++    RefinableView<GenericRecord> view = dataset.with("message", "hello");
++
++    Assert.assertFalse(uriHandler.exists(view.getUri(), null));
++  }
++
++  @Test
++  public void checkURIExistsView() throws URIHandlerException, IOException{
++    DatasetRepository repository = newRepo();
++    Dataset<GenericRecord> dataset = repository.create("data","readymailbox", testDescriptor);
++
++    View<GenericRecord> view = dataset.with("message", "hello");
++    ((Signalable<GenericRecord>)view).signalReady();
++
++    Assert.assertTrue(uriHandler.exists(view.getUri(), null));
++  }
++
++  @Test
++  public void checkURIExistsDataset() throws URIHandlerException, IOException{
++    DatasetRepository repository = newRepo();
++    Dataset<GenericRecord> dataset = repository.create("data","readymailbox", testDescriptor);
++
++    ((Signalable<GenericRecord>)((View<GenericRecord>)dataset)).signalReady();
++
++    Assert.assertTrue(uriHandler.exists(dataset.getUri(), null));
++  }
++
++  @Test
++  public void validateInvalidScheme() throws URIHandlerException {
++    String uri = "repo:hdfs:/default/cloudera/users?favoriteColor=pink";
++    try {
++      uriHandler.validate(uri);
++      Assert.fail("Validate with an invalid schema should have thrown an exception");
++    } catch (XException ex) {
++      Assert.assertEquals(ErrorCode.E0904, ex.getErrorCode());
++    }
++  }
++
++  @Test
++  public void validateNotAURI() throws URIHandlerException {
++    String uri = "clearly not a uri";
++    try {
++      uriHandler.validate(uri);
++      Assert.fail("Validate with an invalid URI should have thrown an exception");
++    } catch (XException ex) {
++      Assert.assertEquals(ErrorCode.E0906, ex.getErrorCode());
++    }
++  }
++
++  @Test
++  public void existsForNonReadiableView() throws URIHandlerException, URISyntaxException {
++    Registration.register(
++        new URIPattern("unreadiable?absolute=true"),
++        new URIPattern("unreadiable::namespace/:dataset?absolute=true"),
++        new UnreadiableDatasetBuilder());
++
++    URI uri = new URI("view:unreadiable:default/person?version=201404240000");
++
++    Assert.assertFalse(uriHandler.exists(uri, null));
++  }
++
++  //minimal implementation of the dataset stack to get an non-readiable view to load in the handler
++  private static final class UnreadiableDatasetRepository implements DatasetRepository {
++
++    @Override
++    public <E> Dataset<E> load(String namespace, String name) {
++      return null;
++    }
++
++    @Override
++    public <E> Dataset<E> load(String namespace, String name, Class<E> type) {
++      return new UnreadiableDataset<E>();
++    }
++
++    @Override
++    public <E> Dataset<E> create(String namespace, String name, DatasetDescriptor descriptor) {
++      return null;
++    }
++
++    @Override
++    public <E> Dataset<E> create(String namespace, String name, DatasetDescriptor descriptor, Class<E> type) {
++      return null;
++    }
++
++    @Override
++    public <E> Dataset<E> update(String namespace, String name, DatasetDescriptor descriptor) {
++      return null;
++    }
++
++    @Override
++    public <E> Dataset<E> update(String namespace, String name, DatasetDescriptor descriptor, Class<E> type) {
++      return null;
++    }
++
++    @Override
++    public boolean delete(String namespace, String name) {
++      return false;
++    }
++
++    @Override
++    public boolean exists(String namespace, String name) {
++      return false;
++    }
++
++    @Override
++    public Collection<String> namespaces() {
++      return null;
++    }
++
++    @Override
++    public Collection<String> datasets(String namespace) {
++      return null;
++    }
++
++    @Override
++    public URI getUri() {
++      return null;
++    }
++
++  }
++
++  @SuppressWarnings("rawtypes")
++  private static final class UnreadiableDataset<E> implements Dataset<E> {
++
++    @Override
++    public RefinableView<E> with(String name, Object... values) {
++      return null;
++    }
++
++    @Override
++    public RefinableView<E> from(String name, Comparable value) {
++      return null;
++    }
++
++    @Override
++    public RefinableView<E> fromAfter(String name, Comparable value) {
++      return null;
++    }
++
++    @Override
++    public RefinableView<E> to(String name, Comparable value) {
++      return null;
++    }
++
++    @Override
++    public RefinableView<E> toBefore(String name, Comparable value) {
++      return null;
++    }
++
++    @Override
++    public Dataset<E> getDataset() {
++      return null;
++    }
++
++    @Override
++    public DatasetReader<E> newReader() {
++      return null;
++    }
++
++    @Override
++    public DatasetWriter<E> newWriter() {
++      return null;
++    }
++
++    @Override
++    public boolean includes(E entity) {
++      return false;
++    }
++
++    @Override
++    public boolean deleteAll() {
++      return false;
++    }
++
++    @Override
++    public Iterable<PartitionView<E>> getCoveringPartitions() {
++      return null;
++    }
++
++    @Override
++    public Class<E> getType() {
++      return null;
++    }
++
++    @Override
++    public boolean isEmpty() {
++      return false;
++    }
++
++    @Override
++    public String getName() {
++      return null;
++    }
++
++    @Override
++    public String getNamespace() {
++      return null;
++    }
++
++    @Override
++    public DatasetDescriptor getDescriptor() {
++      return null;
++    }
++
++    @Override
++    public URI getUri() {
++      return null;
++    }
++
++    @Override
++    public Schema getSchema() {
++        return null;
++    }
++
++    @Override
++    public View<GenericRecord> asSchema(Schema schema) {
++        return null;
++    }
++
++    @Override
++    public <T> View<T> asType(Class<T> type) {
++        return null;
++    }
++
++  }
++
++  private static final class UnreadiableDatasetBuilder implements OptionBuilder<DatasetRepository> {
++
++    @Override
++    public DatasetRepository getFromOptions(Map<String, String> options) {
++      return new UnreadiableDatasetRepository();
++    }
++
++  }
++
++}
+diff --git a/kite-data/pom.xml b/kite-data/pom.xml
+index 3360dcd..06f3f1a 100644
+--- a/kite-data/pom.xml
++++ b/kite-data/pom.xml
+@@ -24,6 +24,7 @@
+ 
+   <modules>
+     <module>kite-data-core</module>
++    <module>kite-data-oozie</module>
+     <module>kite-data-hive</module>
+     <module>kite-data-s3</module>
+     <module>kite-data-crunch</module>
+@@ -121,5 +122,4 @@
+       </plugin>
+     </plugins>
+   </reporting>
+-
+ </project>
+-- 
+1.7.0.4
+

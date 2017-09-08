@@ -1,0 +1,101 @@
+From e55019055b5e80cc1481655aaabeadf15547163f Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 1 Apr 2015 17:03:16 -0700
+Subject: [PATCH 045/115] CDK-938: Fix morphlines dependency bug from S3.
+
+The S3 dependencies conflict with morphlines dependencies. This
+limits the S3 dependency versions to just kite-data.
+---
+ kite-data/pom.xml |   26 ++++++++++++++++++++++++++
+ pom.xml           |   17 -----------------
+ 2 files changed, 26 insertions(+), 17 deletions(-)
+
+diff --git a/kite-data/pom.xml b/kite-data/pom.xml
+index 7389390..e30a135 100644
+--- a/kite-data/pom.xml
++++ b/kite-data/pom.xml
+@@ -47,6 +47,12 @@
+     datasets in Hadoop platforms.
+   </description>
+ 
++  <properties>
++    <!-- change s3-related versions for kite-data only -->
++    <vers.apache-httpcomponents>4.2</vers.apache-httpcomponents>
++    <vers.jets3t>0.9.0</vers.jets3t>
++  </properties>
++
+   <build>
+     <plugins>
+       <plugin>
+@@ -75,6 +81,26 @@
+     </pluginManagement>
+   </build>
+ 
++  <dependencyManagement>
++    <dependencies>
++      <dependency>
++        <groupId>net.java.dev.jets3t</groupId>
++        <artifactId>jets3t</artifactId>
++        <version>${vers.jets3t}</version>
++      </dependency>
++      <dependency>
++        <groupId>org.apache.httpcomponents</groupId>
++        <artifactId>httpclient</artifactId>
++        <version>${vers.apache-httpcomponents}</version>
++      </dependency>
++      <dependency>
++        <groupId>org.apache.httpcomponents</groupId>
++        <artifactId>httpcore</artifactId>
++        <version>${vers.apache-httpcomponents}</version>
++      </dependency>
++    </dependencies>
++  </dependencyManagement>
++
+   <reporting>
+     <plugins>
+       <plugin>
+diff --git a/pom.xml b/pom.xml
+index b19e22e..f85fbf6 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -173,8 +173,6 @@
+     <vers.jcommander>1.35</vers.jcommander>
+     <vers.spark>${cdh.spark.version}</vers.spark>
+     <vers.hadoop-aws>2.6.0</vers.hadoop-aws>
+-    <vers.apache-httpcomponents>4.2</vers.apache-httpcomponents>
+-    <vers.jets3t>0.9.0</vers.jets3t>
+ 
+     <!-- Plugin versions -->
+     <vers.doxia-module-markdown>1.4</vers.doxia-module-markdown>
+@@ -863,11 +861,6 @@
+         <artifactId>commons-jexl</artifactId>
+         <version>${vers.jexl}</version>
+       </dependency>
+-      <dependency>
+-        <groupId>net.java.dev.jets3t</groupId>
+-        <artifactId>jets3t</artifactId>
+-        <version>${vers.jets3t}</version>
+-      </dependency>
+ 
+       <!-- Logging -->
+       <dependency>
+@@ -970,16 +963,6 @@
+         <artifactId>commons-lang</artifactId>
+         <version>${vers.commons-lang}</version>
+       </dependency>
+-      <dependency>
+-        <groupId>org.apache.httpcomponents</groupId>
+-        <artifactId>httpclient</artifactId>
+-        <version>${vers.apache-httpcomponents}</version>
+-      </dependency>
+-      <dependency>
+-        <groupId>org.apache.httpcomponents</groupId>
+-        <artifactId>httpcore</artifactId>
+-        <version>${vers.apache-httpcomponents}</version>
+-      </dependency>
+ 
+       <!-- Testing -->
+       <dependency>
+-- 
+1.7.0.4
+

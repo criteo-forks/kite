@@ -1,0 +1,540 @@
+From bd3fe16fcacca058bf9d1726322c97e1d6bc2ee9 Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Mon, 8 Jun 2015 12:02:56 +0300
+Subject: [PATCH 023/115] CDK-1015: Add "replaceValues" morphline command that replaces all matching record field values with a given replacement string
+
+---
+ .../morphline/stdlib/RemoveFieldsBuilder.java      |    3 +-
+ .../morphline/stdlib/RemoveValuesBuilder.java      |   71 +-------------
+ .../kitesdk/morphline/stdlib/ReplaceValues.java    |  104 ++++++++++++++++++++
+ .../morphline/stdlib/ReplaceValuesBuilder.java     |   51 ++++++++++
+ .../org/kitesdk/morphline/api/MorphlineTest.java   |   60 +++++++++++
+ .../resources/test-morphlines/replaceValues.conf   |   36 +++++++
+ .../replaceValuesWithLiteralsOnly.conf             |   34 +++++++
+ .../confluence/morphlinesReferenceGuide.confluence |   58 +++++++++++-
+ 8 files changed, 345 insertions(+), 72 deletions(-)
+ create mode 100644 kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/ReplaceValues.java
+ create mode 100644 kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/ReplaceValuesBuilder.java
+ create mode 100644 kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/replaceValues.conf
+ create mode 100644 kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/replaceValuesWithLiteralsOnly.conf
+
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/RemoveFieldsBuilder.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/RemoveFieldsBuilder.java
+index db2f779..bb07ed2 100644
+--- a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/RemoveFieldsBuilder.java
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/RemoveFieldsBuilder.java
+@@ -59,7 +59,8 @@ public final class RemoveFieldsBuilder implements CommandBuilder {
+       super(builder, config, parent, child, context);
+       List<String> includes = getConfigs().getStringList(config, "blacklist", Collections.singletonList("*"));
+       List<String> excludes = getConfigs().getStringList(config, "whitelist", Collections.<String>emptyList());
+-      this.nameMatcher = new PatternNameMatcher(includes, excludes, 10000);
++      int cacheCapacity = getConfigs().getInt(config, "cacheCapacity", 10000);
++      this.nameMatcher = new PatternNameMatcher(includes, excludes, cacheCapacity);
+       validateArguments();
+     }
+ 
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/RemoveValuesBuilder.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/RemoveValuesBuilder.java
+index 8b7f9de..e6c0240 100644
+--- a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/RemoveValuesBuilder.java
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/RemoveValuesBuilder.java
+@@ -17,15 +17,10 @@ package org.kitesdk.morphline.stdlib;
+ 
+ import java.util.Collection;
+ import java.util.Collections;
+-import java.util.Iterator;
+-import java.util.List;
+-import java.util.Map;
+ 
+ import org.kitesdk.morphline.api.Command;
+ import org.kitesdk.morphline.api.CommandBuilder;
+ import org.kitesdk.morphline.api.MorphlineContext;
+-import org.kitesdk.morphline.api.Record;
+-import org.kitesdk.morphline.base.AbstractCommand;
+ 
+ import com.typesafe.config.Config;
+ 
+@@ -50,71 +45,7 @@ public final class RemoveValuesBuilder implements CommandBuilder {
+ 
+   @Override
+   public Command build(Config config, Command parent, Command child, MorphlineContext context) {
+-    return new RemoveValues(this, config, parent, child, context);
++    return new ReplaceValues(this, config, parent, child, context, true);
+   }
+-  
+-  
+-  ///////////////////////////////////////////////////////////////////////////////
+-  // Nested classes:
+-  ///////////////////////////////////////////////////////////////////////////////
+-  private static final class RemoveValues extends AbstractCommand {
+     
+-    private final PatternNameMatcher nameMatcher;
+-    private final PatternNameMatcher valueMatcher;
+-
+-    public RemoveValues(CommandBuilder builder, Config config, Command parent, Command child, MorphlineContext context) { 
+-      super(builder, config, parent, child, context);
+-      List<String> nameBlacklist = getConfigs().getStringList(config, "nameBlacklist", Collections.singletonList("*"));
+-      List<String> nameWhitelist = getConfigs().getStringList(config, "nameWhitelist", Collections.<String>emptyList());
+-      List<String> valueBlacklist = getConfigs().getStringList(config, "valueBlacklist", Collections.singletonList("*"));
+-      List<String> valueWhitelist = getConfigs().getStringList(config, "valueWhitelist", Collections.<String>emptyList());
+-      this.nameMatcher = new PatternNameMatcher(nameBlacklist, nameWhitelist, 10000);
+-      this.valueMatcher = new PatternNameMatcher(valueBlacklist, valueWhitelist, 0);
+-      validateArguments();
+-    }
+-
+-    @Override
+-    protected boolean doProcess(Record record) {
+-      if (nameMatcher.getLiteralsOnly() == null) {
+-        doProcessSlow(record); // general case
+-      } else { 
+-        doProcessFast(record); // fast path for common special case
+-      }
+-      
+-      // pass record to next command in chain:
+-      return super.doProcess(record);
+-    }
+-
+-    private void doProcessSlow(Record record) {
+-      Iterator<Map.Entry<String, Collection<Object>>> iter = record.getFields().asMap().entrySet().iterator();
+-      while (iter.hasNext()) {
+-        Map.Entry<String, Collection<Object>> entry = iter.next();
+-        if (nameMatcher.matches(entry.getKey())) {
+-          List values = (List) entry.getValue();
+-          for (int i = values.size(); --i >= 0; ) {
+-            if (valueMatcher.matches(values.get(i).toString())) {
+-              if (values.size() > 1) {
+-                values.remove(i);
+-              } else {
+-                iter.remove(); // to avoid ConcurrentModificationException
+-              }
+-            }
+-          }
+-        }
+-      }
+-    }
+-
+-    private void doProcessFast(Record record) {
+-      for (String name : nameMatcher.getLiteralsOnly()) {
+-        List values = record.get(name);
+-        for (int i = values.size(); --i >= 0; ) {
+-          if (valueMatcher.matches(values.get(i).toString())) {
+-            values.remove(i);
+-          }
+-        }
+-      }
+-    }
+-
+-  }
+-
+ }
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/ReplaceValues.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/ReplaceValues.java
+new file mode 100644
+index 0000000..aa04569
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/ReplaceValues.java
+@@ -0,0 +1,104 @@
++/*
++ * Licensed to the Apache Software Foundation (ASF) under one
++ * or more contributor license agreements.  See the NOTICE file
++ * distributed with this work for additional information
++ * regarding copyright ownership.  The ASF licenses this file
++ * to you under the Apache License, Version 2.0 (the
++ * "License"); you may not use this file except in compliance
++ * with the License.  You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing,
++ * software distributed under the License is distributed on an
++ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
++ * KIND, either express or implied.  See the License for the
++ * specific language governing permissions and limitations
++ * under the License.
++ */
++package org.kitesdk.morphline.stdlib;
++
++import java.util.Collection;
++import java.util.Collections;
++import java.util.Iterator;
++import java.util.List;
++import java.util.Map;
++
++import org.kitesdk.morphline.api.Command;
++import org.kitesdk.morphline.api.CommandBuilder;
++import org.kitesdk.morphline.api.MorphlineContext;
++import org.kitesdk.morphline.api.Record;
++import org.kitesdk.morphline.base.AbstractCommand;
++
++import com.typesafe.config.Config;
++
++final class ReplaceValues extends AbstractCommand {
++  
++  private final PatternNameMatcher nameMatcher;
++  private final PatternNameMatcher valueMatcher;
++  private final String replacement;
++
++  public ReplaceValues(CommandBuilder builder, Config config, Command parent, Command child, MorphlineContext context,
++      boolean isRemoving) {
++    super(builder, config, parent, child, context);
++    List<String> nameBlacklist = getConfigs().getStringList(config, "nameBlacklist", Collections.singletonList("*"));
++    List<String> nameWhitelist = getConfigs().getStringList(config, "nameWhitelist", Collections.<String>emptyList());
++    List<String> valueBlacklist = getConfigs().getStringList(config, "valueBlacklist", Collections.singletonList("*"));
++    List<String> valueWhitelist = getConfigs().getStringList(config, "valueWhitelist", Collections.<String>emptyList());
++    int nameCacheCapacity = getConfigs().getInt(config, "nameCacheCapacity", 10000);
++    this.nameMatcher = new PatternNameMatcher(nameBlacklist, nameWhitelist, nameCacheCapacity);
++    int valueCacheCapacity = getConfigs().getInt(config, "valueCacheCapacity", 0);
++    this.valueMatcher = new PatternNameMatcher(valueBlacklist, valueWhitelist, valueCacheCapacity);
++    this.replacement = isRemoving ? null : getConfigs().getString(config, "replacement");
++    validateArguments();
++  }
++
++  @Override
++  protected boolean doProcess(Record record) {
++    if (nameMatcher.getLiteralsOnly() == null) {
++      doProcessSlow(record); // general case
++    } else { 
++      doProcessFast(record); // fast path for common special case
++    }
++    
++    // pass record to next command in chain:
++    return super.doProcess(record);
++  }
++
++  private void doProcessSlow(Record record) {
++    Iterator<Map.Entry<String, Collection<Object>>> iter = record.getFields().asMap().entrySet().iterator();
++    while (iter.hasNext()) {
++      Map.Entry<String, Collection<Object>> entry = iter.next();
++      if (nameMatcher.matches(entry.getKey())) {
++        List values = (List) entry.getValue();
++        for (int i = values.size(); --i >= 0; ) {
++          if (valueMatcher.matches(values.get(i).toString())) {
++            if (replacement != null) {
++              values.set(i, replacement);
++            } else if (values.size() > 1) {
++              values.remove(i);
++            } else {
++              iter.remove(); // to avoid ConcurrentModificationException
++            }
++          }
++        }
++      }
++    }
++  }
++
++  private void doProcessFast(Record record) {
++    for (String name : nameMatcher.getLiteralsOnly()) {
++      List values = record.get(name);
++      for (int i = values.size(); --i >= 0; ) {
++        if (valueMatcher.matches(values.get(i).toString())) {
++          if (replacement != null) {
++            values.set(i, replacement);
++          } else {
++            values.remove(i);
++          }
++        }
++      }
++    }
++  }
++
++}
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/ReplaceValuesBuilder.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/ReplaceValuesBuilder.java
+new file mode 100644
+index 0000000..1b58a1f
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/ReplaceValuesBuilder.java
+@@ -0,0 +1,51 @@
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.morphline.stdlib;
++
++import java.util.Collection;
++import java.util.Collections;
++
++import org.kitesdk.morphline.api.Command;
++import org.kitesdk.morphline.api.CommandBuilder;
++import org.kitesdk.morphline.api.MorphlineContext;
++
++import com.typesafe.config.Config;
++
++/**
++ * Replaces all record field values for which all of the following conditions hold:
++ * 
++ * 1) the field name matches at least one of the given nameBlacklist predicates but none of the
++ * given nameWhitelist predicates.
++ * 
++ * 2) the field value matches at least one of the given valueBlacklist predicates but none of the
++ * given valueWhitelist predicates.
++ * 
++ * If the blacklist specification is absent it defaults to MATCH ALL. If the whitelist specification
++ * is absent it defaults to MATCH NONE.
++ */
++public final class ReplaceValuesBuilder implements CommandBuilder {
++
++  @Override
++  public Collection<String> getNames() {
++    return Collections.singletonList("replaceValues");
++  }
++
++  @Override
++  public Command build(Config config, Command parent, Command child, MorphlineContext context) {
++    return new ReplaceValues(this, config, parent, child, context, false);
++  }
++
++}
+diff --git a/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/MorphlineTest.java b/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/MorphlineTest.java
+index 363953f..8571bc3 100644
+--- a/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/MorphlineTest.java
++++ b/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/MorphlineTest.java
+@@ -285,6 +285,66 @@ public class MorphlineTest extends AbstractMorphlineTest {
+   }
+ 
+   @Test
++  public void testReplaceValues() throws Exception {
++    morphline = createMorphline("test-morphlines/replaceValues");
++    for (int i = 0; i < 2; i++) {
++      Record record = new Record();
++      record.put("foobar", "data");
++      record.put("foo", "foo");
++      record.put("foo", "foobar");
++      record.put("foo", "barx");
++      record.put("foo", "barox");
++      record.put("foo", "baz");
++      record.put("foo", "baz");
++      record.put("foo", "hello");
++      record.put("barx", "foo");
++      record.put("barox", "foo");
++      record.put("baz", "foo");
++      record.put("baz", "foo");
++      record.put("hello", "foo");
++      
++      Record expected = new Record();
++      expected.put("foobar", "data");
++      expected.put("foo", "myReplacement");
++      expected.put("foo", "foobar");
++      expected.put("foo", "myReplacement");
++      expected.put("foo", "barox");
++      expected.put("foo", "myReplacement");
++      expected.put("foo", "myReplacement");
++      expected.put("foo", "hello");
++      expected.put("barx", "myReplacement");
++      expected.put("barox", "foo");
++      expected.put("baz", "myReplacement");
++      expected.put("baz", "myReplacement");
++      expected.put("hello", "foo");
++      processAndVerifySuccess(record, expected);
++    }
++  }
++
++  @Test
++  public void testReplaceValuesWithLiteralsOnly() throws Exception {
++    morphline = createMorphline("test-morphlines/replaceValuesWithLiteralsOnly");
++    for (int i = 0; i < 2; i++) {
++      Record record = new Record();
++      record.put("foo", "foo");
++      record.put("foo", "baz");
++      record.put("bar", "bar");
++      record.put("baz", "baz");
++      record.put("baz", "xxxx");
++      record.put("hello", "data");
++      
++      Record expected = new Record();
++      expected.put("foo", "foo");
++      expected.put("foo", "baz");
++      expected.put("bar", "bar");
++      expected.put("baz", "myReplacement");
++      expected.put("baz", "myReplacement");
++      expected.put("hello", "data");
++      processAndVerifySuccess(record, expected);
++    }
++  }
++
++  @Test
+   public void testNotifications() throws Exception {
+     morphline = createMorphline("test-morphlines/pipeWithTwoBasicCommands");
+     Notifications.notifyBeginTransaction(morphline);
+diff --git a/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/replaceValues.conf b/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/replaceValues.conf
+new file mode 100644
+index 0000000..dffe090
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/replaceValues.conf
+@@ -0,0 +1,36 @@
++# Copyright 2013 Cloudera Inc.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++# http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++morphlines : [
++  {
++    id : morphline1
++    importCommands : ["org.kitesdk.**"]
++    
++    commands : [                    
++      { 
++        # replace all values where the name and value matches at least one of foo.* or bar* or baz, 
++        # yet doesn’t match at least one of foobar or baro*
++        replaceValues {
++          nameBlacklist : ["regex:foo.*", "glob:bar*", "literal:baz", "literal:xxxx"]
++          nameWhitelist: ["literal:foobar", "glob:baro*"]
++          valueBlacklist : ["regex:foo.*", "glob:bar*", "literal:baz", "literal:xxxx"]
++          valueWhitelist: ["literal:foobar", "glob:baro*"]                    
++          replacement : "myReplacement"
++        }
++      } 
++      
++      { logDebug { format : "output record: {}", args : ["@{}"] } }    
++    ]
++  }
++]
+diff --git a/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/replaceValuesWithLiteralsOnly.conf b/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/replaceValuesWithLiteralsOnly.conf
+new file mode 100644
+index 0000000..6c7c7fb
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/replaceValuesWithLiteralsOnly.conf
+@@ -0,0 +1,34 @@
++# Copyright 2013 Cloudera Inc.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++# http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++morphlines : [
++  {
++    id : morphline1
++    importCommands : ["org.kitesdk.**"]
++    
++    commands : [                    
++      { 
++        replaceValues {
++          nameBlacklist : ["literal:foo", "literal:baz", "literal:xxxx", "literal:bar"]
++          nameWhitelist: ["literal:foo", "literal:yyyy"]
++          valueBlacklist : ["literal:foo", "literal:baz", "literal:xxxx", "literal:bax"]
++          valueWhitelist: ["literal:foo", "literal:yyyy"]
++          replacement : "myReplacement"
++        }
++      } 
++      
++      { logDebug { format : "output record: {}", args : ["@{}"] } }    
++    ]
++  }
++]
+diff --git a/kite-morphlines/src/site/confluence/morphlinesReferenceGuide.confluence b/kite-morphlines/src/site/confluence/morphlinesReferenceGuide.confluence
+index f1f60ba..b4a98c4 100644
+--- a/kite-morphlines/src/site/confluence/morphlinesReferenceGuide.confluence
++++ b/kite-morphlines/src/site/confluence/morphlinesReferenceGuide.confluence
+@@ -73,6 +73,7 @@ h3. kite\-morphlines\-core\-stdlib
+ | [#pipe] | Pipes a record through a chain of commands. | 
+ | [#removeFields] | Removes all record fields for which the field name matches a blacklist but not a whitelist. |
+ | [#removeValues] | Removes all record field values for which the field name and value matches a blacklist but not a whitelist. |
++| [#replaceValues] | Replaces all record field values for which the field name and value matches a blacklist but not a whitelist. |
+ | [#sample] | Forwards each input record with a given probability to its child command. |
+ | [#separateAttachments] | Emits one separate output record for each attachment in the input record's list of attachments. |
+ | [#setValues] | Assigns a given list of values (or the contents of another field) to a given field. |
+@@ -1130,6 +1131,8 @@ The {{removeValues}} command ([source code|https://github.com/kite-sdk/kite/blob
+ 
+ A predicate can be a regex pattern (e.g. "regex:foo.\*") or [POSIX glob pattern|https://github.com/kite-sdk/kite/blob/master/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/shaded/org/apache/hadoop/fs/GlobPattern.java] (e.g. "glob:foo\*") or literal pattern (e.g. "literal:foo") or "\*" which is equivalent to "glob:\*".
+  
++This command behaves in the same way as the [#replaceValues] command except that maching values are removed rather than replaced.
++
+ The command provides the following configuration options:
+ 
+ || Property Name || Default || Description ||
+@@ -1142,7 +1145,7 @@ Example usage:
+ {code}
+ # Remove all field values where the field name and value matches at least one of foo.* or bar* or baz, 
+ # but matches none of foobar or baro*
+-removeFields {
++removeValues {
+   nameBlacklist : ["regex:foo.*", "glob:bar*", "literal:baz", "literal:xxxx"]
+   nameWhitelist: ["literal:foobar", "glob:baro*"]
+   valueBlacklist : ["regex:foo.*", "glob:bar*", "literal:baz", "literal:xxxx"]
+@@ -1168,6 +1171,59 @@ barox:foo
+ hello:foo
+ {code}
+ 
++h2. replaceValues
++
++The {{replaceValues}} command ([source code|https://github.com/kite-sdk/kite/blob/master/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/ReplaceValuesBuilder.java]) replaces all record field values for which all of the following conditions hold:
++
++1) the field name matches at least one of the given nameBlacklist predicates but none of the given nameWhitelist predicates.
++
++2) the field value matches at least one of the given valueBlacklist predicates but none of the given valueWhitelist predicates.
++
++A predicate can be a regex pattern (e.g. "regex:foo.\*") or [POSIX glob pattern|https://github.com/kite-sdk/kite/blob/master/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/shaded/org/apache/hadoop/fs/GlobPattern.java] (e.g. "glob:foo\*") or literal pattern (e.g. "literal:foo") or "\*" which is equivalent to "glob:\*".
++
++This command behaves in the same way as the [#removeValues] command except that maching values are replaced rather than removed.
++ 
++The command provides the following configuration options:
++
++|| Property Name || Default || Description ||
++| nameBlacklist | "[\*]" | The blacklist predicates to use for entry names (i.e. entry keys). If the blacklist specification is absent it defaults to MATCH ALL. |
++| nameWhitelist | "[]" | The whitelist predicates to use for entry names (i.e. entry keys). If the whitelist specification is absent it defaults to MATCH NONE. |
++| valueBlacklist | "[\*]" | The blacklist predicates to use for entry values. If the blacklist specification is absent it defaults to MATCH ALL. |
++| valueWhitelist | "[]" | The whitelist predicates to use for entry values. If the whitelist specification is absent it defaults to MATCH NONE. |
++| replacement | n/a | The replacement string to use for matching entry values. |
++
++Example usage:
++{code}
++# Replace with "myReplacement" all field values where the field name and value  
++# matches at least one of foo.* or bar* or baz, but matches none of foobar or baro*
++replaceValues {
++  nameBlacklist : ["regex:foo.*", "glob:bar*", "literal:baz", "literal:xxxx"]
++  nameWhitelist: ["literal:foobar", "glob:baro*"]
++  valueBlacklist : ["regex:foo.*", "glob:bar*", "literal:baz", "literal:xxxx"]
++  valueWhitelist: ["literal:foobar", "glob:baro*"]
++  replacement : "myReplacement"
++}
++{code}
++
++Input record:
++{code}
++foobar:data
++foo:[foo,foobar,barx,barox,baz,baz,hello]
++barx:foo
++barox:foo
++baz:[foo,foo]
++hello:foo 
++{code}
++  
++Expected output:
++{code}
++foobar:data
++foo:[myReplacement,foobar,myReplacement,barox,myReplacement,myReplacement,hello]
++barox:foo
++baz:[myReplacement,myReplacement]
++hello:foo
++{code}
++
+ h2. sample
+ 
+ The {{sample}} command ([source code|https://github.com/kite-sdk/kite/blob/master/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/SampleBuilder.java]) forwards each input record with a given probability to its child command, and silently ignores all other input records. Sampling is based on a random number generator. This can be helpful to easily test a morphline with a random subset of records from a large dataset.
+-- 
+1.7.0.4
+

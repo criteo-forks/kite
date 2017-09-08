@@ -1,0 +1,141 @@
+From 3c5112a18b86b6d0e9eb61d0f23943285b28c41d Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Tue, 25 Aug 2015 19:42:43 -0700
+Subject: [PATCH 101/115] KITE-1023: Avoid using new Path(URI), add warnings.
+
+This adds warnings for methods that may return URIs that are FS paths to
+prevent users from calling new Path(URI). It also removes incorrect use
+of new Path(URI) from Kite's FS implementation.
+---
+ .../java/org/kitesdk/data/DatasetDescriptor.java   |   10 +++++++---
+ .../main/java/org/kitesdk/data/PartitionView.java  |    8 +++++++-
+ .../data/spi/filesystem/FileSystemDataset.java     |    2 +-
+ .../filesystem/FileSystemDatasetRepository.java    |    2 +-
+ .../data/spi/filesystem/FileSystemUtil.java        |    2 +-
+ .../data/spi/filesystem/TestFileSystemUtil.java    |    2 +-
+ .../spi/hive/HiveExternalMetadataProvider.java     |    2 +-
+ 7 files changed, 19 insertions(+), 9 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/DatasetDescriptor.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/DatasetDescriptor.java
+index 5c9a4f2..d752f13 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/DatasetDescriptor.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/DatasetDescriptor.java
+@@ -179,6 +179,10 @@ public class DatasetDescriptor {
+   /**
+    * Get the URL location where the data for this {@link Dataset} is stored
+    * (optional).
++   * <p>
++   * Due to a bug in Hadoop's {@link Path}, the URI returned by this method
++   * should not be used to create a path using its {@link URI} constructor.
++   * Instead, use {@code new Path(desc.getLocation().toString())}.
+    *
+    * @return a location URL or null if one is not set
+    *
+@@ -563,13 +567,13 @@ public class DatasetDescriptor {
+     /**
+      * Configure the dataset's location (optional).
+      *
+-     * @param uri A location Path
++     * @param path A location Path
+      * @return An instance of the builder for method chaining.
+      *
+      * @since 0.8.0
+      */
+-    public Builder location(Path uri) {
+-      return location(uri.toUri());
++    public Builder location(Path path) {
++      return location(path.toString());
+     }
+ 
+     /**
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionView.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionView.java
+index d8f0ab1..b2d8a00 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionView.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionView.java
+@@ -32,11 +32,17 @@ import javax.annotation.concurrent.Immutable;
+ public interface PartitionView<E> extends View<E> {
+   /**
+    * Returns the location of this partition as a {@link URI}.
++   * <p>
++   * Due to a bug in Hadoop's {@link org.apache.hadoop.fs.Path}, the URI
++   * returned by this method should not be used to create a path using its
++   * {@link URI} constructor. Instead, use
++   * {@code new Path(desc.getLocation().toString())}.
++   *
+    *
+    * @return a {@code URI} for the location of this partition.
+    * @since 1.1.0
+    */
+-  public URI getLocation();
++  URI getLocation();
+ 
+   /**
+    * Deletes the entities included in this {@link View}.
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+index 0f8f1bb..09d68ad 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+@@ -681,7 +681,7 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+           "Configuration or FileSystem must be set");
+       Preconditions.checkState(type != null, "No type specified");
+ 
+-      this.directory = new Path(descriptor.getLocation());
++      this.directory = new Path(descriptor.getLocation().toString());
+ 
+       if (fileSystem == null) {
+         try {
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDatasetRepository.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDatasetRepository.java
+index 942fa2a..910b357 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDatasetRepository.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDatasetRepository.java
+@@ -230,7 +230,7 @@ public class FileSystemDatasetRepository extends AbstractDatasetRepository
+     // we still need to delete the data directory
+     boolean changed = metadataProvider.delete(namespace, name);
+ 
+-    Path dataLocation = new Path(descriptor.getLocation());
++    Path dataLocation = new Path(descriptor.getLocation().toString());
+     FileSystem dataFS = fsForPath(dataLocation, conf);
+ 
+     if (fs.getUri().equals(dataFS.getUri())) {
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
+index 173e597..7182148 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
+@@ -64,7 +64,7 @@ public class FileSystemUtil {
+     Preconditions.checkNotNull(descriptor.getLocation(),
+         "Cannot get FileSystem for a descriptor with no location");
+ 
+-    Path dataPath = new Path(descriptor.getLocation());
++    Path dataPath = new Path(descriptor.getLocation().toString());
+     FileSystem fs = null;
+ 
+     try {
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemUtil.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemUtil.java
+index 497348a..3821bd5 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemUtil.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemUtil.java
+@@ -182,7 +182,7 @@ public class TestFileSystemUtil {
+     Assert.assertFalse("Should not flag at mixed depth",
+         descriptor.hasProperty("kite.filesystem.mixed-depth"));
+     Assert.assertEquals("Location should be at the partition directory",
+-        partitionPath.toUri(), actual.getLocation());
++        URI.create(partitionPath.toString()), actual.getLocation());
+     Assert.assertEquals("Should use user schema",
+         USER_SCHEMA, actual.getSchema());
+     Assert.assertEquals("Should have Avro format",
+diff --git a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveExternalMetadataProvider.java b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveExternalMetadataProvider.java
+index 07180ac..f52cb20 100644
+--- a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveExternalMetadataProvider.java
++++ b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveExternalMetadataProvider.java
+@@ -84,7 +84,7 @@ class HiveExternalMetadataProvider extends HiveAbstractMetadataProvider {
+           .build();
+     }
+ 
+-    Path managerPath = new Path(new Path(newDescriptor.getLocation()),
++    Path managerPath = new Path(new Path(newDescriptor.getLocation().toString()),
+         SCHEMA_DIRECTORY);
+ 
+     // Store the schema with the schema manager and use the
+-- 
+1.7.0.4
+

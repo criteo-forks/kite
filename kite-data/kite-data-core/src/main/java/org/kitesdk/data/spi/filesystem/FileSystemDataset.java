@@ -217,12 +217,7 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
 
   public boolean deleteAll() {
     // no constraints, so delete is always aligned to partition boundaries
-    return unbounded.deleteAllUnsafe(false);
-  }
-
-  @Override
-  public boolean moveToTrash() {
-    return unbounded.moveToTrash();
+    return unbounded.deleteAllUnsafe();
   }
 
   public PathIterator pathIterator() {

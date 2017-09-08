@@ -34,22 +34,27 @@ import org.kitesdk.data.spi.ReaderWriterState;
 
 public class TestAvroWriter extends TestFileSystemWriters {
   @Override
-  public FileSystemWriter<Record> newWriter(Path directory, Schema datasetSchema, Schema writerSchema) {
-    return FileSystemWriter.newWriter(fs, directory, 100, 2 * 1024 * 1024,
+  public FileSystemWriter<Record> newWriter(Path directory, Schema schema) {
+    return FileSystemWriter.newWriter(fs, directory, 100, getTargetFileSize(),
         new DatasetDescriptor.Builder()
             .property(
                 "kite.writer.roll-interval-seconds", String.valueOf(10))
             .property(
                 "kite.writer.target-file-size",
                 String.valueOf(32 * 1024 * 1024)) // 32 MB
-            .schema(datasetSchema)
+            .schema(schema)
             .format("avro")
-            .build(), writerSchema);
+            .build());
   }
 
   @Override
   public DatasetReader<Record> newReader(Path path, Schema schema) {
     return new FileSystemDatasetReader<Record>(fs, path, schema, Record.class);
+  }
+
+  @Override
+  public long getTargetFileSize() {
+    return 2 * 1024 * 1024;
   }
 
   @Test

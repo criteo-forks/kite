@@ -1,0 +1,623 @@
+From 7e3fdb8d6d4b97cec36830ccecd6ded2f8c46996 Mon Sep 17 00:00:00 2001
+From: Tom White <tom@cloudera.com>
+Date: Fri, 22 May 2015 10:55:08 +0100
+Subject: [PATCH 063/115] CDK-988. Implement and test project and projectStrict.
+
+---
+ .../java/org/kitesdk/data/PartitionStrategy.java   |   14 +-
+ .../kitesdk/data/spi/PartitionStrategyParser.java  |    8 +-
+ .../partition/FixedLongRangeFieldPartitioner.java  |  120 ---------------
+ .../LongFixedSizeRangeFieldPartitioner.java        |  161 ++++++++++++++++++++
+ .../data/spi/partition/PartitionFunctions.java     |   10 +-
+ .../java/org/kitesdk/data/spi/predicates/In.java   |    2 +-
+ .../data/spi/TestPartitionStrategyParser.java      |    6 +-
+ .../TestFixedLongRangeFieldPartitioner.java        |   43 -----
+ .../TestLongFixedSizeRangeFieldPartitioner.java    |   48 ++++++
+ .../spi/partition/TestPartitionerProjection.java   |   42 +++++
+ 10 files changed, 271 insertions(+), 183 deletions(-)
+ delete mode 100644 kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/FixedLongRangeFieldPartitioner.java
+ create mode 100644 kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/LongFixedSizeRangeFieldPartitioner.java
+ delete mode 100644 kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestFixedLongRangeFieldPartitioner.java
+ create mode 100644 kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestLongFixedSizeRangeFieldPartitioner.java
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionStrategy.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionStrategy.java
+index d1a502d..1e9aea0 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionStrategy.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionStrategy.java
+@@ -22,7 +22,7 @@ import java.util.Map;
+ import java.util.Set;
+ import org.kitesdk.data.spi.PartitionStrategyParser;
+ import org.kitesdk.data.spi.partition.DayOfMonthFieldPartitioner;
+-import org.kitesdk.data.spi.partition.FixedLongRangeFieldPartitioner;
++import org.kitesdk.data.spi.partition.LongFixedSizeRangeFieldPartitioner;
+ import org.kitesdk.data.spi.partition.HourFieldPartitioner;
+ import org.kitesdk.data.spi.partition.MinuteFieldPartitioner;
+ import org.kitesdk.data.spi.partition.MonthFieldPartitioner;
+@@ -373,7 +373,7 @@ public class PartitionStrategy {
+      * is placed in the partition <code>floor(v/size)*size</code>.
+      *
+      * The partition name will be the source field name with a "_range" suffix.
+-     * For example, fixedRange("number", 10) creates "number_range"
++     * For example, fixedSizeRange("number", 10) creates "number_range"
+      * partitions.
+      *
+      * @param sourceName
+@@ -384,8 +384,8 @@ public class PartitionStrategy {
+      * @return An instance of the builder for method chaining.
+      * @see IntRangeFieldPartitioner
+      */
+-    public Builder fixedRange(String sourceName, long size) {
+-      add(new FixedLongRangeFieldPartitioner(sourceName, size));
++    public Builder fixedSizeRange(String sourceName, long size) {
++      add(new LongFixedSizeRangeFieldPartitioner(sourceName, size));
+       return this;
+     }
+ 
+@@ -394,7 +394,7 @@ public class PartitionStrategy {
+      * is placed in the partition <code>floor(v/size)*size</code>.
+      *
+      * If name is null, the partition name will be the source field name with a "_range" suffix.
+-     * For example, fixedRange("number", 10) creates "number_range"
++     * For example, fixedSizeRange("number", 10) creates "number_range"
+      * partitions.
+      *
+      * @param sourceName
+@@ -407,8 +407,8 @@ public class PartitionStrategy {
+      * @return An instance of the builder for method chaining.
+      * @see IntRangeFieldPartitioner
+      */
+-    public Builder fixedRange(String sourceName, @Nullable String name, long size) {
+-      add(new FixedLongRangeFieldPartitioner(sourceName, name, size));
++    public Builder fixedSizeRange(String sourceName, @Nullable String name, long size) {
++      add(new LongFixedSizeRangeFieldPartitioner(sourceName, name, size));
+       return this;
+     }
+ 
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/PartitionStrategyParser.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/PartitionStrategyParser.java
+index 79c2621..b06836d 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/PartitionStrategyParser.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/PartitionStrategyParser.java
+@@ -36,7 +36,7 @@ import org.kitesdk.data.ValidationException;
+ import org.kitesdk.data.impl.Accessor;
+ import org.kitesdk.data.spi.partition.DateFormatPartitioner;
+ import org.kitesdk.data.spi.partition.DayOfMonthFieldPartitioner;
+-import org.kitesdk.data.spi.partition.FixedLongRangeFieldPartitioner;
++import org.kitesdk.data.spi.partition.LongFixedSizeRangeFieldPartitioner;
+ import org.kitesdk.data.spi.partition.HashFieldPartitioner;
+ import org.kitesdk.data.spi.partition.HourFieldPartitioner;
+ import org.kitesdk.data.spi.partition.IdentityFieldPartitioner;
+@@ -186,7 +186,7 @@ public class PartitionStrategyParser {
+             "Invalid size for range partitioner %s: %s",
+             name == null ? source : name,
+             fieldPartitioner.get(SIZE).asText());
+-        builder.fixedRange(source, name, size);
++        builder.fixedSizeRange(source, name, size);
+       } else if (type.equals("year")) {
+         builder.year(source, name);
+       } else if (type.equals("month")) {
+@@ -232,11 +232,11 @@ public class PartitionStrategyParser {
+         partitioner.set(SOURCE, TextNode.valueOf(fp.getSourceName()));
+         partitioner.set(TYPE, TextNode.valueOf("hash"));
+         partitioner.set(BUCKETS, LongNode.valueOf(fp.getCardinality()));
+-      } else if (fp instanceof FixedLongRangeFieldPartitioner) {
++      } else if (fp instanceof LongFixedSizeRangeFieldPartitioner) {
+         partitioner.set(SOURCE, TextNode.valueOf(fp.getSourceName()));
+         partitioner.set(TYPE, TextNode.valueOf("range"));
+         partitioner.set(SIZE,
+-            LongNode.valueOf(((FixedLongRangeFieldPartitioner) fp).getSize()));
++            LongNode.valueOf(((LongFixedSizeRangeFieldPartitioner) fp).getSize()));
+       } else if (fp instanceof YearFieldPartitioner) {
+         partitioner.set(SOURCE, TextNode.valueOf(fp.getSourceName()));
+         partitioner.set(TYPE, TextNode.valueOf("year"));
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/FixedLongRangeFieldPartitioner.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/FixedLongRangeFieldPartitioner.java
+deleted file mode 100644
+index beba6fe..0000000
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/FixedLongRangeFieldPartitioner.java
++++ /dev/null
+@@ -1,120 +0,0 @@
+-/**
+- * Copyright 2013 Cloudera Inc.
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- * http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-package org.kitesdk.data.spi.partition;
+-
+-import com.google.common.base.Objects;
+-import com.google.common.base.Preconditions;
+-import com.google.common.base.Predicate;
+-import com.google.common.collect.DiscreteDomains;
+-import javax.annotation.Nullable;
+-import javax.annotation.concurrent.Immutable;
+-import org.kitesdk.data.spi.FieldPartitioner;
+-import org.kitesdk.data.spi.predicates.Exists;
+-import org.kitesdk.data.spi.predicates.In;
+-import org.kitesdk.data.spi.predicates.Predicates;
+-import org.kitesdk.data.spi.predicates.Range;
+-import org.kitesdk.data.spi.predicates.Ranges;
+-
+-@edu.umd.cs.findbugs.annotations.SuppressWarnings(value={
+-    "NP_PARAMETER_MUST_BE_NONNULL_BUT_MARKED_AS_NULLABLE",
+-    "SE_COMPARATOR_SHOULD_BE_SERIALIZABLE"},
+-    justification="False positive due to generics.")
+-@Immutable
+-public class FixedLongRangeFieldPartitioner extends FieldPartitioner<Long, Long> {
+-
+-  private final long size;
+-
+-  public FixedLongRangeFieldPartitioner(String sourceName, long size) {
+-    this(sourceName, null, size);
+-  }
+-
+-  public FixedLongRangeFieldPartitioner(String sourceName, @Nullable String name,
+-      long size) {
+-    super(sourceName, (name == null ? sourceName + "_range" : name),
+-        Long.class, Long.class);
+-    this.size = size;
+-    Preconditions.checkArgument(size > 0,
+-        "Size of range buckets is not positive: %s", size);
+-  }
+-
+-  @Override
+-  public Long apply(Long value) {
+-    return Math.round(Math.floor(value / ((double) size))) * size;
+-  }
+-
+-  @Override
+-  public Predicate<Long> project(Predicate<Long> predicate) {
+-    if (predicate instanceof Exists) {
+-      return Predicates.exists();
+-    } else if (predicate instanceof In) {
+-      return ((In<Long>) predicate).transform(this);
+-    } else if (predicate instanceof Range) {
+-      // must use a closed range:
+-      //   if this( 5 ) => 10 then this( 6 ) => 10, so 10 must be included
+-      return Ranges.transformClosed(
+-          Ranges.adjustClosed((Range<Long>) predicate,
+-              DiscreteDomains.longs()), this);
+-    } else {
+-      return null;
+-    }
+-  }
+-
+-  @Override
+-  public Predicate<Long> projectStrict(Predicate<Long> predicate) {
+-    if (predicate instanceof Exists) {
+-      return Predicates.exists();
+-    } else if (predicate instanceof In) {
+-      return ((In<Long>) predicate).transform(this);
+-    }
+-    return null;
+-  }
+-
+-  public long getSize() {
+-    return size;
+-  }
+-
+-  @Override
+-  @edu.umd.cs.findbugs.annotations.SuppressWarnings(
+-      value="NP_METHOD_PARAMETER_TIGHTENS_ANNOTATION",
+-      justification="Default annotation is not correct for equals")
+-  public boolean equals(@Nullable Object o) {
+-    if (this == o) {
+-      return true;
+-    }
+-    if (o == null || !getClass().equals(o.getClass())) {
+-      return false;
+-    }
+-    FixedLongRangeFieldPartitioner that = (FixedLongRangeFieldPartitioner) o;
+-    return Objects.equal(this.getName(), that.getName()) &&
+-        Objects.equal(this.size, that.size);
+-  }
+-
+-  @Override
+-  public int compare(Long o1, Long o2) {
+-    return apply(o1).compareTo(apply(o2));
+-  }
+-
+-  @Override
+-  public int hashCode() {
+-    return Objects.hashCode(getName(), size);
+-  }
+-
+-  @Override
+-  public String toString() {
+-    return Objects.toStringHelper(this).add("name", getName())
+-      .add("size", size).toString();
+-  }
+-}
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/LongFixedSizeRangeFieldPartitioner.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/LongFixedSizeRangeFieldPartitioner.java
+new file mode 100644
+index 0000000..f62c598
+--- /dev/null
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/LongFixedSizeRangeFieldPartitioner.java
+@@ -0,0 +1,161 @@
++/**
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.data.spi.partition;
++
++import com.google.common.base.Objects;
++import com.google.common.base.Preconditions;
++import com.google.common.base.Predicate;
++import com.google.common.collect.DiscreteDomains;
++import com.google.common.collect.Sets;
++import java.util.Set;
++import java.util.TreeSet;
++import javax.annotation.Nullable;
++import javax.annotation.concurrent.Immutable;
++import org.kitesdk.data.spi.FieldPartitioner;
++import org.kitesdk.data.spi.predicates.Exists;
++import org.kitesdk.data.spi.predicates.In;
++import org.kitesdk.data.spi.predicates.Predicates;
++import org.kitesdk.data.spi.predicates.Range;
++import org.kitesdk.data.spi.predicates.Ranges;
++
++@edu.umd.cs.findbugs.annotations.SuppressWarnings(value={
++    "NP_PARAMETER_MUST_BE_NONNULL_BUT_MARKED_AS_NULLABLE",
++    "SE_COMPARATOR_SHOULD_BE_SERIALIZABLE"},
++    justification="False positive due to generics.")
++@Immutable
++public class LongFixedSizeRangeFieldPartitioner extends FieldPartitioner<Long, Long> {
++
++  private final long size;
++
++  public LongFixedSizeRangeFieldPartitioner(String sourceName, long size) {
++    this(sourceName, null, size);
++  }
++
++  public LongFixedSizeRangeFieldPartitioner(String sourceName, @Nullable String name,
++      long size) {
++    super(sourceName, (name == null ? sourceName + "_range" : name),
++        Long.class, Long.class);
++    this.size = size;
++    Preconditions.checkArgument(size > 0,
++        "Size of range buckets is not positive: %s", size);
++  }
++
++  @Override
++  public Long apply(Long value) {
++    return Math.round(Math.floor(value / ((double) size))) * size;
++  }
++
++  @Override
++  public Predicate<Long> project(Predicate<Long> predicate) {
++    if (predicate instanceof Exists) {
++      return Predicates.exists();
++    } else if (predicate instanceof In) {
++      return ((In<Long>) predicate).transform(this);
++    } else if (predicate instanceof Range) {
++      return Ranges.transformClosed(
++          Ranges.adjustClosed((Range<Long>) predicate,
++              DiscreteDomains.longs()), this);
++    } else {
++      return null;
++    }
++  }
++
++  @Override
++  public Predicate<Long> projectStrict(Predicate<Long> predicate) {
++    if (predicate instanceof Exists) {
++      return Predicates.exists();
++    } else if (predicate instanceof In) {
++      Set<Long> possibleValues = Sets.newHashSet();
++      In<Long> in = ((In<Long>) predicate).transform(this);
++      for (Long val : in.getSet()) {
++        boolean matchedAll = true;
++        for (long i = 0; i < size; i++) {
++          matchedAll = matchedAll && predicate.apply(val + i);
++        }
++        if (matchedAll) {
++          possibleValues.add(val);
++        }
++      }
++      if (!possibleValues.isEmpty()) {
++        return Predicates.in(possibleValues);
++      }
++    } else if (predicate instanceof Range) {
++      Range<Long> closed = Ranges.adjustClosed(
++          (Range<Long>) predicate, DiscreteDomains.longs());
++      Long start = null;
++      if (closed.hasLowerBound()) {
++        if ((closed.lowerEndpoint() % size) == 0) {
++          // the entire set of values is included
++          start = closed.lowerEndpoint();
++        } else {
++          // start the predicate at the next value
++          start = apply(closed.lowerEndpoint() + size);
++        }
++      }
++      Long end = null;
++      if (closed.hasUpperBound()) {
++        if (((closed.upperEndpoint() + 1) % size) == 0) {
++          // all values are included
++          end = apply(closed.upperEndpoint());
++        } else {
++          // end the predicate at the previous value
++          end = apply(closed.upperEndpoint() - size);
++        }
++      }
++      if (start != null && end != null && start > end) {
++        return null;
++      }
++      return Ranges.closed(start, end); // null start or end => unbound
++    }
++    return null;
++  }
++
++  public long getSize() {
++    return size;
++  }
++
++  @Override
++  @edu.umd.cs.findbugs.annotations.SuppressWarnings(
++      value="NP_METHOD_PARAMETER_TIGHTENS_ANNOTATION",
++      justification="Default annotation is not correct for equals")
++  public boolean equals(@Nullable Object o) {
++    if (this == o) {
++      return true;
++    }
++    if (o == null || !getClass().equals(o.getClass())) {
++      return false;
++    }
++    LongFixedSizeRangeFieldPartitioner that = (LongFixedSizeRangeFieldPartitioner) o;
++    return Objects.equal(this.getName(), that.getName()) &&
++        Objects.equal(this.size, that.size);
++  }
++
++  @Override
++  public int compare(Long o1, Long o2) {
++    return apply(o1).compareTo(apply(o2));
++  }
++
++  @Override
++  public int hashCode() {
++    return Objects.hashCode(getName(), size);
++  }
++
++  @Override
++  public String toString() {
++    return Objects.toStringHelper(this).add("name", getName())
++      .add("size", size).toString();
++  }
++}
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/PartitionFunctions.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/PartitionFunctions.java
+index 679795e..044f299 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/PartitionFunctions.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/PartitionFunctions.java
+@@ -60,8 +60,8 @@ public class PartitionFunctions {
+     return new RangeFieldPartitioner(sourceName, name, upperBounds);
+   }
+ 
+-  public static FieldPartitioner<Long, Long> fixedRange(String sourceName, @Nullable String name, long range) {
+-    return new FixedLongRangeFieldPartitioner(sourceName, name, range);
++  public static FieldPartitioner<Long, Long> fixedSizeRange(String sourceName, @Nullable String name, long range) {
++    return new LongFixedSizeRangeFieldPartitioner(sourceName, name, range);
+   }
+ 
+   public static FieldPartitioner<Long, Integer> year(String sourceName, @Nullable String name) {
+@@ -132,10 +132,10 @@ public class PartitionFunctions {
+       return String.format("range(\"%s\", \"%s\", %s)",
+           fieldPartitioner.getSourceName(), fieldPartitioner.getName(),
+           builder.toString());
+-    } else if (fieldPartitioner instanceof FixedLongRangeFieldPartitioner) {
+-      return String.format("fixedRange(\"%s\", \"%s\", %s)",
++    } else if (fieldPartitioner instanceof LongFixedSizeRangeFieldPartitioner) {
++      return String.format("fixedSizeRange(\"%s\", \"%s\", %s)",
+           fieldPartitioner.getSourceName(), fieldPartitioner.getName(),
+-          ((FixedLongRangeFieldPartitioner) fieldPartitioner).getSize());
++          ((LongFixedSizeRangeFieldPartitioner) fieldPartitioner).getSize());
+     } else if (fieldPartitioner instanceof DateFormatPartitioner) {
+       return String.format("dateFormat(\"%s\", \"%s\", \"%s\")",
+           fieldPartitioner.getSourceName(),
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java
+index e22b878..8575b71 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java
+@@ -89,7 +89,7 @@ public class In<T> extends RegisteredPredicate<T> {
+     return new In<V>(Iterables.transform(set, function));
+   }
+ 
+-  Set<T> getSet() {
++  public Set<T> getSet() {
+     return set;
+   }
+ 
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestPartitionStrategyParser.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestPartitionStrategyParser.java
+index 26ae684..f3d985b 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestPartitionStrategyParser.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestPartitionStrategyParser.java
+@@ -89,10 +89,10 @@ public class TestPartitionStrategyParser {
+   }
+ 
+   @Test
+-  public void testFixedRange() {
+-    checkParser(new PartitionStrategy.Builder().fixedRange("id", 64).build(),
++  public void testFixedSizedRange() {
++    checkParser(new PartitionStrategy.Builder().fixedSizeRange("id", 64).build(),
+         "[ {\"type\": \"range\", \"source\": \"id\", \"size\": 64} ]");
+-    checkParser(new PartitionStrategy.Builder().fixedRange("id", "rng", 64).build(),
++    checkParser(new PartitionStrategy.Builder().fixedSizeRange("id", "rng", 64).build(),
+         "[ {\"type\": \"range\", " +
+             "\"source\": \"id\", " +
+             "\"name\": \"rng\", " +
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestFixedLongRangeFieldPartitioner.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestFixedLongRangeFieldPartitioner.java
+deleted file mode 100644
+index 8ae2a76..0000000
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestFixedLongRangeFieldPartitioner.java
++++ /dev/null
+@@ -1,43 +0,0 @@
+-/**
+- * Copyright 2013 Cloudera Inc.
+- *
+- * Licensed under the Apache License, Version 2.0 (the "License");
+- * you may not use this file except in compliance with the License.
+- * You may obtain a copy of the License at
+- *
+- * http://www.apache.org/licenses/LICENSE-2.0
+- *
+- * Unless required by applicable law or agreed to in writing, software
+- * distributed under the License is distributed on an "AS IS" BASIS,
+- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+- * See the License for the specific language governing permissions and
+- * limitations under the License.
+- */
+-package org.kitesdk.data.spi.partition;
+-
+-import org.junit.Assert;
+-import org.junit.Test;
+-
+-public class TestFixedLongRangeFieldPartitioner {
+-
+-  @Test(expected = IllegalArgumentException.class)
+-  public void testRangeNotPositive() {
+-    new FixedLongRangeFieldPartitioner("position", 0);
+-  }
+-
+-  @Test
+-  public void test() {
+-    FixedLongRangeFieldPartitioner partitioner =
+-        new FixedLongRangeFieldPartitioner("position", 10);
+-
+-    Assert.assertEquals(0, partitioner.apply(0L).longValue());
+-    Assert.assertEquals(0, partitioner.apply(9L).longValue());
+-    Assert.assertEquals(10, partitioner.apply(10L).longValue());
+-    Assert.assertEquals(10, partitioner.apply(11L).longValue());
+-    Assert.assertEquals(-10, partitioner.apply(-1L).longValue());
+-    Assert.assertEquals(-10, partitioner.apply(-9L).longValue());
+-    Assert.assertEquals(-10, partitioner.apply(-10L).longValue());
+-    Assert.assertEquals(-20, partitioner.apply(-11L).longValue());
+-  }
+-
+-}
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestLongFixedSizeRangeFieldPartitioner.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestLongFixedSizeRangeFieldPartitioner.java
+new file mode 100644
+index 0000000..1fba5b7
+--- /dev/null
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestLongFixedSizeRangeFieldPartitioner.java
+@@ -0,0 +1,48 @@
++/**
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.data.spi.partition;
++
++import org.junit.Assert;
++import org.junit.Test;
++
++public class TestLongFixedSizeRangeFieldPartitioner {
++
++  @Test(expected = IllegalArgumentException.class)
++  public void testZeroRange() {
++    new LongFixedSizeRangeFieldPartitioner("position", 0);
++  }
++
++  @Test(expected = IllegalArgumentException.class)
++  public void testNegativeRange() {
++    new LongFixedSizeRangeFieldPartitioner("position", -1);
++  }
++
++  @Test
++  public void test() {
++    LongFixedSizeRangeFieldPartitioner partitioner =
++        new LongFixedSizeRangeFieldPartitioner("position", 10);
++
++    Assert.assertEquals(0, partitioner.apply(0L).longValue());
++    Assert.assertEquals(0, partitioner.apply(9L).longValue());
++    Assert.assertEquals(10, partitioner.apply(10L).longValue());
++    Assert.assertEquals(10, partitioner.apply(11L).longValue());
++    Assert.assertEquals(-10, partitioner.apply(-1L).longValue());
++    Assert.assertEquals(-10, partitioner.apply(-9L).longValue());
++    Assert.assertEquals(-10, partitioner.apply(-10L).longValue());
++    Assert.assertEquals(-20, partitioner.apply(-11L).longValue());
++  }
++
++}
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestPartitionerProjection.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestPartitionerProjection.java
+index 2933f2f..c061f2f 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestPartitionerProjection.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestPartitionerProjection.java
+@@ -270,6 +270,48 @@ public class TestPartitionerProjection {
+   }
+ 
+   @Test
++  public void testLongFixedSizeRangeFieldPartitionerRangePredicate() {
++    final FieldPartitioner<Long, Long> fp =
++        new LongFixedSizeRangeFieldPartitioner("num", 5);
++    Assert.assertEquals(Ranges.closed(-5L, 10L),
++        fp.project(Ranges.open(-2L, 15L)));
++    Assert.assertEquals(Ranges.closed(5L, 10L),
++        fp.project(Ranges.open(5L, 15L)));
++    Assert.assertEquals(Ranges.closed(5L, 10L),
++        fp.project(Ranges.open(4L, 15L)));
++    Assert.assertEquals(Ranges.closed(0L, 15L),
++        fp.project(Ranges.closed(4L, 15L)));
++    Assert.assertEquals(Ranges.closed(5L, 20L),
++        fp.project(Ranges.openClosed(5L, 21L)));
++
++    Assert.assertEquals(Ranges.singleton(10L),
++        fp.projectStrict(Ranges.open(5L, 15L)));
++    Assert.assertNull(fp.projectStrict(Ranges.open(5L, 14L)));
++    Assert.assertEquals(Ranges.atMost(10L),
++        fp.projectStrict(Ranges.atMost(15L)));
++    Assert.assertEquals(Ranges.atMost(15L),
++        fp.projectStrict(Ranges.lessThan(21L)));
++    Assert.assertEquals(Ranges.atLeast(15L),
++        fp.projectStrict(Ranges.atLeast(14L)));
++  }
++
++  @Test
++  public void testLongFixedSizeRangeFieldPartitionerSetPredicate() {
++    final FieldPartitioner<Long, Long> fp =
++        new LongFixedSizeRangeFieldPartitioner("num", 5);
++    Assert.assertEquals(Predicates.in(5L, 15L),
++        fp.project(Predicates.in(5L, 6L, 15L, 16L)));
++
++    // null if no full range is included
++    Assert.assertNull(fp.projectStrict(Predicates.in(5L, 6L, 15L, 16L)));
++    Assert.assertEquals(Predicates.in(5L),
++        fp.projectStrict(Predicates.in(5L, 6L, 7L, 8L, 9L, 15L, 16L)));
++    Assert.assertEquals(Predicates.in(5L, 15L),
++        fp.projectStrict(Predicates.in(
++            4L, 5L, 6L, 7L, 8L, 9L, 10L, 15L, 16L, 17L, 18L, 19L, 20L)));
++  }
++
++  @Test
+   public void testRangeFieldPartitionerRangePredicate() {
+     final FieldPartitioner<String, String> fp =
+         new RangeFieldPartitioner("str", "str_bound", new String[]{"a", "b", "c"});
+-- 
+1.7.0.4
+

@@ -1,0 +1,33 @@
+From bb31f88a569fae90bb23570d482241aba04ae14a Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Mon, 18 May 2015 15:09:45 +0300
+Subject: [PATCH 021/115] CDK-1001: dropRecord morphline command should forward notifications - part 2
+
+---
+ .../morphline/stdlib/DropRecordBuilder.java        |    3 +--
+ 1 files changed, 1 insertions(+), 2 deletions(-)
+
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/DropRecordBuilder.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/DropRecordBuilder.java
+index 559aecc..b746f06 100644
+--- a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/DropRecordBuilder.java
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/DropRecordBuilder.java
+@@ -25,7 +25,6 @@ import org.kitesdk.morphline.api.Record;
+ import org.kitesdk.morphline.base.AbstractCommand;
+ 
+ import com.typesafe.config.Config;
+-import com.typesafe.config.ConfigFactory;
+ 
+ /**
+  * Command that silently consumes records without ever emitting any record - think /dev/null.
+@@ -83,7 +82,7 @@ public final class DropRecordBuilder implements CommandBuilder {
+   private static final class DropRecord extends AbstractCommand {
+     
+     public DropRecord(CommandBuilder builder, Config config, Command parent, Command child, MorphlineContext context) {
+-      super(builder, ConfigFactory.empty(), parent, child, context);
++      super(builder, config, parent, child, context);
+     }
+ 
+     @Override
+-- 
+1.7.0.4
+

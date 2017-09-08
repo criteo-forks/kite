@@ -1,0 +1,52 @@
+From 44005026ca76db1d6b88fc2a052c89305baaa62e Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 1 Apr 2015 19:21:51 -0700
+Subject: [PATCH 037/115] CDK-902: Fix Hadoop-1 incompatibility.
+
+---
+ .../data/spi/filesystem/FileSystemUtil.java        |   19 +++++++++++++++++--
+ 1 files changed, 17 insertions(+), 2 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
+index 01367e2..bf73543 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
+@@ -27,6 +27,7 @@ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.fs.FileStatus;
+ import org.apache.hadoop.fs.FileSystem;
+ import org.apache.hadoop.fs.Path;
++import org.kitesdk.compat.DynMethods;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetIOException;
+ import org.kitesdk.data.Format;
+@@ -174,11 +175,25 @@ public class FileSystemUtil {
+     return visit(visitor, fs, path, Lists.<Path>newArrayList());
+   }
+ 
++  private static final DynMethods.UnboundMethod IS_SYMLINK;
++  static {
++    DynMethods.UnboundMethod isSymlink;
++    try {
++      isSymlink = new DynMethods.Builder("isSymlink")
++          .impl(FileStatus.class)
++          .buildChecked();
++    } catch (NoSuchMethodException e) {
++      isSymlink = null;
++    }
++    IS_SYMLINK = isSymlink;
++  }
++
+   private static <T> T visit(PathVisitor<T> visitor, FileSystem fs, Path path,
+                       List<Path> followedLinks) throws IOException {
+-    if (fs.getFileStatus(path).isFile()) {
++    if (fs.isFile(path)) {
+       return visitor.file(fs, path);
+-    } else if (fs.getFileStatus(path).isSymlink()) {
++    } else if (IS_SYMLINK != null &&
++        IS_SYMLINK.<Boolean>invoke(fs.getFileStatus(path))) {
+       Preconditions.checkArgument(!followedLinks.contains(path),
+           "Encountered recursive path structure at link: " + path);
+       followedLinks.add(path); // no need to remove
+-- 
+1.7.0.4
+

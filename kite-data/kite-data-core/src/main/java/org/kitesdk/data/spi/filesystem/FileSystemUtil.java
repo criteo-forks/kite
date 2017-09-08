@@ -20,10 +20,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.net.URI;
 import java.util.Collection;
 import java.util.List;
 import javax.annotation.Nullable;
@@ -32,7 +29,6 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.Trash;
 import org.kitesdk.compat.DynMethods;
 import org.kitesdk.data.DatasetDescriptor;
 import org.kitesdk.data.DatasetIOException;
@@ -182,7 +178,7 @@ public class FileSystemUtil {
           // destination is deleted last
           continue;
         }
-        FileSystemUtil.cleanlyDelete(fs, root, toRemove, false);
+        FileSystemUtil.cleanlyDelete(fs, root, toRemove);
       }
 
       // remove the directory that will be replaced with a move
@@ -201,14 +197,6 @@ public class FileSystemUtil {
   }
 
   static boolean cleanlyDelete(FileSystem fs, Path root, Path path) {
-    return cleanlyDelete(fs, root, path, false);
-  }
-
-  static boolean cleanlyMoveToTrash(FileSystem fs, Path root, Path path) {
-    return cleanlyDelete(fs, root, path, true);
-  }
-
-  private static boolean cleanlyDelete(FileSystem fs, Path root, Path path, boolean useTrash) {
     Preconditions.checkNotNull(fs, "File system cannot be null");
     Preconditions.checkNotNull(root, "Root path cannot be null");
     Preconditions.checkNotNull(path, "Path to delete cannot be null");
@@ -225,56 +213,31 @@ public class FileSystemUtil {
       if (relativePath.isAbsolute()) {
         // path is not relative to the root. delete just the path
         LOG.debug("Deleting path {}", path);
-        deleted = useTrash ? Trash.moveToAppropriateTrash(fs, path, fs.getConf())
-            : fs.delete(path, true /* include any files */);
+        deleted = fs.delete(path, true /* include any files */ );
       } else {
         // the is relative to the root path
         Path absolute = new Path(root, relativePath);
         LOG.debug("Deleting path {}", absolute);
-        deleted = useTrash ? Trash.moveToAppropriateTrash(fs, absolute, fs.getConf())
-            : fs.delete(absolute, true /* include any files */);
+        deleted = fs.delete(absolute, true /* include any files */ );
         // iterate up to the root, removing empty directories
-        deleted |= deleteParentDirectoriesIfEmpty(fs, root, absolute);
+        for (Path current = absolute.getParent();
+             !current.equals(root) && !(current.getParent() == null);
+             current = current.getParent()) {
+          final FileStatus[] stats = fs.listStatus(current);
+          if (stats == null || stats.length == 0) {
+            // dir is empty and should be removed
+            LOG.debug("Deleting empty path {}", current);
+            deleted = fs.delete(current, true) || deleted;
+          } else {
+            // all parent directories will be non-empty
+            break;
+          }
+        }
       }
       return deleted;
     } catch (IOException ex) {
       throw new DatasetIOException("Could not cleanly delete path:" + path, ex);
     }
-  }
-
-  /**
-   * Deletes the empty parent directories of the specified path.
-   * The method catches and ignores FileNotFoundException as it is possible that multiple parallel Kite instances are
-   * importing into a directory under the same root directory and it can happen that a Kite instance founds an empty
-   * directory which needs to be deleted but when it tries execute the delete command the folder is missing
-   * because it has been already deleted by another Kite instance.
-   *
-   * @param fs   the FileSystem
-   * @param root The empty parent directories have to be deleted up to this root directory.
-   * @param path The parent directories of this path will be deleted.
-   * @return True if at least one empty parent directory was deleted false otherwise.
-   * @throws IOException
-   */
-  static boolean deleteParentDirectoriesIfEmpty(FileSystem fs, Path root, Path path) throws IOException {
-    boolean deleted = false;
-    try {
-      for (Path current = path.getParent();
-           !current.equals(root) && !(current.getParent() == null);
-           current = current.getParent()) {
-        final FileStatus[] stats = fs.listStatus(current);
-        if (stats == null || stats.length == 0) {
-          // dir is empty and should be removed
-          LOG.debug("Deleting empty path {}", current);
-          deleted = fs.delete(current, true) || deleted;
-        } else {
-          // all parent directories will be non-empty
-          break;
-        }
-      }
-    } catch (FileNotFoundException e) {
-      LOG.debug("Path does not exist it may have been deleted by another process.", e);
-    }
-    return deleted;
   }
 
   public static Schema schema(String name, FileSystem fs, Path location) throws IOException {
@@ -695,25 +658,5 @@ public class FileSystemUtil {
     } else {
       return SchemaUtil.merge(left, right);
     }
-  }
-
-  /**
-   * Determine whether a FileSystem that supports efficient file renaming is being used. Two known
-   * FileSystem implementations that currently lack this feature are S3N and S3A.
-   *
-   * @param fsUri the FileSystem URI
-   * @param conf the FileSystem Configuration
-   * @return {@code true} if the FileSystem URI or {@link FileSystemProperties#SUPPORTS_RENAME_PROP
-   *     configuration override} indicates that the FileSystem implementation supports efficient
-   *     rename operations, {@code false} otherwise.
-   */
-  public static boolean supportsRename(URI fsUri, Configuration conf) {
-    String fsUriScheme = fsUri.getScheme();
-
-    // Only S3 is known to not support renaming, but allow configuration override.
-    // This logic is intended as a temporary placeholder solution and should
-    // be revisited once HADOOP-9565 has been completed.
-    return conf.getBoolean(FileSystemProperties.SUPPORTS_RENAME_PROP,
-        !(fsUriScheme.equalsIgnoreCase("s3n") || fsUriScheme.equalsIgnoreCase("s3a")));
   }
 }

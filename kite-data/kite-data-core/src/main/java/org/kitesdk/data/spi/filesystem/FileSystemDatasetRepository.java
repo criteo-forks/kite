@@ -16,8 +16,6 @@
 package org.kitesdk.data.spi.filesystem;
 
 import javax.annotation.Nullable;
-
-import org.apache.hadoop.fs.Trash;
 import org.kitesdk.data.impl.Accessor;
 import org.kitesdk.data.spi.Compatibility;
 import org.kitesdk.data.spi.PartitionKey;
@@ -216,15 +214,6 @@ public class FileSystemDatasetRepository extends AbstractDatasetRepository
 
   @Override
   public boolean delete(String namespace, String name) {
-    return deleteWithTrash(namespace, name, false);
-  }
-
-  @Override
-  public boolean moveToTrash(String namespace, String name) {
-    return deleteWithTrash(namespace, name, true);
-  }
-
-  private boolean deleteWithTrash(String namespace, String name, boolean useTrash){
     Preconditions.checkNotNull(namespace, "Namespace cannot be null");
     Preconditions.checkNotNull(name, "Dataset name cannot be null");
 
@@ -239,27 +228,23 @@ public class FileSystemDatasetRepository extends AbstractDatasetRepository
 
     // don't care about the return value here -- if it already doesn't exist
     // we still need to delete the data directory
-    boolean changed = useTrash ? metadataProvider.moveToTrash(namespace, name) :
-            metadataProvider.delete(namespace, name);
+    boolean changed = metadataProvider.delete(namespace, name);
 
     Path dataLocation = new Path(descriptor.getLocation().toString());
     FileSystem dataFS = fsForPath(dataLocation, conf);
 
     if (fs.getUri().equals(dataFS.getUri())) {
       // the data location is on the right FS, so cleanlyDelete will work
-      changed |= (useTrash ? FileSystemUtil.cleanlyMoveToTrash(fs, rootDirectory, dataLocation)
-          : FileSystemUtil.cleanlyDelete(fs, rootDirectory, dataLocation));
+      changed |= FileSystemUtil.cleanlyDelete(fs, rootDirectory, dataLocation);
     } else {
       try {
         if (dataFS.exists(dataLocation)) {
-
-          changed = (useTrash ? Trash.moveToAppropriateTrash(dataFS, dataLocation, dataFS.getConf())
-              : dataFS.delete(dataLocation, true));
-
-          if (!changed){
+          if (dataFS.delete(dataLocation, true)) {
+            changed = true;
+          } else {
             throw new IOException(
                 "Failed to delete dataset name:" + name +
-                    " location:" + dataLocation);
+                " location:" + dataLocation);
           }
         }
       } catch (IOException e) {

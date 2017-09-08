@@ -1,0 +1,24 @@
+From bdf49317a48e5270b451a741347da3ecdd731a9c Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Mon, 14 Sep 2015 17:36:31 -0700
+Subject: [PATCH 106/115] KITE-1071: Use exit 1 when Hadoop isn't found by CLI.
+
+---
+ .../kite-tools/src/main/sh/dataset.sh              |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/kite-tools-parent/kite-tools/src/main/sh/dataset.sh b/kite-tools-parent/kite-tools/src/main/sh/dataset.sh
+index 671789f..96e5278 100644
+--- a/kite-tools-parent/kite-tools/src/main/sh/dataset.sh
++++ b/kite-tools-parent/kite-tools/src/main/sh/dataset.sh
+@@ -139,6 +139,7 @@ if [ -x "$HADOOP_COMMON_HOME/bin/hadoop" ]; then
+ else
+   echo "ERROR: Cannot find Hadoop installation!"
+   echo "You can fix this warning by setting HADOOP_HOME"
++  exit 1
+ fi
+ 
+ exit
+-- 
+1.7.0.4
+

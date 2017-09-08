@@ -1,0 +1,105 @@
+From 599f83d89d5fe4940585c88e35410e07d330450f Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 11 Mar 2015 16:47:27 -0700
+Subject: [PATCH 015/115] CDK-945: Ignore trailing slash in URIs.
+
+This updates the URIPattern code to ignore trailing slashes in URIs.
+URIs can still match a trailing / explicitly, and URI pattern globbing
+still works as before.
+---
+ .../main/java/org/kitesdk/data/spi/URIPattern.java |   14 +++++++++++
+ .../java/org/kitesdk/data/spi/TestURIPattern.java  |   16 ++++++++++++
+ .../data/spi/filesystem/TestHDFSDatasetURIs.java   |   25 ++++++++++++++++++++
+ 3 files changed, 55 insertions(+), 0 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/URIPattern.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/URIPattern.java
+index e4617c9..076b15d 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/URIPattern.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/URIPattern.java
+@@ -283,6 +283,20 @@ public class URIPattern {
+         PATH_SPLITTER.split(pattern));
+     LinkedList<String> parts = Lists.newLinkedList(PATH_SPLITTER.split(path));
+ 
++    // if the data URI ends in a trailing slash, ignore it unless:
++    // 1. the pattern ends with a glob
++    // 2. the pattern ends with a slash that should be considered a match
++    if (parts.peekLast().isEmpty()) {
++      // don't change glob handling
++      if (!patternParts.peekLast().startsWith("*")) {
++        parts.removeLast();
++      }
++      // match the trailing slash for the pattern, if present
++      if (patternParts.peekLast().isEmpty()) {
++        patternParts.removeLast();
++      }
++    }
++
+     // consume URI parts moving forward until exhausted or a glob pattern
+     String globPattern = null;
+     while (!patternParts.isEmpty()) {
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestURIPattern.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestURIPattern.java
+index 7d55ac9..c98644f 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestURIPattern.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestURIPattern.java
+@@ -178,6 +178,22 @@ public class TestURIPattern {
+   }
+ 
+   @Test
++  public void testIgnoreTrailingSlash() throws URISyntaxException {
++    URIPattern pattern = new URIPattern("mysql:/:db/:table");
++    String uri = "mysql:/myDB/myTable/";
++    Assert.assertTrue(pattern.matches(uri));
++
++    Map<String, String> actual = pattern.getMatch(uri);
++    expected.put("uri:scheme", "mysql");
++    expected.put("db", "myDB");
++    expected.put("table", "myTable");
++    Assert.assertEquals(expected, actual);
++
++    URI constructed = pattern.construct(expected);
++    Assert.assertEquals(URI.create("mysql:/myDB/myTable"), constructed);
++  }
++
++  @Test
+   public void testPathVariablesWithGlob() throws URISyntaxException {
+     URIPattern pattern = new URIPattern("mysql:/:db/:table/*the-rest");
+     String uri = "mysql:/myDB/myTable/a/b/c";
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestHDFSDatasetURIs.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestHDFSDatasetURIs.java
+index e20b3c7..7fe14d6 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestHDFSDatasetURIs.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestHDFSDatasetURIs.java
+@@ -72,6 +72,31 @@ public class TestHDFSDatasetURIs extends MiniDFSTest {
+   }
+ 
+   @Test
++  public void testAbsoluteTrailingSlash() {
++    DatasetRepository repo = DatasetRepositories
++        .repositoryFor("repo:hdfs://" + hdfsAuth + "/tmp/data/");
++    repo.delete("ns", "test");
++    repo.create("ns", "test", descriptor);
++
++    Dataset<Object> ds = Datasets.<Object, Dataset<Object>>
++        load("dataset:hdfs://" + hdfsAuth + "/tmp/data/ns/test/", Object.class);
++
++    Assert.assertNotNull("Should load dataset", ds);
++    Assert.assertTrue(ds instanceof FileSystemDataset);
++    Assert.assertEquals("Locations should match",
++        URI.create("hdfs://" + hdfsAuth + "/tmp/data/ns/test"),
++        ds.getDescriptor().getLocation());
++    Assert.assertEquals("Descriptors should match",
++        repo.load("ns", "test").getDescriptor(), ds.getDescriptor());
++    Assert.assertEquals("Should report correct namespace",
++        "ns", ds.getNamespace());
++    Assert.assertEquals("Should report correct name",
++        "test", ds.getName());
++
++    repo.delete("ns", "test");
++  }
++
++  @Test
+   public void testAbsoluteRoot() {
+     DatasetRepository repo = DatasetRepositories
+         .repositoryFor("repo:hdfs://" + hdfsAuth + "/");
+-- 
+1.7.0.4
+

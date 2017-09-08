@@ -1,0 +1,894 @@
+From d463611a0b36d27a7377e457bd91097d0dae6e9a Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Sat, 21 Feb 2015 17:00:09 -0800
+Subject: [PATCH 034/115] CDK-902: Add CLI wrap command to create a dataset from existing data.
+
+---
+ .../java/org/kitesdk/data/DatasetDescriptor.java   |   52 +----
+ .../main/java/org/kitesdk/data/spi/Schemas.java    |  214 ++++++++++++++++++
+ .../data/spi/filesystem/FileSystemDataset.java     |    8 +
+ .../filesystem/FileSystemDatasetRepository.java    |    9 +-
+ .../data/spi/filesystem/FileSystemUtil.java        |  235 ++++++++++++++++++++
+ .../spi/partition/ProvidedFieldPartitioner.java    |    2 +-
+ .../java/org/kitesdk/data/spi/hive/HiveUtils.java  |    2 +-
+ .../src/main/java/org/kitesdk/cli/Main.java        |    2 +
+ .../kitesdk/cli/commands/WrapDatasetCommand.java   |  170 ++++++++++++++
+ 9 files changed, 645 insertions(+), 49 deletions(-)
+ create mode 100644 kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Schemas.java
+ create mode 100644 kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/WrapDatasetCommand.java
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/DatasetDescriptor.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/DatasetDescriptor.java
+index aa57efc..5c9a4f2 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/DatasetDescriptor.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/DatasetDescriptor.java
+@@ -36,10 +36,6 @@ import java.util.TreeSet;
+ import javax.annotation.Nullable;
+ import javax.annotation.concurrent.Immutable;
+ import org.apache.avro.Schema;
+-import org.apache.avro.file.DataFileReader;
+-import org.apache.avro.file.DataFileStream;
+-import org.apache.avro.generic.GenericDatumReader;
+-import org.apache.avro.generic.GenericRecord;
+ import org.apache.avro.reflect.ReflectData;
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.fs.FileSystem;
+@@ -50,6 +46,7 @@ import org.kitesdk.data.spi.FieldPartitioner;
+ import org.kitesdk.data.spi.HadoopFileSystemURLStreamHandler;
+ import org.kitesdk.data.spi.PartitionStrategyParser;
+ import org.kitesdk.data.spi.SchemaUtil;
++import org.kitesdk.data.spi.Schemas;
+ import org.kitesdk.data.spi.partition.IdentityFieldPartitioner;
+ import org.kitesdk.data.spi.partition.ProvidedFieldPartitioner;
+ 
+@@ -399,7 +396,7 @@ public class DatasetDescriptor {
+      * @return An instance of the builder for method chaining.
+      */
+     public Builder schema(File file) throws IOException {
+-      this.schema = new Schema.Parser().parse(file);
++      this.schema = Schemas.fromAvsc(file);
+       // don't set schema URL since it is a local file not on a DFS
+       return this;
+     }
+@@ -414,7 +411,7 @@ public class DatasetDescriptor {
+      * @return An instance of the builder for method chaining.
+      */
+     public Builder schema(InputStream in) throws IOException {
+-      this.schema = new Schema.Parser().parse(in);
++      this.schema = Schemas.fromAvsc(in);
+       return this;
+     }
+ 
+@@ -432,16 +429,7 @@ public class DatasetDescriptor {
+      */
+     public Builder schemaUri(URI uri) throws IOException {
+       this.schemaUri = qualifiedUri(uri);
+-
+-      InputStream in = null;
+-      boolean threw = true;
+-      try {
+-        in = open(uri);
+-        schema(in);
+-        threw = false;
+-      } finally {
+-        Closeables.close(in, threw);
+-      }
++      this.schema = Schemas.fromAvsc(conf, uri);
+       return this;
+     }
+ 
+@@ -499,16 +487,7 @@ public class DatasetDescriptor {
+      * @return An instance of the builder for method chaining.
+      */
+     public Builder schemaFromAvroDataFile(File file) throws IOException {
+-      GenericDatumReader<GenericRecord> datumReader = new GenericDatumReader<GenericRecord>();
+-      DataFileReader<GenericRecord> reader = null;
+-      boolean threw = true;
+-      try {
+-        reader = new DataFileReader<GenericRecord>(file, datumReader);
+-        this.schema = reader.getSchema();
+-        threw = false;
+-      } finally {
+-        Closeables.close(reader, threw);
+-      }
++      this.schema = Schemas.fromAvro(file);
+       return this;
+     }
+ 
+@@ -522,16 +501,7 @@ public class DatasetDescriptor {
+      * @return An instance of the builder for method chaining.
+      */
+     public Builder schemaFromAvroDataFile(InputStream in) throws IOException {
+-      GenericDatumReader<GenericRecord> datumReader = new GenericDatumReader<GenericRecord>();
+-      DataFileStream<GenericRecord> stream = null;
+-      boolean threw = true;
+-      try {
+-        stream = new DataFileStream<GenericRecord>(in, datumReader);
+-        this.schema = stream.getSchema();
+-        threw = false;
+-      } finally {
+-        Closeables.close(stream, threw);
+-      }
++      this.schema = Schemas.fromAvro(in);
+       return this;
+     }
+ 
+@@ -544,15 +514,7 @@ public class DatasetDescriptor {
+      * @return An instance of the builder for method chaining.
+      */
+     public Builder schemaFromAvroDataFile(URI uri) throws IOException {
+-      InputStream in = null;
+-      boolean threw = true;
+-      try {
+-        in = open(uri);
+-        schemaFromAvroDataFile(in);
+-        threw = false;
+-      } finally {
+-        Closeables.close(in, threw);
+-      }
++      this.schema = Schemas.fromAvro(conf, uri);
+       return this;
+     }
+ 
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Schemas.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Schemas.java
+new file mode 100644
+index 0000000..335b023
+--- /dev/null
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Schemas.java
+@@ -0,0 +1,214 @@
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.kitesdk.data.spi;
++
++import com.google.common.io.Closeables;
++import com.google.common.io.Resources;
++import java.io.File;
++import java.io.IOException;
++import java.io.InputStream;
++import java.net.URI;
++import org.apache.avro.Schema;
++import org.apache.avro.file.DataFileStream;
++import org.apache.avro.generic.GenericDatumReader;
++import org.apache.avro.generic.GenericRecord;
++import org.apache.hadoop.conf.Configuration;
++import org.apache.hadoop.fs.FileSystem;
++import org.apache.hadoop.fs.Path;
++import parquet.avro.AvroSchemaConverter;
++import parquet.hadoop.ParquetFileReader;
++import parquet.hadoop.metadata.ParquetMetadata;
++
++public class Schemas {
++  // used to match resource:schema.avsc URIs
++  private static final String RESOURCE_URI_SCHEME = "resource";
++
++  public static Schema fromAvsc(InputStream in) throws IOException {
++    // the parser has state, so use a new one each time
++    return new Schema.Parser().parse(in);
++  }
++
++  public static Schema fromAvsc(File location) throws IOException {
++    return fromAvsc(
++        FileSystem.getLocal(DefaultConfiguration.get()),
++        new Path(location.getPath()));
++  }
++
++  public static Schema fromAvsc(FileSystem fs, Path path) throws IOException {
++    InputStream in = null;
++    boolean threw = true;
++
++    try {
++      in = fs.open(path);
++      Schema schema = new Schema.Parser().parse(in);
++      threw = false;
++      return schema;
++    } finally {
++      Closeables.close(in, threw);
++    }
++  }
++
++  public static Schema fromAvsc(Configuration conf, URI location)
++      throws IOException {
++    InputStream in = null;
++    boolean threw = true;
++
++    try {
++      in = open(conf, location);
++      Schema schema = fromAvsc(in);
++      threw = false;
++      return schema;
++    } finally {
++      Closeables.close(in, threw);
++    }
++  }
++
++  public static Schema fromAvro(InputStream in) throws IOException {
++    GenericDatumReader<GenericRecord> datumReader =
++        new GenericDatumReader<GenericRecord>();
++    DataFileStream<GenericRecord> stream = null;
++    boolean threw = true;
++
++    try {
++      stream = new DataFileStream<GenericRecord>(in, datumReader);
++      Schema schema = stream.getSchema();
++      threw = false;
++      return schema;
++    } finally {
++      Closeables.close(stream, threw);
++    }
++  }
++
++  public static Schema fromAvro(File location) throws IOException {
++    return fromAvro(
++        FileSystem.getLocal(DefaultConfiguration.get()),
++        new Path(location.getPath()));
++  }
++
++  public static Schema fromAvro(FileSystem fs, Path location)
++      throws IOException {
++    InputStream in = null;
++    boolean threw = true;
++
++    try {
++      in = fs.open(location);
++      Schema schema = fromAvro(in);
++      threw = false;
++      return schema;
++    } finally {
++      Closeables.close(in, threw);
++    }
++  }
++
++  public static Schema fromAvro(Configuration conf, URI location)
++      throws IOException {
++    InputStream in = null;
++    boolean threw = true;
++
++    try {
++      in = open(conf, location);
++      Schema schema = fromAvro(in);
++      threw = false;
++      return schema;
++    } finally {
++      Closeables.close(in, threw);
++    }
++  }
++
++  public static Schema fromParquet(File location) throws IOException {
++    return fromParquet(
++        FileSystem.getLocal(DefaultConfiguration.get()),
++        new Path(location.getPath()));
++  }
++
++  public static Schema fromParquet(FileSystem fs, Path location) throws IOException {
++    ParquetMetadata footer = ParquetFileReader.readFooter(fs.getConf(), location);
++
++    String schemaString = footer.getFileMetaData()
++        .getKeyValueMetaData().get("parquet.avro.schema");
++    if (schemaString == null) {
++      // try the older property
++      schemaString = footer.getFileMetaData()
++          .getKeyValueMetaData().get("avro.schema");
++    }
++
++    if (schemaString != null) {
++      return new Schema.Parser().parse(schemaString);
++    } else {
++      return new AvroSchemaConverter()
++          .convert(footer.getFileMetaData().getSchema());
++    }
++  }
++
++  public static Schema fromParquet(Configuration conf, URI location)
++      throws IOException {
++    Path path = new Path(location);
++    return fromParquet(path.getFileSystem(conf), path);
++  }
++
++  public static Schema fromJSON(String name, InputStream in) throws IOException {
++    return JsonUtil.inferSchema(in, name, 20);
++  }
++
++  public static Schema fromJSON(String name, File location) throws IOException {
++    return fromJSON(name,
++        FileSystem.getLocal(DefaultConfiguration.get()),
++        new Path(location.getPath()));
++  }
++
++  public static Schema fromJSON(String name, FileSystem fs, Path location)
++      throws IOException {
++    InputStream in = null;
++    boolean threw = true;
++
++    try {
++      in = fs.open(location);
++      Schema schema = fromJSON(name, in);
++      threw = false;
++      return schema;
++    } finally {
++      Closeables.close(in, threw);
++    }
++  }
++
++  public static Schema fromJSON(String name, Configuration conf, URI location)
++      throws IOException {
++    InputStream in = null;
++    boolean threw = true;
++
++    try {
++      in = open(conf, location);
++      Schema schema = fromJSON(name, in);
++      threw = false;
++      return schema;
++    } finally {
++      Closeables.close(in, threw);
++    }
++  }
++
++  private static InputStream open(Configuration conf, URI location)
++      throws IOException {
++    if (RESOURCE_URI_SCHEME.equals(location.getScheme())) {
++      return Resources.getResource(
++          location.getRawSchemeSpecificPart()).openStream();
++    } else {
++      Path path = new Path(location);
++      return path.getFileSystem(conf).open(path);
++    }
++  }
++
++}
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+index 01fa3f6..6dfed31 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+@@ -293,6 +293,14 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+     return partitions;
+   }
+ 
++  void addExistingPartitions() {
++    if (partitionListener != null) {
++      for (Path partition : pathIterator()) {
++        partitionListener.partitionAdded(namespace, name, partition.toString());
++      }
++    }
++  }
++
+   @Override
+   public String toString() {
+     return Objects.toStringHelper(this).add("name", name)
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDatasetRepository.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDatasetRepository.java
+index d1ae395..942fa2a 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDatasetRepository.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDatasetRepository.java
+@@ -141,7 +141,7 @@ public class FileSystemDatasetRepository extends AbstractDatasetRepository
+     LOG.debug("Created dataset: {} schema: {} datasetPath: {}", new Object[] {
+         name, newDescriptor.getSchema(), newDescriptor.getLocation() });
+ 
+-    return new FileSystemDataset.Builder<E>()
++    FileSystemDataset<E> dataset = new FileSystemDataset.Builder<E>()
+         .namespace(namespace)
+         .name(name)
+         .configuration(conf)
+@@ -151,6 +151,11 @@ public class FileSystemDatasetRepository extends AbstractDatasetRepository
+         .partitionKey(newDescriptor.isPartitioned() ? new PartitionKey() : null)
+         .partitionListener(getPartitionListener())
+         .build();
++
++    // notify the partition listener about any existing data partitions
++    dataset.addExistingPartitions();
++
++    return dataset;
+   }
+ 
+   @Override
+@@ -277,7 +282,7 @@ public class FileSystemDatasetRepository extends AbstractDatasetRepository
+     return new TemporaryFileSystemDatasetRepository(conf, rootDirectory, namespace, key);
+   }
+ 
+-  private Path pathForDataset(String namespace, String name) {
++  public Path pathForDataset(String namespace, String name) {
+     return fs.makeQualified(pathForDataset(rootDirectory, namespace, name));
+   }
+ 
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
+index de5554a..db418a9 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemUtil.java
+@@ -17,13 +17,26 @@
+ package org.kitesdk.data.spi.filesystem;
+ 
+ import com.google.common.base.Preconditions;
++import com.google.common.base.Splitter;
++import com.google.common.collect.Lists;
+ import java.io.IOException;
++import java.util.List;
++import javax.annotation.Nullable;
++import org.apache.avro.Schema;
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.fs.FileStatus;
+ import org.apache.hadoop.fs.FileSystem;
+ import org.apache.hadoop.fs.Path;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetIOException;
++import org.kitesdk.data.Format;
++import org.kitesdk.data.Formats;
++import org.kitesdk.data.PartitionStrategy;
++import org.kitesdk.data.ValidationException;
++import org.kitesdk.data.spi.Pair;
++import org.kitesdk.data.spi.SchemaUtil;
++import org.kitesdk.data.spi.Schemas;
++import org.kitesdk.data.spi.partition.ProvidedFieldPartitioner;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+@@ -31,6 +44,9 @@ public class FileSystemUtil {
+ 
+   private static final Logger LOG = LoggerFactory.getLogger(FileSystemUtil.class);
+ 
++  private static final List<Format> SUPPORTED_FORMATS = Lists.newArrayList(
++      Formats.AVRO, Formats.PARQUET, Formats.JSON, Formats.CSV);
++
+   /**
+    * Creates, if necessary, the given the location for {@code descriptor}.
+    *
+@@ -106,4 +122,223 @@ public class FileSystemUtil {
+       throw new DatasetIOException("Could not cleanly delete path:" + path, ex);
+     }
+   }
++
++  public static Schema schema(String name, FileSystem fs, Path location) throws IOException {
++    return visit(new GetSchema(name), fs, location);
++  }
++
++  public static PartitionStrategy strategy(FileSystem fs, Path location) throws IOException {
++    List<Pair<String, Class<? extends Comparable>>> pairs = visit(
++        new GetPartitionInfo(), fs, location);
++
++    if (pairs.isEmpty() || pairs.size() <= 1) {
++      return null;
++    }
++
++    PartitionStrategy.Builder builder = new PartitionStrategy.Builder();
++
++    // skip the initial partition because it is the containing directory
++    for (int i = 1; i < pairs.size(); i += 1) {
++      Pair<String, Class<? extends Comparable>> pair = pairs.get(i);
++      builder.provided(
++          pair.first() == null ? "partition_" + i : pair.first(),
++          ProvidedFieldPartitioner.valuesString(pair.second()));
++    }
++
++    return builder.build();
++  }
++
++  public static Format format(FileSystem fs, Path location) throws IOException {
++    Format format = visit(new GetFormat(), fs, location);
++    Preconditions.checkArgument(format != null,
++        "Cannot determine format: found no data files in " + location);
++    return format;
++  }
++
++  private static abstract class PathVisitor<T> {
++    abstract T directory(FileSystem fs, Path path, List<T> children) throws IOException;
++    abstract T file(FileSystem fs, Path path) throws IOException;
++  }
++
++  private static <T> T visit(PathVisitor<T> visitor, FileSystem fs, Path path)
++      throws IOException {
++    return visit(visitor, fs, path, Lists.<Path>newArrayList());
++  }
++
++  private static <T> T visit(PathVisitor<T> visitor, FileSystem fs, Path path,
++                      List<Path> followedLinks) throws IOException {
++    if (fs.getFileStatus(path).isFile()) {
++      return visitor.file(fs, path);
++    } else if (fs.getFileStatus(path).isSymlink()) {
++      Preconditions.checkArgument(!followedLinks.contains(path),
++          "Encountered recursive path structure at link: " + path);
++      followedLinks.add(path); // no need to remove
++      return visit(visitor, fs, fs.getLinkTarget(path), followedLinks);
++    }
++
++    List<T> children = Lists.newArrayList();
++
++    FileStatus[] statuses = fs.listStatus(path, PathFilters.notHidden());
++    for (FileStatus stat : statuses) {
++      children.add(visit(visitor, fs, stat.getPath()));
++    }
++
++    return visitor.directory(fs, path, children);
++  }
++
++  private static class GetPartitionInfo
++      extends PathVisitor<List<Pair<String, Class<? extends Comparable>>>> {
++    private static final Splitter EQUALS = Splitter.on('=').limit(2).trimResults();
++
++    @Override
++    List<Pair<String, Class<? extends Comparable>>> directory(
++        FileSystem fs, Path path, List<List<Pair<String, Class<? extends Comparable>>>> children)
++        throws IOException {
++
++      // merge the levels under this one
++      List<Pair<String, Class<? extends Comparable>>> accumulated = Lists.newArrayList();
++      for (List<Pair<String, Class<? extends Comparable>>> child : children) {
++        if (child == null) {
++          continue;
++        }
++
++        for (int i = 0; i < child.size(); i += 1) {
++          if (accumulated.size() > i) {
++            Pair<String, Class<? extends Comparable>> pair = merge(
++                accumulated.get(i), child.get(i));
++            accumulated.set(i, pair);
++          } else if (child.get(i) != null) {
++            accumulated.add(child.get(i));
++          }
++        }
++      }
++
++      List<String> parts = Lists.newArrayList(EQUALS.split(path.getName()));
++      String name;
++      String value;
++      if (parts.size() == 2) {
++        name = parts.get(0);
++        value = parts.get(1);
++      } else {
++        name = null;
++        value = parts.get(0);
++      }
++
++      accumulated.add(0,
++          new Pair<String, Class<? extends Comparable>>(name, dataClass(value)));
++
++      return accumulated;
++    }
++
++    @Override
++    List<Pair<String, Class<? extends Comparable>>> file(
++        FileSystem fs, Path path) throws IOException {
++      return null;
++    }
++
++    public Pair<String, Class<? extends Comparable>> merge(
++        Pair<String, Class<? extends Comparable>> left,
++        Pair<String, Class<? extends Comparable>> right) {
++      String name = left.first();
++      if (name == null || name.isEmpty()) {
++        name = right.first();
++      }
++
++      if (left.second() == String.class) {
++        return new Pair<String, Class<? extends Comparable>>(name, String.class);
++      } else if (right.second() == String.class) {
++        return new Pair<String, Class<? extends Comparable>>(name, String.class);
++      } else if (left.second() == Long.class) {
++        return new Pair<String, Class<? extends Comparable>>(name, Long.class);
++      } else if (right.second() == Long.class) {
++        return new Pair<String, Class<? extends Comparable>>(name, Long.class);
++      }
++      return new Pair<String, Class<? extends Comparable>>(name, Integer.class);
++    }
++
++    public Class<? extends Comparable> dataClass(String value) {
++      try {
++        Integer.parseInt(value);
++        return Integer.class;
++      } catch (NumberFormatException e) {
++        // not an integer
++      }
++      try {
++        Long.parseLong(value);
++        return Long.class;
++      } catch (NumberFormatException e) {
++        // not a long
++      }
++      return String.class;
++    }
++  }
++
++  private static class GetFormat extends PathVisitor<Format> {
++    @Override
++    Format directory(FileSystem fs, Path path, List<Format> formats) throws IOException {
++      Format format = null;
++      for (Format otherFormat : formats) {
++        if (format == null) {
++          format = otherFormat;
++        } else if (!format.equals(otherFormat)) {
++          throw new ValidationException(String.format(
++              "Path contains multiple formats (%s, %s): %s",
++              format, otherFormat, path));
++        }
++      }
++      return format;
++    }
++
++    @Override
++    Format file(FileSystem fs, Path path) throws IOException {
++      String filename = path.getName();
++      for (Format format : SUPPORTED_FORMATS) {
++        if (filename.endsWith(format.getExtension())) {
++          return format;
++        }
++      }
++      return null;
++    }
++  }
++
++  private static class GetSchema extends PathVisitor<Schema> {
++    private final String name;
++
++    public GetSchema(String name) {
++      this.name = name;
++    }
++
++    @Override
++    Schema directory(FileSystem fs, Path path, List<Schema> schemas) {
++      Schema merged = null;
++      for (Schema schema : schemas) {
++        merged = merge(merged, schema);
++      }
++      return merged;
++    }
++
++    @Override
++    Schema file(FileSystem fs, Path path) throws IOException {
++      String filename = path.getName();
++      if (filename.endsWith(Formats.AVRO.getExtension())) {
++        return Schemas.fromAvro(fs, path);
++      } else if (filename.endsWith(Formats.PARQUET.getExtension())) {
++        return Schemas.fromParquet(fs, path);
++      } else if (filename.endsWith(Formats.JSON.getExtension())) {
++        return Schemas.fromJSON(name, fs, path);
++      }
++      return null;
++    }
++
++    private static Schema merge(@Nullable Schema left, @Nullable Schema right) {
++      if (left == null) {
++        return right;
++      } else if (right == null) {
++        return left;
++      } else {
++        return SchemaUtil.merge(left, right);
++      }
++    }
++  }
++
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/ProvidedFieldPartitioner.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/ProvidedFieldPartitioner.java
+index ea883c0..b5ab7e5 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/ProvidedFieldPartitioner.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/ProvidedFieldPartitioner.java
+@@ -106,7 +106,7 @@ public class ProvidedFieldPartitioner<T extends Comparable> extends FieldPartiti
+     throw new ValidationException("Not a valid provided type: " + type);
+   }
+ 
+-  private static String valuesString(Class<? extends Comparable> type) {
++  public static String valuesString(Class<? extends Comparable> type) {
+     if (String.class.isAssignableFrom(type)) {
+       return STRING_TYPE;
+     } else if (Integer.class.isAssignableFrom(type)) {
+diff --git a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveUtils.java b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveUtils.java
+index af8e762..22a8dad 100644
+--- a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveUtils.java
++++ b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveUtils.java
+@@ -344,7 +344,7 @@ class HiveUtils {
+       PartitionStrategy ps = descriptor.getPartitionStrategy();
+       table.getParameters().put(PARTITION_EXPRESSION_PROPERTY_NAME,
+           Accessor.getDefault().toExpression(ps));
+-      table.setPartitionKeys(partitionColumns(ps, descriptor.getSchema()));
++      // no need to set the partition columns; no changes to the Hive side
+     }
+ 
+     // keep the custom properties up-to-date
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
+index f18dc12..67e09f9 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
+@@ -53,6 +53,7 @@ import org.kitesdk.cli.commands.ShowRecordsCommand;
+ import org.kitesdk.cli.commands.TarImportCommand;
+ import org.kitesdk.cli.commands.TransformCommand;
+ import org.kitesdk.cli.commands.UpdateDatasetCommand;
++import org.kitesdk.cli.commands.WrapDatasetCommand;
+ import org.kitesdk.data.DatasetIOException;
+ import org.kitesdk.data.DatasetNotFoundException;
+ import org.kitesdk.data.ValidationException;
+@@ -102,6 +103,7 @@ public class Main extends Configured implements Tool {
+     jc.addCommand("schema", new SchemaCommand(console));
+     jc.addCommand("info", new InfoCommand(console));
+     jc.addCommand("show", new ShowRecordsCommand(console));
++    jc.addCommand("wrap", new WrapDatasetCommand(console));
+     jc.addCommand("obj-schema", new ObjectSchemaCommand(console));
+     jc.addCommand("inputformat-import", new InputFormatImportCommand(console));
+     jc.addCommand("csv-schema", new CSVSchemaCommand(console));
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/WrapDatasetCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/WrapDatasetCommand.java
+new file mode 100644
+index 0000000..b92be69
+--- /dev/null
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/WrapDatasetCommand.java
+@@ -0,0 +1,170 @@
++/**
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.cli.commands;
++
++import com.beust.jcommander.DynamicParameter;
++import com.beust.jcommander.Parameter;
++import com.beust.jcommander.Parameters;
++import com.google.common.base.Preconditions;
++import com.google.common.collect.Lists;
++import java.io.IOException;
++import java.net.URI;
++import java.util.List;
++import java.util.Map;
++import org.apache.hadoop.fs.FileSystem;
++import org.apache.hadoop.fs.Path;
++import org.kitesdk.data.DatasetDescriptor;
++import org.kitesdk.data.Format;
++import org.kitesdk.data.Formats;
++import org.kitesdk.data.URIBuilder;
++import org.kitesdk.data.ValidationException;
++import org.kitesdk.data.spi.DatasetRepository;
++import org.kitesdk.data.spi.Pair;
++import org.kitesdk.data.spi.Registration;
++import org.kitesdk.data.spi.filesystem.FileSystemDatasetRepository;
++import org.kitesdk.data.spi.filesystem.FileSystemUtil;
++import org.slf4j.Logger;
++
++@Parameters(commandDescription = "Turn directories of data into a dataset")
++public class WrapDatasetCommand extends BaseDatasetCommand {
++
++  @Parameter(description = "<dataset>")
++  List<String> datasets;
++
++  @Parameter(names = {"-s", "--schema"},
++      description = "A file containing an Avro schema for the dataset.")
++  String avroSchemaFile;
++
++  @Parameter(names = {"--location"},
++      description = "Location where the data is stored")
++  String location;
++
++  @Parameter(names = {"-p", "--partition-by"},
++      description = "A file containing a JSON-formatted partition strategy.")
++  String partitionStrategyFile;
++
++  @Parameter(names = {"-f", "--format"},
++      description = "The file format: avro or parquet.")
++  String formatFromArgs = null;
++
++  @DynamicParameter(names = {"--set", "--property"},
++      description = "Add a property pair: prop.name=value")
++  Map<String, String> properties;
++
++  public WrapDatasetCommand(Logger console) {
++    super(console);
++  }
++
++  @Override
++  public int run() throws IOException {
++    if (datasets == null || datasets.size() != 1) {
++      throw new IllegalArgumentException(
++          "Exactly one dataset name must be specified.");
++    }
++
++    String dataset = datasets.get(0);
++
++    DatasetRepository repo;
++    String namespace;
++    String name;
++
++    if (isDatasetOrViewUri(dataset)) {
++      URI uri = URI.create(URI.create(dataset).getSchemeSpecificPart());
++      Pair<DatasetRepository, Map<String, String>> reg = Registration
++          .lookupDatasetUri(uri);
++      repo = reg.first();
++      namespace = reg.second().get(URIBuilder.NAMESPACE_OPTION);
++      name = reg.second().get(URIBuilder.DATASET_NAME_OPTION);
++      if (location == null) {
++        location = reg.second().get("location");
++      }
++
++    } else {
++      repo = getDatasetRepository();
++      namespace = URIBuilder.NAMESPACE_DEFAULT;
++      name = dataset;
++    }
++
++    if (!(repo instanceof FileSystemDatasetRepository)) {
++      throw new IllegalArgumentException(
++          "Cannot wrap " + dataset + ": not a file system URI");
++    }
++
++    Preconditions.checkArgument(repo.exists(namespace, name),
++        "Cannot create " + dataset + ": already exists");
++
++    DatasetDescriptor.Builder descriptorBuilder = new DatasetDescriptor.Builder();
++
++    Path dataPath;
++    if (location != null) {
++      dataPath = qualifiedPath(location);
++    } else {
++      dataPath = ((FileSystemDatasetRepository) repo)
++          .pathForDataset(namespace, name);
++    }
++
++    descriptorBuilder.location(dataPath);
++
++    FileSystem fs = dataPath.getFileSystem(getConf());
++
++    Format format = FileSystemUtil.format(fs, dataPath);
++    if (format != null) {
++      ValidationException.check(formatFromArgs == null ||
++              Formats.fromString(formatFromArgs).equals(format),
++          "Found %s data, but --format is %s",
++          format.getName(), formatFromArgs);
++      descriptorBuilder.format(format);
++    } else if (formatFromArgs != null) {
++      descriptorBuilder.format(formatFromArgs);
++    } else {
++      throw new ValidationException(
++          "Cannot determine the data format: use --format to set one");
++    }
++
++    if (avroSchemaFile != null) {
++      descriptorBuilder.schemaUri(qualifiedURI(avroSchemaFile));
++    } else {
++      descriptorBuilder.schema(FileSystemUtil.schema("record", fs, dataPath));
++    }
++
++    if (partitionStrategyFile != null) {
++      descriptorBuilder.partitionStrategyUri(qualifiedURI(partitionStrategyFile));
++    } else {
++      descriptorBuilder.partitionStrategy(FileSystemUtil.strategy(fs, dataPath));
++    }
++
++    if (properties != null) {
++      for (Map.Entry<String, String> entry : properties.entrySet()) {
++        descriptorBuilder.property(entry.getKey(), entry.getValue());
++      }
++    }
++
++    repo.create(namespace, name, descriptorBuilder.build());
++
++    console.info("Created {}", dataset);
++
++    return 0;
++  }
++
++  @Override
++  public List<String> getExamples() {
++    return Lists.newArrayList(
++        "# Create dataset for data in hdfs:/data/example/movies:",
++        "dataset:hdfs:/data/example/movies hdfs:/data/example/movies"
++    );
++  }
++
++}
+-- 
+1.7.0.4
+

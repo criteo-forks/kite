@@ -1,0 +1,45 @@
+From ff862140787ed2027a3ef2e348977d09ee9e68f9 Mon Sep 17 00:00:00 2001
+From: Micah Whitacre <micah.whitacre@cerner.com>
+Date: Wed, 11 Mar 2015 11:55:43 -0500
+Subject: [PATCH 055/115] CDK-462: Added static block to add Oozie Action Config to Configuration if present.
+
+---
+ .../org/kitesdk/data/spi/DefaultConfiguration.java |   15 ++++++++++++++-
+ 1 files changed, 14 insertions(+), 1 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DefaultConfiguration.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DefaultConfiguration.java
+index 94e18f8..4de3f29 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DefaultConfiguration.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DefaultConfiguration.java
+@@ -17,6 +17,7 @@
+ package org.kitesdk.data.spi;
+ 
+ import org.apache.hadoop.conf.Configuration;
++import org.apache.hadoop.fs.Path;
+ 
+ /**
+  * Manages a default Hadoop {@link Configuration}.
+@@ -33,7 +34,19 @@ import org.apache.hadoop.conf.Configuration;
+ public class DefaultConfiguration {
+ 
+   // initialize the default configuration from the environment
+-  private static Configuration conf = new Configuration();
++  private static Configuration conf;
++
++  static{
++    //read system property for Oozie Action Configuration XML
++    String oozieActionXml = System.getProperty("oozie.action.conf.xml");
++    if(oozieActionXml != null && oozieActionXml.length() > 0) {
++      Configuration.addDefaultResource(new Path("file:///", oozieActionXml).toString());
++    }
++
++    conf = new Configuration();
++  }
++
++
+ 
+   /**
+    * Get a copy of the default Hadoop {@link Configuration}.
+-- 
+1.7.0.4
+

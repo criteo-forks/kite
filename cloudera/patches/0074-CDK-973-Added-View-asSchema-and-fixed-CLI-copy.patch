@@ -1,0 +1,879 @@
+From a040439768f2100db46f155d8896dc85c35a140f Mon Sep 17 00:00:00 2001
+From: Joey Echeverria <joey42@gmail.com>
+Date: Tue, 31 Mar 2015 20:38:43 -0700
+Subject: [PATCH 074/115] CDK-973: Added View#asSchema() and fixed CLI copy.
+
+* Added View#asSchema() method
+* Added View#getSchema() method
+* Updated DatasetKeyInputFormat to use View#getSchema() for
+  GenericRecords
+
+Conflicts:
+	kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java
+Resolution:
+    Conflicts with changes to fix Crunch hash problem. Simple merge.
+---
+ .../src/main/java/org/kitesdk/data/View.java       |   25 +++++++
+ .../java/org/kitesdk/data/spi/AbstractDataset.java |   14 ++++
+ .../kitesdk/data/spi/AbstractRefinableView.java    |   17 +++++
+ .../java/org/kitesdk/data/spi/DataModelUtil.java   |   29 +++++++-
+ .../java/org/kitesdk/data/spi/EntityAccessor.java  |    6 +-
+ .../data/spi/filesystem/FileSystemView.java        |   15 ++++
+ .../filesystem/FileSystemViewKeyInputFormat.java   |   21 +++++--
+ .../main/java/org/kitesdk/data/hbase/DaoView.java  |   13 ++++
+ .../data/mapreduce/DatasetKeyInputFormat.java      |   28 +++++++-
+ .../data/mapreduce/TestDatasetRecordWriter.java    |   72 ++++++++++++++++++++
+ .../java/org/kitesdk/cli/commands/CopyCommand.java |    2 +-
+ .../cli/commands/TestCopyCommandCluster.java       |   43 ++++++------
+ ...yCommandClusterChangedNameWithPartitioning.java |   68 ++++++++++++++++++
+ .../commands/TestCopyCommandClusterNewField.java   |   52 ++++++++++++++
+ .../TestCopyCommandClusterSchemaEvolution.java     |   71 +++++++++++++++++++
+ 15 files changed, 442 insertions(+), 34 deletions(-)
+ create mode 100644 kite-data/kite-data-mapreduce/src/test/java/org/kitesdk/data/mapreduce/TestDatasetRecordWriter.java
+ create mode 100644 kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterChangedNameWithPartitioning.java
+ create mode 100644 kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterNewField.java
+ create mode 100644 kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterSchemaEvolution.java
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/View.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/View.java
+index 1f9f5b9..76170e5 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/View.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/View.java
+@@ -17,6 +17,8 @@ package org.kitesdk.data;
+ 
+ import java.net.URI;
+ import javax.annotation.concurrent.Immutable;
++import org.apache.avro.Schema;
++import org.apache.avro.generic.GenericRecord;
+ 
+ /**
+  * A {@code View} is a subset of a {@link Dataset}.
+@@ -109,6 +111,15 @@ public interface View<E> {
+   public Class<E> getType();
+ 
+   /**
++   * Get the schema of entities contained in this {@code View}.
++   *
++   * @return the schema of entities contained in this view
++   *
++   * @since 1.1.0
++   */
++  public Schema getSchema();
++
++  /**
+    * Check whether this {@link View} contains any records.
+    *
+    * Implementations should return once a single record in this view is found.
+@@ -152,4 +163,18 @@ public interface View<E> {
+    * @since 1.1.0
+    */
+   public Iterable<PartitionView<E>> getCoveringPartitions();
++
++  /**
++   * Creates a copy of this {@code View} that projects entities to the given
++   * {@link Schema}.
++   * <p>
++   * This method always returns a {@code View} with type {@link GenericRecord}.
++   *
++   * @param <T> the type of {@code GenericRecord} to use
++   * @param schema an Avro schema to project entities to
++   * @return a copy of this view that projects entities to the given schema
++   * @throws IncompatibleSchemaException the given {@code schema} is incompatible
++   * with the underlying dataset.
++   */
++  <T extends GenericRecord> View<T> asSchema(Schema schema);
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractDataset.java
+index 8a867a8..3094723 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractDataset.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractDataset.java
+@@ -24,6 +24,8 @@ import org.kitesdk.data.PartitionView;
+ import org.kitesdk.data.RefinableView;
+ import javax.annotation.concurrent.Immutable;
+ import org.apache.avro.Schema;
++import org.apache.avro.generic.GenericRecord;
++import org.kitesdk.data.View;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+@@ -40,9 +42,11 @@ public abstract class AbstractDataset<E> implements Dataset<E>, RefinableView<E>
+ 
+   protected abstract RefinableView<E> asRefinableView();
+   protected final Class<E> type;
++  protected final Schema schema;
+ 
+   public AbstractDataset(Class<E> type, Schema schema) {
+     this.type = DataModelUtil.resolveType(type, schema);
++    this.schema = DataModelUtil.getReaderSchema(this.type, schema);
+   }
+ 
+   @Override
+@@ -83,6 +87,11 @@ public abstract class AbstractDataset<E> implements Dataset<E>, RefinableView<E>
+   }
+ 
+   @Override
++  public Schema getSchema() {
++    return schema;
++  }
++
++  @Override
+   public RefinableView<E> with(String name, Object... values) {
+     return asRefinableView().with(name, values);
+   }
+@@ -108,6 +117,11 @@ public abstract class AbstractDataset<E> implements Dataset<E>, RefinableView<E>
+   }
+ 
+   @Override
++  public <T extends GenericRecord> View<T> asSchema(Schema schema) {
++    return asRefinableView().asSchema(schema);
++  }
++
++  @Override
+   public boolean deleteAll() {
+     throw new UnsupportedOperationException(
+         "This Dataset does not support bulk deletion");
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractRefinableView.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractRefinableView.java
+index e309488..9aa3a70 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractRefinableView.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/AbstractRefinableView.java
+@@ -21,6 +21,7 @@ import com.google.common.base.Predicate;
+ import java.net.URI;
+ import java.util.Map;
+ import javax.annotation.concurrent.Immutable;
++import org.apache.avro.Schema;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetReader;
+@@ -74,6 +75,17 @@ public abstract class AbstractRefinableView<E> implements RefinableView<E> {
+     this.entityTest = constraints.toEntityPredicate(accessor);
+   }
+ 
++  protected AbstractRefinableView(AbstractRefinableView<?> view, Schema schema) {
++    this.dataset = (Dataset<E>) view.dataset;
++    this.comparator = view.comparator;
++    this.constraints = view.constraints;
++    // thread-safe, so okay to reuse when views share a partition strategy
++    this.keys = view.keys;
++    // Resolve our type according to the given schema
++    this.accessor = DataModelUtil.accessor(schema);
++    this.entityTest = constraints.toEntityPredicate(accessor);
++  }
++
+   protected AbstractRefinableView(AbstractRefinableView<E> view, Constraints constraints) {
+     this.dataset = view.dataset;
+     this.comparator = view.comparator;
+@@ -108,6 +120,11 @@ public abstract class AbstractRefinableView<E> implements RefinableView<E> {
+     return accessor.getType();
+   }
+ 
++  @Override
++  public Schema getSchema() {
++    return accessor.getEntitySchema();
++  }
++
+   public EntityAccessor<E> getAccessor() {
+     return accessor;
+   }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DataModelUtil.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DataModelUtil.java
+index fb2bd25..70aa347 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DataModelUtil.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DataModelUtil.java
+@@ -101,6 +101,25 @@ public class DataModelUtil {
+   }
+ 
+   /**
++   * Returns true if the type implements GenericRecord but not SpecificRecord
++   *
++   * @param <E> The entity type
++   * @param type The Java class of the entity type
++   * @return true if the type implements GenericRecord but not SpecificRecord
++   */
++  public static <E> boolean isGeneric(Class<E> type) {
++    // Need to check if SpecificRecord first because specific records also
++    // implement GenericRecord
++    if (SpecificRecord.class.isAssignableFrom(type)) {
++      return false;
++    } else if (IndexedRecord.class.isAssignableFrom(type)) {
++      return true;
++    } else {
++      return false;
++    }
++  }
++
++  /**
+    * Get the DatumReader for the given type.
+    *
+    * @param <E> The entity type
+@@ -160,11 +179,11 @@ public class DataModelUtil {
+    *
+    * @param <E> The entity type
+    * @param type The Java class of the entity type
+-   * @param writerSchema The writer {@link Schema} for the entity
++   * @param schema The {@link Schema} for the entity
+    * @return The reader schema based on the given type and writer schema
+    */
+-  public static <E> Schema getReaderSchema(Class<E> type, Schema writerSchema) {
+-    Schema readerSchema = writerSchema;
++  public static <E> Schema getReaderSchema(Class<E> type, Schema schema) {
++    Schema readerSchema = schema;
+     GenericData dataModel = getDataModelForType(type);
+ 
+     if (dataModel instanceof SpecificData) {
+@@ -207,4 +226,8 @@ public class DataModelUtil {
+     return new EntityAccessor<E>(type, schema);
+   }
+ 
++  public static <E> EntityAccessor<E> accessor(Schema schema) {
++    Class<E> type = resolveType(null, schema);
++    return new EntityAccessor<E>(type, schema);
++  }
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/EntityAccessor.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/EntityAccessor.java
+index 3ed62cb..6d3674b 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/EntityAccessor.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/EntityAccessor.java
+@@ -38,9 +38,9 @@ public class EntityAccessor<E> {
+   private final GenericData model;
+   private final Map<String, List<Schema.Field>> cache = Maps.newHashMap();
+ 
+-  EntityAccessor(Class<E> type, Schema schema) {
+-    this.type = DataModelUtil.resolveType(type, schema);
+-    this.schema = DataModelUtil.getReaderSchema(this.type, schema);
++  EntityAccessor(Class<E> type, Schema readerSchema) {
++    this.type = DataModelUtil.resolveType(type, readerSchema);
++    this.schema = DataModelUtil.getReaderSchema(this.type, readerSchema);
+     this.model = DataModelUtil.getDataModelForType(this.type);
+   }
+ 
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
+index d872b1e..d46c51b 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
+@@ -43,7 +43,10 @@ import org.apache.hadoop.fs.Path;
+ import javax.annotation.Nullable;
+ import javax.annotation.concurrent.Immutable;
+ import java.io.IOException;
++import org.apache.avro.Schema;
++import org.apache.avro.generic.GenericRecord;
+ import org.apache.hadoop.conf.Configuration;
++import org.kitesdk.data.RefinableView;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+@@ -82,12 +85,24 @@ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatA
+     this.signalManager = view.signalManager;
+   }
+ 
++  private FileSystemView(FileSystemView<?> view, Schema schema) {
++    super(view, schema);
++    this.fs = view.fs;
++    this.root = view.root;
++    this.listener = view.listener;
++  }
++
+   @Override
+   protected FileSystemView<E> filter(Constraints c) {
+     return new FileSystemView<E>(this, c);
+   }
+ 
+   @Override
++  public <T extends GenericRecord> RefinableView<T> asSchema(Schema schema) {
++    return new FileSystemView<T>(this, schema);
++  }
++
++  @Override
+   public DatasetReader<E> newReader() {
+     AbstractDatasetReader<E> reader = new MultiFileDatasetReader<E>(fs,
+         pathIterator(), dataset.getDescriptor(), constraints, getAccessor());
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemViewKeyInputFormat.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemViewKeyInputFormat.java
+index d9ea39f..df1a1e4 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemViewKeyInputFormat.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemViewKeyInputFormat.java
+@@ -15,11 +15,13 @@
+  */
+ package org.kitesdk.data.spi.filesystem;
+ 
++import com.google.common.base.Preconditions;
+ import com.google.common.collect.ImmutableList;
+ import com.google.common.collect.Lists;
+ import java.io.IOException;
+ import java.util.Iterator;
+ import java.util.List;
++import org.apache.avro.Schema;
+ import org.apache.avro.hadoop.io.AvroSerialization;
+ import org.apache.avro.mapred.AvroKey;
+ import org.apache.avro.mapreduce.AvroJob;
+@@ -57,6 +59,7 @@ class FileSystemViewKeyInputFormat<E> extends InputFormat<E, Void> {
+   // Constant from AvroJob copied here so we can set it on the Configuration
+   // given to this class.
+   private static final String AVRO_SCHEMA_INPUT_KEY = "avro.schema.input.key";
++  private static final String KITE_READER_SCHEMA = "kite.readerSchema";
+ 
+   // this is required for 1.7.4 because setDataModelClass is not available
+   private static final DynMethods.StaticMethod setModel =
+@@ -76,24 +79,32 @@ class FileSystemViewKeyInputFormat<E> extends InputFormat<E, Void> {
+     Format format = dataset.getDescriptor().getFormat();
+ 
+     boolean isSpecific = SpecificRecord.class.isAssignableFrom(dataset.getType());
++    String readerSchema = conf.get(KITE_READER_SCHEMA);
++
++    Preconditions.checkState(!isSpecific || readerSchema == null,
++      "Illegal configuration: {} must not be set if dataset uses a specific type {}",
++      KITE_READER_SCHEMA, dataset.getType());
++
++    if (isSpecific) {
++      readerSchema = SpecificData.get().getSchema(dataset.getType()).toString();
++    }
+ 
+     if (Formats.AVRO.equals(format)) {
+       setModel.invoke(conf,
+           DataModelUtil.getDataModelForType(dataset.getType()).getClass());
+ 
+       // Use the reader's schema type if provided.
+-      if (isSpecific) {
++      if (readerSchema != null) {
+ 
+-        conf.set(AVRO_SCHEMA_INPUT_KEY,
+-            SpecificData.get().getSchema(dataset.getType()).toString());
++        conf.set(AVRO_SCHEMA_INPUT_KEY, readerSchema);
+       }
+     } else if (Formats.PARQUET.equals(format)) {
+ 
+       // Use the reader's schema type if provided.
+-      if (isSpecific) {
++      if (readerSchema != null) {
+ 
+         AvroReadSupport.setAvroReadSchema(conf,
+-            SpecificData.get().getSchema(dataset.getType()));
++          new Schema.Parser().parse(readerSchema));
+       }
+     }
+   }
+diff --git a/kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/DaoView.java b/kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/DaoView.java
+index 115cc64..c63a5e9 100644
+--- a/kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/DaoView.java
++++ b/kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/DaoView.java
+@@ -38,7 +38,10 @@ import org.kitesdk.data.spi.StorageKey;
+ import org.kitesdk.data.spi.Marker;
+ import org.kitesdk.data.spi.MarkerRange;
+ import java.util.List;
++import org.apache.avro.Schema;
++import org.apache.avro.generic.GenericRecord;
+ import org.apache.hadoop.conf.Configuration;
++import org.kitesdk.data.RefinableView;
+ 
+ class DaoView<E> extends AbstractRefinableView<E> implements InputFormatAccessor<E> {
+ 
+@@ -54,11 +57,21 @@ class DaoView<E> extends AbstractRefinableView<E> implements InputFormatAccessor
+     this.dataset = view.dataset;
+   }
+ 
++  private DaoView(DaoView<?> view, Schema schema) {
++    super(view, schema);
++    this.dataset = (DaoDataset<E>) view.dataset;
++  }
++
+   @Override
+   protected DaoView<E> filter(Constraints constraints) {
+     return new DaoView<E>(this, constraints);
+   }
+ 
++  @Override
++  public <T extends GenericRecord> RefinableView<T> asSchema(Schema schema) {
++    return new DaoView<T>(this, schema);
++  }
++
+   EntityScanner<E> newEntityScanner() {
+     Iterable<MarkerRange> markerRanges = constraints.toKeyRanges();
+     // TODO: combine all ranges into a single reader
+diff --git a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java
+index aca03e4..fca0703 100644
+--- a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java
++++ b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java
+@@ -15,11 +15,14 @@
+  */
+ package org.kitesdk.data.mapreduce;
+ 
++import com.google.common.base.Preconditions;
+ import java.io.IOException;
+ import java.net.URI;
+ import java.util.List;
+ import java.util.Map;
++import org.apache.avro.Schema;
+ import org.apache.avro.generic.GenericData;
++import org.apache.avro.specific.SpecificRecord;
+ import org.apache.hadoop.conf.Configurable;
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.fs.Path;
+@@ -39,6 +42,7 @@ import org.kitesdk.data.spi.PartitionKey;
+ import org.kitesdk.data.spi.PartitionedDataset;
+ import org.kitesdk.data.TypeNotFoundException;
+ import org.kitesdk.data.View;
++import org.kitesdk.data.spi.DataModelUtil;
+ import org.kitesdk.data.spi.InputFormatAccessor;
+ import org.kitesdk.data.spi.filesystem.FileSystemDataset;
+ import org.slf4j.Logger;
+@@ -61,6 +65,7 @@ public class DatasetKeyInputFormat<E> extends InputFormat<E, Void>
+   public static final String KITE_INPUT_URI = "kite.inputUri";
+   public static final String KITE_PARTITION_DIR = "kite.inputPartitionDir";
+   public static final String KITE_TYPE = "kite.inputEntityType";
++  public static final String KITE_READER_SCHEMA = "kite.readerSchema";
+ 
+   private Configuration conf;
+   private InputFormat<E, Void> delegate;
+@@ -104,7 +109,13 @@ public class DatasetKeyInputFormat<E> extends InputFormat<E, Void>
+       for (String property : descriptor.listProperties()) {
+         conf.set(property, descriptor.getProperty(property));
+       }
+-      withType(view.getType());
++
++      if (DataModelUtil.isGeneric(view.getType())) {
++        withSchema(view.getSchema());
++      } else {
++        withType(view.getType());
++      }
++
+       conf.set(KITE_INPUT_URI, view.getUri().toString());
+       return this;
+     }
+@@ -135,9 +146,22 @@ public class DatasetKeyInputFormat<E> extends InputFormat<E, Void>
+      * @return this for method chaining
+      */
+     public <E> ConfigBuilder withType(Class<E> type) {
++      String readerSchema = conf.get(KITE_READER_SCHEMA);
++      Preconditions.checkArgument(DataModelUtil.isGeneric(type) || readerSchema == null,
++        "Can't configure a type when a reader schema is already set: {}", readerSchema);
+       conf.setClass(KITE_TYPE, type, type);
+       return this;
+     }
++
++    public ConfigBuilder withSchema(Schema readerSchema) {
++      Class<?> type = conf.getClass(KITE_TYPE, null);
++      Preconditions.checkArgument(type == null,
++        "Can't configure a reader schema when a type is already set: {}", type);
++
++      conf.set(KITE_READER_SCHEMA, readerSchema.toString());
++      return this;
++    }
++
+   }
+ 
+   /**
+@@ -230,7 +254,7 @@ public class DatasetKeyInputFormat<E> extends InputFormat<E, Void>
+ 
+   @SuppressWarnings({"deprecation", "unchecked"})
+   private static <E> View<E> load(Configuration conf) {
+-    Class<E> type; 
++    Class<E> type;
+     try {
+       type = (Class<E>)conf.getClass(KITE_TYPE, GenericData.Record.class);
+     } catch (RuntimeException e) {
+diff --git a/kite-data/kite-data-mapreduce/src/test/java/org/kitesdk/data/mapreduce/TestDatasetRecordWriter.java b/kite-data/kite-data-mapreduce/src/test/java/org/kitesdk/data/mapreduce/TestDatasetRecordWriter.java
+new file mode 100644
+index 0000000..9669c30
+--- /dev/null
++++ b/kite-data/kite-data-mapreduce/src/test/java/org/kitesdk/data/mapreduce/TestDatasetRecordWriter.java
+@@ -0,0 +1,72 @@
++/*
++ * Copyright 2015 Cloudera, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.data.mapreduce;
++
++import com.google.common.collect.ImmutableList;
++import junit.framework.Assert;
++import org.apache.avro.Schema;
++import org.apache.avro.generic.GenericData;
++import org.junit.Before;
++import org.junit.Test;
++import org.junit.runner.RunWith;
++import org.junit.runners.Parameterized;
++import org.kitesdk.data.Dataset;
++import org.kitesdk.data.DatasetDescriptor;
++import org.kitesdk.data.Format;
++import org.kitesdk.data.spi.SchemaValidationUtil;
++
++@RunWith(Parameterized.class)
++public class TestDatasetRecordWriter extends FileSystemTestBase {
++
++  private Dataset<GenericData.Record> dataset;
++
++  public TestDatasetRecordWriter(Format format) {
++    super(format);
++  }
++
++  @Before
++  @Override
++  public void setUp() throws Exception {
++    super.setUp();
++    dataset = repo.create("ns", "out",
++        new DatasetDescriptor.Builder()
++            .property("kite.allow.csv", "true")
++            .schema(STATS_SCHEMA)
++            .format(format)
++            .build(), GenericData.Record.class);
++  }
++
++  @Test
++  public void testBasicRecordWriter() {
++    DatasetKeyOutputFormat.DatasetRecordWriter<GenericData.Record> recordWriter;
++    recordWriter =
++      new DatasetKeyOutputFormat.DatasetRecordWriter<GenericData.Record>(dataset);
++
++    ImmutableList<Integer> counts = ImmutableList.of(1, 2, 3, 4, 5, 6, 7, 8, 9,
++      10);
++
++    for (Integer count : counts) {
++      GenericData.Record record = new GenericData.Record(STATS_SCHEMA);
++      record.put("count", count);
++      record.put("name", "name"+count);
++
++      recordWriter.write(record, null);
++    }
++
++    recordWriter.close(null);
++  }
++
++}
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
+index 569570d..93752dd 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
+@@ -67,8 +67,8 @@ public class CopyCommand extends BaseDatasetCommand {
+     Preconditions.checkArgument(datasets.size() == 2,
+         "Cannot copy multiple datasets");
+ 
+-    View<Record> source = load(datasets.get(0), Record.class);
+     View<Record> dest = load(datasets.get(1), Record.class);
++    View<Record> source = load(datasets.get(0), Record.class).asSchema(dest.getSchema());
+ 
+     CopyTask task = new CopyTask<Record>(source, dest);
+ 
+diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java
+index 57e4906..1771c5c 100644
+--- a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java
++++ b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java
+@@ -22,14 +22,10 @@ import com.google.common.io.Files;
+ import java.io.BufferedWriter;
+ import java.io.File;
+ import java.net.URI;
+-import java.util.ArrayList;
+-import java.util.List;
++import java.util.Arrays;
+ import java.util.Map;
+-import java.util.Set;
+-import java.util.regex.Pattern;
+ import org.apache.avro.SchemaBuilder;
+ import org.apache.avro.generic.GenericData;
+-import org.apache.avro.generic.GenericRecord;
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.fs.Path;
+ import org.apache.hadoop.mapred.LocalJobRunner;
+@@ -62,11 +58,10 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
+ 
+ public class TestCopyCommandCluster extends MiniDFSTest {
+ 
+-  private static final String source = "users_source";
+-  private static final String dest = "users_dest";
+-  private static final String avsc = "target/user.avsc";
+-  private static final Pattern UPPER_CASE = Pattern.compile("^[A-Z]+\\d*$");
+-  private static String repoUri;
++  protected static final String source = "users_source";
++  protected static final String dest = "users_dest";
++  protected static final String avsc = "target/user.avsc";
++  protected static String repoUri;
+   private static int numRecords;
+ 
+   @BeforeClass
+@@ -97,7 +92,8 @@ public class TestCopyCommandCluster extends MiniDFSTest {
+     // keep this in sync with the number of lines above
+     numRecords = 14;
+ 
+-    TestUtil.run("-v", "csv-schema", csv, "-o", avsc, "--class", "User");
++    TestUtil.run("-v", "csv-schema", csv, "-o", avsc, "--class", "User",
++      "--require", "id");
+     TestUtil.run("create", source, "-s", avsc,
+         "-r", repoUri, "-d", "target/data");
+     TestUtil.run("csv-import", csv, source, "-r", repoUri, "-d", "target/data");
+@@ -108,8 +104,8 @@ public class TestCopyCommandCluster extends MiniDFSTest {
+     TestUtil.run("delete", source, "-r", repoUri, "-d", "target/data");
+   }
+ 
+-  private Logger console;
+-  private CopyCommand command;
++  protected Logger console;
++  protected CopyCommand command;
+ 
+   @Before
+   public void createDestination() throws Exception {
+@@ -143,6 +139,10 @@ public class TestCopyCommandCluster extends MiniDFSTest {
+ 
+   @Test
+   public void testCopyWithoutCompaction() throws Exception {
++    testCopyWithoutCompaction(1);
++  }
++
++  public void testCopyWithoutCompaction(int expectedFiles) throws Exception {
+     command.repoURI = repoUri;
+     command.noCompaction = true;
+     command.datasets = Lists.newArrayList(source, dest);
+@@ -157,16 +157,21 @@ public class TestCopyCommandCluster extends MiniDFSTest {
+     int size = DatasetTestUtilities.datasetSize(ds);
+     Assert.assertEquals("Should contain copied records", numRecords, size);
+ 
+-    Assert.assertEquals("Should produce 1 files",
+-        1, Iterators.size(ds.pathIterator()));
++    Path[] paths = Iterators.toArray(ds.pathIterator(), Path.class);
++    Assert.assertEquals("Should produce " + expectedFiles + " files: " + Arrays.toString(paths),
++        expectedFiles, Iterators.size(ds.pathIterator()));
+ 
+     verify(console).info("Added {} records to \"{}\"", (long) numRecords, dest);
+     verifyNoMoreInteractions(console);
+   }
+ 
+   @Test
+-  @SuppressWarnings("unchecked")
+   public void testCopyWithNumWriters() throws Exception {
++    testCopyWithNumWriters(3);
++  }
++
++  @SuppressWarnings("unchecked")
++  public void testCopyWithNumWriters(int expectedFiles) throws Exception {
+     Assume.assumeTrue(setLocalReducerMax(getConfiguration(), 3));
+ 
+     command.repoURI = repoUri;
+@@ -183,10 +188,8 @@ public class TestCopyCommandCluster extends MiniDFSTest {
+     int size = DatasetTestUtilities.datasetSize(ds);
+     Assert.assertEquals("Should contain copied records", numRecords, size);
+ 
+-    List<Path> paths = new ArrayList<Path>();
+-    Iterators.addAll(paths, ds.pathIterator());
+-    Assert.assertEquals("Should produce 3 files",
+-        3, Iterators.size(ds.pathIterator()));
++    Assert.assertEquals("Should produce " + expectedFiles + " files",
++        expectedFiles, Iterators.size(ds.pathIterator()));
+ 
+     verify(console).info("Added {} records to \"{}\"", (long) numRecords, dest);
+     verifyNoMoreInteractions(console);
+diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterChangedNameWithPartitioning.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterChangedNameWithPartitioning.java
+new file mode 100644
+index 0000000..e6310b1
+--- /dev/null
++++ b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterChangedNameWithPartitioning.java
+@@ -0,0 +1,68 @@
++/*
++ * Copyright 2015 Cloudera, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.cli.commands;
++
++import com.beust.jcommander.internal.Lists;
++import com.google.common.collect.ImmutableList;
++import java.io.FileOutputStream;
++import java.util.List;
++import org.apache.avro.Schema;
++import org.kitesdk.data.PartitionStrategy;
++
++public class TestCopyCommandClusterChangedNameWithPartitioning extends TestCopyCommandClusterSchemaEvolution {
++
++  private static final String partitionStrategyJson = "target/partition-strategy.json";
++
++  @Override
++  public Schema getEvolvedSchema(Schema original) {
++    List<Schema.Field> fields = Lists.newArrayList();
++    for (Schema.Field field : original.getFields()) {
++      fields.add(new Schema.Field(field.name(), field.schema(), field.doc(),
++        field.defaultValue()));
++    }
++
++    Schema evolved = Schema.createRecord("NewUser", original.getDoc(),
++      original.getNamespace(), false);
++    evolved.addAlias("User");
++    evolved.setFields(fields);
++
++    return evolved;
++  }
++
++  @Override
++  public List<String> getExtraCreateArgs() throws Exception {
++    PartitionStrategy partitionStrategy = new PartitionStrategy.Builder()
++      .hash("id", "part", 5)
++      .build();
++
++    FileOutputStream psOut = new FileOutputStream(partitionStrategyJson);
++    psOut.write(partitionStrategy.toString(true).getBytes());
++    psOut.close();
++
++    return ImmutableList.of("-p", partitionStrategyJson);
++  }
++
++  @Override
++  public void testCopyWithoutCompaction() throws Exception {
++    testCopyWithoutCompaction(6);
++  }
++
++  @Override
++  public void testCopyWithNumWriters() throws Exception {
++    testCopyWithNumWriters(5);
++  }
++  
++}
+diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterNewField.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterNewField.java
+new file mode 100644
+index 0000000..76cdd30
+--- /dev/null
++++ b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterNewField.java
+@@ -0,0 +1,52 @@
++/*
++ * Copyright 2015 Cloudera, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.cli.commands;
++
++import com.beust.jcommander.internal.Lists;
++import com.google.common.collect.ImmutableList;
++import java.util.List;
++import org.apache.avro.Schema;
++import org.codehaus.jackson.node.NullNode;
++
++public class TestCopyCommandClusterNewField extends TestCopyCommandClusterSchemaEvolution {
++
++  @Override
++  public Schema getEvolvedSchema(Schema original) {
++    List<Schema.Field> fields = Lists.newArrayList();
++    fields.add(new Schema.Field("new",
++      Schema.createUnion(ImmutableList.of(
++          Schema.create(Schema.Type.NULL),
++          Schema.create(Schema.Type.STRING))),
++      "New field", NullNode.getInstance()));
++
++    for (Schema.Field field : original.getFields()) {
++      fields.add(new Schema.Field(field.name(), field.schema(), field.doc(),
++        field.defaultValue()));
++    }
++
++    Schema evolved = Schema.createRecord(original.getName(), original.getDoc(),
++      original.getNamespace(), false);
++    evolved.setFields(fields);
++
++    return evolved;
++  }
++
++  @Override
++  public List<String> getExtraCreateArgs() {
++    return ImmutableList.of();
++  }
++
++}
+diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterSchemaEvolution.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterSchemaEvolution.java
+new file mode 100644
+index 0000000..f56ff2c
+--- /dev/null
++++ b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandClusterSchemaEvolution.java
+@@ -0,0 +1,71 @@
++/*
++ * Copyright 2015 Cloudera, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.cli.commands;
++
++import java.io.FileInputStream;
++import java.io.FileOutputStream;
++import java.util.List;
++import org.apache.avro.Schema;
++import org.apache.hadoop.conf.Configuration;
++import org.junit.Ignore;
++import org.kitesdk.cli.TestUtil;
++import com.google.common.collect.Lists;
++import static org.mockito.Mockito.mock;
++import org.slf4j.Logger;
++import org.slf4j.LoggerFactory;
++
++public abstract class TestCopyCommandClusterSchemaEvolution extends TestCopyCommandCluster {
++
++  private static final String evolvedAvsc = "target/evolved_user.avsc";
++
++  @Override
++  public void createDestination() throws Exception {
++    FileInputStream schemaIn = new FileInputStream(avsc);
++    Schema original = new Schema.Parser().parse(schemaIn);
++    schemaIn.close();
++
++    Schema evolved = getEvolvedSchema(original);
++
++    FileOutputStream schemaOut = new FileOutputStream(evolvedAvsc);
++    schemaOut.write(evolved.toString(true).getBytes());
++    schemaOut.close();
++
++    List<String> createArgs = Lists.newArrayList(
++      "create", dest, "-s", evolvedAvsc, "-r", repoUri, "-d", "target/data");
++    createArgs.addAll(getExtraCreateArgs());
++
++    TestUtil.run(LoggerFactory.getLogger(this.getClass()),
++      "delete", dest, "-r", repoUri, "-d", "target/data");
++    TestUtil.run(LoggerFactory.getLogger(this.getClass()),
++      createArgs.toArray(new String[createArgs.size()]));
++    this.console = mock(Logger.class);
++    this.command = new CopyCommand(console);
++    command.setConf(new Configuration());
++  }
++
++  @Ignore
++  @Override
++  public void testPartitionedCopyWithNumWriters() throws Exception {
++    super.testPartitionedCopyWithNumWriters(); //To change body of generated methods, choose Tools | Templates.
++  }
++
++  
++
++  public abstract Schema getEvolvedSchema(Schema original) throws Exception;
++
++  public abstract List<String> getExtraCreateArgs() throws Exception;
++  
++}
+-- 
+1.7.0.4
+

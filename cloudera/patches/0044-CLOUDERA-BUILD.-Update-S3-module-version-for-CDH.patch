@@ -1,0 +1,25 @@
+From 05163480b0be1eea5a1efdfbafe196a95165a188 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Tue, 25 Aug 2015 16:02:49 -0700
+Subject: [PATCH 044/115] CLOUDERA-BUILD. Update S3 module version for CDH.
+
+---
+ kite-data/kite-data-s3/pom.xml |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/kite-data/kite-data-s3/pom.xml b/kite-data/kite-data-s3/pom.xml
+index 7bd1bcd..e74b164 100644
+--- a/kite-data/kite-data-s3/pom.xml
++++ b/kite-data/kite-data-s3/pom.xml
+@@ -22,7 +22,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-data</artifactId>
+-    <version>1.0.1-SNAPSHOT</version>
++    <version>1.0.0-cdh5.5.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Data S3 Module</name>
+-- 
+1.7.0.4
+

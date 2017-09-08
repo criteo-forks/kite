@@ -135,8 +135,7 @@ public class TimeDomain {
       for (CalendarFieldPartitioner fp : partitioners) {
         time.add((Integer) key.get(fp.getName()));
       }
-      //if contains null is partial so allow it for now...
-      return time.contains(null) ? true : times.apply(time);
+      return times.apply(time);
     }
 
     @Override
@@ -223,19 +222,13 @@ public class TimeDomain {
 
     private boolean checkLower(Marker key) {
       for (int i = 0; i < names.length; i += 1) {
-        Object markerValue = key.get(names[i]);
-        if(markerValue != null) {
-          int value = (Integer) markerValue;
-          if (value < lower[i]) {
-            // strictly within range, so all other levels must be
-            // example: 2013-4-10 to 2013-10-4 => 4 < month < 10 => accept
-            return false;
-          } else if (value > lower[i]) {
-            // falls out of the range at this level
-            return true;
-          }
-        }else {
-          //returning true because at this point no value is known so nothing to disqualify on
+        int value = (Integer) key.get(names[i]);
+        if (value < lower[i]) {
+          // strictly within range, so all other levels must be
+          // example: 2013-4-10 to 2013-10-4 => 4 < month < 10 => accept
+          return false;
+        } else if (value > lower[i]) {
+          // falls out of the range at this level
           return true;
         }
         // value was equal to one endpoint, continue checking
@@ -247,17 +240,10 @@ public class TimeDomain {
     private boolean checkUpper(Marker key) {
       // same as checkLower, see comments there
       for (int i = 0; i < names.length; i += 1) {
-
-        Object markerValue = key.get(names[i]);
-        if(markerValue != null) {
-          int value = (Integer) markerValue;
-          if (value > upper[i]) {
-            return false;
-          } else if (value < upper[i]) {
-            return true;
-          }
-        }else{
-          //returning true because at this point no value is known so nothing to disqualify on
+        int value = (Integer) key.get(names[i]);
+        if (value > upper[i]) {
+          return false;
+        } else if (value < upper[i]) {
           return true;
         }
       }

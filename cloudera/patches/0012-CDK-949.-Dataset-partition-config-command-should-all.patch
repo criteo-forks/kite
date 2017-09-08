@@ -1,0 +1,195 @@
+From 9735c2d5acada1f43c0c5922823ddf535e20e058 Mon Sep 17 00:00:00 2001
+From: Tom White <tom@cloudera.com>
+Date: Fri, 6 Mar 2015 10:30:26 +0000
+Subject: [PATCH 012/115] CDK-949. Dataset partition-config command should allow nested field names.
+
+---
+ .../java/org/kitesdk/data/DatasetDescriptor.java   |    8 ++----
+ .../main/java/org/kitesdk/data/spi/SchemaUtil.java |    4 +-
+ .../java/org/kitesdk/data/spi/TestConstraints.java |    3 +-
+ .../org/kitesdk/data/spi/TestRefinableViews.java   |    2 +-
+ .../commands/CreatePartitionStrategyCommand.java   |   21 ++++++++++---------
+ .../TestCreatePartitionStrategyCommand.java        |   12 +++++++++++
+ .../src/test/resources/test-schemas/user.avsc      |   17 ++++++++++++++++
+ 7 files changed, 48 insertions(+), 19 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/DatasetDescriptor.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/DatasetDescriptor.java
+index d337f42..aa57efc 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/DatasetDescriptor.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/DatasetDescriptor.java
+@@ -1024,14 +1024,12 @@ public class DatasetDescriptor {
+         "Cannot map non-records: %s", schema);
+     Set<String> keyMappedFields = Sets.newHashSet();
+     for (FieldMapping fm : mappings.getFieldMappings()) {
+-      Schema.Field field = schema.getField(fm.getFieldName());
+-      ValidationException.check(field != null,
+-          "Cannot map field %s (missing from schema)", fm.getFieldName());
++      Schema fieldSchema = SchemaUtil.fieldSchema(schema, fm.getFieldName());
+       ValidationException.check(
+           SchemaUtil.isConsistentWithMappingType(
+-              field.schema().getType(), fm.getMappingType()),
++              fieldSchema.getType(), fm.getMappingType()),
+           "Field type %s is not compatible with mapping %s",
+-          field.schema().getType(), fm);
++          fieldSchema.getType(), fm);
+       if (FieldMapping.MappingType.KEY == fm.getMappingType()) {
+         keyMappedFields.add(fm.getFieldName());
+       }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/SchemaUtil.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/SchemaUtil.java
+index b5d572f..c6caf7b 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/SchemaUtil.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/SchemaUtil.java
+@@ -235,11 +235,11 @@ public class SchemaUtil {
+     List<String> levels = Lists.newArrayList();
+     for (String level : NAME_SPLITTER.split(name)) {
+       levels.add(level);
+-      Preconditions.checkArgument(Schema.Type.RECORD == schema.getType(),
++      ValidationException.check(Schema.Type.RECORD == schema.getType(),
+           "Cannot get schema for %s: %s is not a record schema: %s",
+           name, NAME_JOINER.join(levels), nested.toString(true));
+       Schema.Field field = nested.getField(level);
+-      Preconditions.checkArgument(field != null,
++      ValidationException.check(field != null,
+           "Cannot get schema for %s: %s is not a field",
+           name, NAME_JOINER.join(levels));
+       nested = field.schema();
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestConstraints.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestConstraints.java
+index 2d34b0c..5e86acc 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestConstraints.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestConstraints.java
+@@ -33,6 +33,7 @@ import org.junit.Assert;
+ import org.junit.Test;
+ import org.kitesdk.data.PartitionStrategy;
+ import org.kitesdk.data.TestHelpers;
++import org.kitesdk.data.ValidationException;
+ import org.kitesdk.data.spi.partition.HashFieldPartitioner;
+ import org.kitesdk.data.spi.predicates.Predicates;
+ import org.kitesdk.data.spi.predicates.Ranges;
+@@ -646,7 +647,7 @@ public class TestConstraints {
+   @Test
+   public void testRejectsNonSchemaOrPartitionFields() {
+     TestHelpers.assertThrows("Should reject unknown field name",
+-        IllegalArgumentException.class, new Runnable() {
++        ValidationException.class, new Runnable() {
+           @Override
+           public void run() {
+             emptyConstraints.with("prescription", 34);
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestRefinableViews.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestRefinableViews.java
+index a1c85e6..95cf5ac 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestRefinableViews.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestRefinableViews.java
+@@ -119,7 +119,7 @@ public abstract class TestRefinableViews extends MiniDFSTest {
+     }
+   }
+ 
+-  @Test(expected = IllegalArgumentException.class)
++  @Test(expected = ValidationException.class)
+   public void testNonExistentField() {
+     unbounded.with("nosuchfield");
+   }
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CreatePartitionStrategyCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CreatePartitionStrategyCommand.java
+index 04ae375..97f694c 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CreatePartitionStrategyCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CreatePartitionStrategyCommand.java
+@@ -32,7 +32,7 @@ import org.slf4j.Logger;
+ public class CreatePartitionStrategyCommand extends BaseCommand {
+ 
+   private static final Pattern PARTITION_FIELD = Pattern.compile(
+-      "(\\w+):(\\w+)(?:\\[(\\d+)\\])?");
++      "((?:\\w|\\.)+):(\\w+)(?:\\[(\\d+)\\])?");
+ 
+   private final Logger console;
+ 
+@@ -66,28 +66,29 @@ public class CreatePartitionStrategyCommand extends BaseCommand {
+         String fieldName = m.group(1);
+         ValidationException.check(fieldName != null && !fieldName.isEmpty(),
+             "Invalid field name: %s", String.valueOf(fieldName));
+-        if ("hash".equals(m.group(2))) {
++        String partitionerType = m.group(2);
++        if ("hash".equals(partitionerType)) {
+           String width = m.group(3);
+           ValidationException.check(width != null,
+               "Missing number of hash partitions: %s:hash[?]", fieldName);
+           strategyBuilder.hash(fieldName, Integer.parseInt(width));
+-        } else if ("copy".equals(m.group(2))) {
++        } else if ("copy".equals(partitionerType)) {
+           strategyBuilder.identity(fieldName);
+-        } else if ("year".equals(m.group(2))) {
++        } else if ("year".equals(partitionerType)) {
+           strategyBuilder.year(fieldName);
+-        } else if ("month".equals(m.group(2))) {
++        } else if ("month".equals(partitionerType)) {
+           strategyBuilder.month(fieldName);
+-        } else if ("day".equals(m.group(2))) {
++        } else if ("day".equals(partitionerType)) {
+           strategyBuilder.day(fieldName);
+-        } else if ("hour".equals(m.group(2))) {
++        } else if ("hour".equals(partitionerType)) {
+           strategyBuilder.hour(fieldName);
+-        } else if ("minute".equals(m.group(2))) {
++        } else if ("minute".equals(partitionerType)) {
+           strategyBuilder.minute(fieldName);
+-        } else if ("provided".equals(m.group(2))) {
++        } else if ("provided".equals(partitionerType)) {
+           strategyBuilder.provided(fieldName);
+         } else {
+           throw new ValidationException(
+-              "Unknown partitioner type: " + m.group(2));
++              "Unknown partitioner type: " + partitionerType);
+         }
+       } else {
+         throw new ValidationException(
+diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCreatePartitionStrategyCommand.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCreatePartitionStrategyCommand.java
+index eff3225..b42a87c 100644
+--- a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCreatePartitionStrategyCommand.java
++++ b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCreatePartitionStrategyCommand.java
+@@ -57,6 +57,18 @@ public class TestCreatePartitionStrategyCommand {
+   }
+ 
+   @Test
++  public void testNested() throws Exception {
++    command.partitions = Lists.newArrayList("address.line1:copy");
++    command.run();
++
++    PartitionStrategy strategy = new PartitionStrategy.Builder()
++        .identity("address.line1")
++        .build();
++    verify(console).info(strategy.toString(true));
++    verifyNoMoreInteractions(console);
++  }
++
++  @Test
+   public void testTime() throws Exception {
+     command.partitions = Lists.newArrayList(
+         "created_at:year", "created_at:month", "created_at:day",
+diff --git a/kite-tools-parent/kite-tools/src/test/resources/test-schemas/user.avsc b/kite-tools-parent/kite-tools/src/test/resources/test-schemas/user.avsc
+index 8d7b704..e69a4af 100644
+--- a/kite-tools-parent/kite-tools/src/test/resources/test-schemas/user.avsc
++++ b/kite-tools-parent/kite-tools/src/test/resources/test-schemas/user.avsc
+@@ -13,6 +13,23 @@
+     {
+       "type": "long",
+       "name": "created_at"
++    },
++    {
++      "type": {
++        "type": "record",
++        "name": "address",
++        "fields": [
++          {
++            "type": "string",
++            "name": "line1"
++          },
++          {
++            "type": "string",
++            "name": "line2"
++          }
++        ]
++      },
++      "name": "address"
+     }
+   ]
+ }
+-- 
+1.7.0.4
+

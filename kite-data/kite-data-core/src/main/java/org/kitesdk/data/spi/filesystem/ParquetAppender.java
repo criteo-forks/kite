@@ -28,9 +28,10 @@ import org.kitesdk.data.CompressionType;
 import org.kitesdk.data.Formats;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.parquet.avro.AvroParquetWriter;
-import org.apache.parquet.hadoop.ParquetWriter;
-import org.apache.parquet.hadoop.metadata.CompressionCodecName;
+import parquet.avro.AvroParquetWriter;
+import parquet.hadoop.ParquetFileWriter;
+import parquet.hadoop.ParquetWriter;
+import parquet.hadoop.metadata.CompressionCodecName;
 
 class ParquetAppender<E extends IndexedRecord> implements FileSystemWriter.FileAppender<E> {
 
@@ -76,9 +77,7 @@ class ParquetAppender<E extends IndexedRecord> implements FileSystemWriter.FileA
 
   @Override
   public long pos() throws IOException {
-    // TODO: add a callback to set the position when Parquet decides to flush
-    // this is not a good way to find out the current position
-    return fileSystem.getFileStatus(path).getLen();
+    return avroParquetWriter.getDataSize();
   }
 
   @Override

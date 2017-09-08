@@ -119,12 +119,7 @@ class FileSystemPartitionView<E> extends FileSystemView<E>
 
   @Override
   public boolean deleteAll() {
-    return deleteAllUnsafe(false);
-  }
-
-  @Override
-  public boolean moveToTrash() {
-    return deleteAllUnsafe(true);
+    return deleteAllUnsafe();
   }
 
   @Override

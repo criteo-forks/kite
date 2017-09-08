@@ -1,0 +1,42 @@
+From bcdf24b9eec2e8014b0fb371720d7087f715a57f Mon Sep 17 00:00:00 2001
+From: Newton Truong <newton@deep6analytics.com>
+Date: Wed, 3 Jun 2015 10:22:56 -0700
+Subject: [PATCH 026/115] Properly use the SequenceFile.reader.stream to pass in record stream
+
+---
+ .../sequencefile/ReadSequenceFileBuilder.java      |   12 ++----------
+ 1 files changed, 2 insertions(+), 10 deletions(-)
+
+diff --git a/kite-morphlines/kite-morphlines-hadoop-sequencefile/src/main/java/org/kitesdk/morphline/hadoop/sequencefile/ReadSequenceFileBuilder.java b/kite-morphlines/kite-morphlines-hadoop-sequencefile/src/main/java/org/kitesdk/morphline/hadoop/sequencefile/ReadSequenceFileBuilder.java
+index 15f66fb..c7ac84f 100644
+--- a/kite-morphlines/kite-morphlines-hadoop-sequencefile/src/main/java/org/kitesdk/morphline/hadoop/sequencefile/ReadSequenceFileBuilder.java
++++ b/kite-morphlines/kite-morphlines-hadoop-sequencefile/src/main/java/org/kitesdk/morphline/hadoop/sequencefile/ReadSequenceFileBuilder.java
+@@ -23,8 +23,6 @@ import java.util.Collections;
+ 
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.fs.FSDataInputStream;
+-import org.apache.hadoop.fs.FileSystem;
+-import org.apache.hadoop.fs.Path;
+ import org.apache.hadoop.fs.PositionedReadable;
+ import org.apache.hadoop.fs.Seekable;
+ import org.apache.hadoop.io.SequenceFile;
+@@ -84,14 +82,8 @@ public final class ReadSequenceFileBuilder implements CommandBuilder {
+       SequenceFile.Metadata sequenceFileMetaData = null;
+       SequenceFile.Reader reader = null;
+       try {
+-        // Need to pass valid FS and path, although overriding openFile means
+-        // they will not be used.
+-        reader = new SequenceFile.Reader(FileSystem.getLocal(conf), new Path("/"), conf) {
+-          @Override
+-          protected FSDataInputStream openFile(FileSystem fs, Path f, int sz, long l) throws IOException {
+-            return new FSDataInputStream(new ForwardOnlySeekable(in));
+-          }
+-        };
++        reader = new SequenceFile.Reader(conf, SequenceFile.Reader.stream(new FSDataInputStream(new ForwardOnlySeekable(in))));
++
+         if (includeMetaData) {
+           sequenceFileMetaData = reader.getMetadata();
+         }
+-- 
+1.7.0.4
+

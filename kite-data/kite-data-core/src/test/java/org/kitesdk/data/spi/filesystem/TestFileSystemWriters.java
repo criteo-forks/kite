@@ -20,20 +20,16 @@ import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
-
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
-
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
-import org.apache.avro.generic.GenericRecordBuilder;
 import org.apache.avro.generic.GenericData.Record;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.PathFilter;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -48,10 +44,9 @@ public abstract class TestFileSystemWriters extends MiniDFSTest {
   public static final Schema TEST_SCHEMA = SchemaBuilder.record("Message").fields()
       .requiredLong("id")
       .requiredString("message")
-      .nullableString("name","")
       .endRecord();
 
-  public abstract FileSystemWriter<Record> newWriter(Path directory, Schema datasetSchema, Schema writerSchema);
+  public abstract FileSystemWriter<Record> newWriter(Path directory, Schema schema);
   public abstract DatasetReader<Record> newReader(Path path, Schema schema);
 
   protected FileSystem fs = null;
@@ -62,7 +57,7 @@ public abstract class TestFileSystemWriters extends MiniDFSTest {
   public void setup() throws IOException {
     this.fs = getDFS();
     this.testDirectory = new Path(Files.createTempDir().getAbsolutePath());
-    this.fsWriter = newWriter(testDirectory, TEST_SCHEMA, TEST_SCHEMA);
+    this.fsWriter = newWriter(testDirectory, TEST_SCHEMA);
   }
 
   @After
@@ -74,17 +69,10 @@ public abstract class TestFileSystemWriters extends MiniDFSTest {
   public void testBasicWrite() throws IOException {
     init(fsWriter);
 
-    if (fsWriter.useTempPath) {
-      FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-      Assert.assertEquals("Should contain no visible files", 0, stats.length);
-      stats = fs.listStatus(testDirectory);
-      Assert.assertEquals("Should contain a hidden file", 1, stats.length);
-    } else {
-      FileStatus[] stats = fs.listStatus(testDirectory, hidden());
-      Assert.assertEquals("Should contain no hidden files", 0, stats.length);
-      stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-      Assert.assertEquals("Should contain a visible file", 1, stats.length);
-    }
+    FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
+    Assert.assertEquals("Should contain no visible files", 0, stats.length);
+    stats = fs.listStatus(testDirectory);
+    Assert.assertEquals("Should contain a hidden file", 1, stats.length);
 
     List<Record> written = Lists.newArrayList();
     for (long i = 0; i < 10000; i += 1) {
@@ -93,22 +81,13 @@ public abstract class TestFileSystemWriters extends MiniDFSTest {
       written.add(record);
     }
 
-    if (fsWriter.useTempPath) {
-      FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-      Assert.assertEquals("Should contain no visible files", 0, stats.length);
-      stats = fs.listStatus(testDirectory);
-      Assert.assertEquals("Should contain a hidden file", 1, stats.length);
-    } else {
-      FileStatus[] stats = fs.listStatus(testDirectory, hidden());
-      Assert.assertEquals("Should contain no hidden files", 0, stats.length);
-      stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-      Assert.assertEquals("Should contain a visible file", 1, stats.length);
-    }
+    stats = fs.listStatus(testDirectory, PathFilters.notHidden());
+    Assert.assertEquals("Should contain no visible files", 0, stats.length);
+    stats = fs.listStatus(testDirectory);
+    Assert.assertEquals("Should contain a hidden file", 1, stats.length);
 
     fsWriter.close();
 
-    FileStatus[] stats = fs.listStatus(testDirectory, hidden());
-    Assert.assertEquals("Should contain no hidden files", 0, stats.length);
     stats = fs.listStatus(testDirectory, PathFilters.notHidden());
     Assert.assertEquals("Should contain a visible data file", 1, stats.length);
 
@@ -116,49 +95,17 @@ public abstract class TestFileSystemWriters extends MiniDFSTest {
     Assert.assertEquals("Should match written records",
         written, Lists.newArrayList((Iterator) init(reader)));
   }
-  
-  @Test
-  public void testWriteWithOldSchema() throws IOException {
-    
-    Schema writerSchema = SchemaBuilder.record("Message").fields()
-        .requiredLong("id")
-        .requiredString("message")
-        .endRecord();
 
-    fsWriter = newWriter(testDirectory, TEST_SCHEMA, writerSchema);
-    init(fsWriter);
-
-    for (long i = 0; i < 1000; i += 1) {
-    
-    GenericRecordBuilder recordBuilder = new GenericRecordBuilder(TEST_SCHEMA)
-        .set("id", i).set("message","test-"+ i);
-      fsWriter.write(recordBuilder.build());
-    }
-
-    fsWriter.close();
-
-    final FileStatus[]   stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-    Assert.assertEquals("Should match with writer schema",
-        writerSchema, FileSystemUtil.schema("record", fs, stats[0].getPath()));
-  }
+  public abstract long getTargetFileSize();
 
   @Test
   public void testTargetFileSize() throws IOException {
     init(fsWriter);
 
-    Path rolledFilePath = null;
-    if (fsWriter.useTempPath) {
-      FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-      Assert.assertEquals("Should contain no visible files", 0, stats.length);
-      stats = fs.listStatus(testDirectory);
-      Assert.assertEquals("Should contain a hidden file", 1, stats.length);
-    } else {
-      FileStatus[] stats = fs.listStatus(testDirectory, hidden());
-      Assert.assertEquals("Should contain no hidden files", 0, stats.length);
-      stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-      Assert.assertEquals("Should contain a visible file", 1, stats.length);
-      rolledFilePath = stats[0].getPath();
-    }
+    FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
+    Assert.assertEquals("Should contain no visible files", 0, stats.length);
+    stats = fs.listStatus(testDirectory);
+    Assert.assertEquals("Should contain a hidden file", 1, stats.length);
 
     List<Record> written = Lists.newArrayList();
     for (long i = 0; i < 100000; i += 1) {
@@ -168,33 +115,20 @@ public abstract class TestFileSystemWriters extends MiniDFSTest {
       written.add(record);
     }
 
-    FileStatus rolledFile = null;
-    if (fsWriter.useTempPath) {
-      FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-      Assert.assertEquals("Should contain a rolled file", 1, stats.length);
+    stats = fs.listStatus(testDirectory, PathFilters.notHidden());
+    Assert.assertEquals("Should contain a rolled file", 1, stats.length);
 
-      // keep track of the rolled file for the size check
-      rolledFile = stats[0];
+    // keep track of the rolled file for the size check
+    FileStatus rolledFile = stats[0];
 
-      stats = fs.listStatus(testDirectory);
-      Assert.assertEquals("Should contain a hidden file and a rolled file",
-          2, stats.length);
-    } else {
-      FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-      Assert.assertEquals("Should contain a new file and a rolled file", 2, stats.length);
-
-      // keep track of the rolled file for the size check
-      for (FileStatus stat : stats) {
-        if (stat.getPath().equals(rolledFilePath)) {
-          rolledFile = stat;
-        }
-      }
-    }
+    stats = fs.listStatus(testDirectory);
+    Assert.assertEquals("Should contain a hidden file and a rolled file",
+        2, stats.length);
 
     fsWriter.close();
 
-    FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-    Assert.assertEquals("Should contain two visible data files", 2, stats.length);
+    stats = fs.listStatus(testDirectory, PathFilters.notHidden());
+    Assert.assertEquals("Should contain a visible data file", 2, stats.length);
 
     List<Record> actualContent = Lists.newArrayList();
     DatasetReader<Record> reader = newReader(stats[0].getPath(), TEST_SCHEMA);
@@ -207,7 +141,7 @@ public abstract class TestFileSystemWriters extends MiniDFSTest {
     Assert.assertTrue("Should match written records",
         Sets.newHashSet(written).equals(Sets.newHashSet(actualContent)));
 
-    double ratioToTarget = (((double) rolledFile.getLen()) / 2 / 1024 / 1024);
+    double ratioToTarget = (((double) rolledFile.getLen()) / getTargetFileSize());
     Assert.assertTrue(
         "Should be within 10% of target size: " + ratioToTarget * 100,
         ratioToTarget > 0.90 && ratioToTarget < 1.10);
@@ -219,19 +153,10 @@ public abstract class TestFileSystemWriters extends MiniDFSTest {
     // with ClockReady#tick.
     init(fsWriter);
 
-    Path rolledFilePath = null;
-    if (fsWriter.useTempPath) {
-      FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-      Assert.assertEquals("Should contain no visible files", 0, stats.length);
-      stats = fs.listStatus(testDirectory);
-      Assert.assertEquals("Should contain a hidden file", 1, stats.length);
-    } else {
-      FileStatus[] stats = fs.listStatus(testDirectory, hidden());
-      Assert.assertEquals("Should contain no hidden files", 0, stats.length);
-      stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-      Assert.assertEquals("Should contain a visible file", 1, stats.length);
-      rolledFilePath = stats[0].getPath();
-    }
+    FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
+    Assert.assertEquals("Should contain no visible files", 0, stats.length);
+    stats = fs.listStatus(testDirectory);
+    Assert.assertEquals("Should contain a hidden file", 1, stats.length);
 
     // write the first half of the records
     List<Record> firstHalf = Lists.newArrayList();
@@ -256,33 +181,20 @@ public abstract class TestFileSystemWriters extends MiniDFSTest {
       secondHalf.add(record);
     }
 
-    FileStatus rolledFile = null;
-    if (fsWriter.useTempPath) {
-      FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-      Assert.assertEquals("Should contain a rolled file", 1, stats.length);
+    stats = fs.listStatus(testDirectory, PathFilters.notHidden());
+    Assert.assertEquals("Should contain a rolled file", 1, stats.length);
 
-      // keep track of the rolled file for the content check
-      rolledFile = stats[0];
+    // keep track of the rolled file for the content check
+    FileStatus rolledFile = stats[0];
 
-      stats = fs.listStatus(testDirectory);
-      Assert.assertEquals("Should contain a hidden file and a rolled file",
-          2, stats.length);
-    } else {
-      FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-      Assert.assertEquals("Should contain a new file and a rolled file", 2, stats.length);
-
-      // keep track of the rolled file for the size check
-      for (FileStatus stat : stats) {
-        if (stat.getPath().equals(rolledFilePath)) {
-          rolledFile = stat;
-        }
-      }
-    }
+    stats = fs.listStatus(testDirectory);
+    Assert.assertEquals("Should contain a hidden file and a rolled file",
+        2, stats.length);
 
     fsWriter.close();
 
-    FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-    Assert.assertEquals("Should contain two visible data files", 2, stats.length);
+    stats = fs.listStatus(testDirectory, PathFilters.notHidden());
+    Assert.assertEquals("Should contain a visible data file", 2, stats.length);
 
     DatasetReader<Record> reader = newReader(rolledFile.getPath(), TEST_SCHEMA);
     int count = 0;
@@ -307,11 +219,8 @@ public abstract class TestFileSystemWriters extends MiniDFSTest {
     init(fsWriter);
     fsWriter.close();
 
-    FileStatus[] stats = fs.listStatus(testDirectory, hidden());
-    Assert.assertEquals("Should not contain any hidden files", 0, stats.length);
-
-    stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-    Assert.assertEquals("Should not contain any visible files", 0, stats.length);
+    FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
+    Assert.assertEquals("Should not contain any files", 0, stats.length);
   }
 
   @Test
@@ -328,11 +237,8 @@ public abstract class TestFileSystemWriters extends MiniDFSTest {
 
     fsWriter.close();
 
-    FileStatus[] stats = fs.listStatus(testDirectory, hidden());
-    Assert.assertEquals("Should not contain any hidden files", 0, stats.length);
-
-    stats = fs.listStatus(testDirectory, PathFilters.notHidden());
-    Assert.assertEquals("Should not contain any visible files", 0, stats.length);
+    FileStatus[] stats = fs.listStatus(testDirectory, PathFilters.notHidden());
+    Assert.assertEquals("Should not contain any files", 0, stats.length);
   }
 
   protected static Record record(long id, String message) {
@@ -347,15 +253,5 @@ public abstract class TestFileSystemWriters extends MiniDFSTest {
       ((InitializeAccessor) obj).initialize();
     }
     return obj;
-  }
-
-  protected static PathFilter hidden() {
-    final PathFilter notHidden = PathFilters.notHidden();
-    return new PathFilter() {
-      @Override
-      public boolean accept(Path path) {
-        return !notHidden.accept(path);
-      }
-    };
   }
 }

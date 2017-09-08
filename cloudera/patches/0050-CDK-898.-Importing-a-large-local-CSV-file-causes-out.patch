@@ -1,0 +1,122 @@
+From 6d42e20055e6e40711ff964fa16d703abcbd578c Mon Sep 17 00:00:00 2001
+From: Tom White <tom@cloudera.com>
+Date: Thu, 5 Feb 2015 09:14:11 +0000
+Subject: [PATCH 050/115] CDK-898. Importing a large local CSV file causes out of memory error.
+
+Always use MRPipeline.
+---
+ .../main/java/org/kitesdk/tools/TransformTask.java |   63 +++++---------------
+ .../kitesdk/cli/commands/TestCSVImportCommand.java |   13 +---
+ 2 files changed, 20 insertions(+), 56 deletions(-)
+
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
+index 6a805e0..147bc45 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
+@@ -96,63 +96,32 @@ public class TransformTask<S, T> extends Configured {
+   }
+ 
+   public PipelineResult run() throws IOException {
+-    boolean runInParallel = true;
+-    if (isLocal(from.getDataset()) || isLocal(to.getDataset())) {
+-      runInParallel = false;
+-    }
+-
+     PType<T> toPType = ptype(to);
+     MapFn<T, T> validate = new CheckEntityClass<T>(to.getType());
+ 
+-    if (runInParallel) {
+-      TaskUtil.configure(getConf())
+-          .addJarPathForClass(HiveConf.class);
+-
+-      Pipeline pipeline = new MRPipeline(getClass(), getConf());
+-
+-      PCollection<T> collection = pipeline.read(CrunchDatasets.asSource(from))
+-          .parallelDo(transform, toPType).parallelDo(validate, toPType);
+-
+-      if (compact) {
+-        // the transform must be run before partitioning
+-        collection = CrunchDatasets.partition(collection, to, numWriters);
+-      }
+-
+-      pipeline.write(collection, CrunchDatasets.asTarget(to), Target.WriteMode.APPEND);
+-
+-      PipelineResult result = pipeline.done();
++    TaskUtil.configure(getConf())
++        .addJarPathForClass(HiveConf.class);
+ 
+-      StageResult sr = Iterables.getFirst(result.getStageResults(), null);
+-      if (sr != null && MAP_INPUT_RECORDS != null) {
+-        this.count = sr.getCounterValue(MAP_INPUT_RECORDS);
+-      }
+-
+-      return result;
+-
+-    } else {
+-      Pipeline pipeline = MemPipeline.getInstance();
++    Pipeline pipeline = new MRPipeline(getClass(), getConf());
+ 
+-      PCollection<T> collection = pipeline.read(CrunchDatasets.asSource(from))
+-          .parallelDo(transform, toPType).parallelDo(validate, toPType);
++    PCollection<T> collection = pipeline.read(CrunchDatasets.asSource(from))
++        .parallelDo(transform, toPType).parallelDo(validate, toPType);
+ 
+-      boolean threw = true;
+-      DatasetWriter<T> writer = null;
+-      try {
+-        writer = to.newWriter();
+-
+-        for (T entity : collection.materialize()) {
+-          writer.write(entity);
+-          count += 1;
+-        }
++    if (compact) {
++      // the transform must be run before partitioning
++      collection = CrunchDatasets.partition(collection, to, numWriters);
++    }
+ 
+-        threw = false;
++    pipeline.write(collection, CrunchDatasets.asTarget(to), Target.WriteMode.APPEND);
+ 
+-      } finally {
+-        Closeables.close(writer, threw);
+-      }
++    PipelineResult result = pipeline.done();
+ 
+-      return pipeline.done();
++    StageResult sr = Iterables.getFirst(result.getStageResults(), null);
++    if (sr != null && MAP_INPUT_RECORDS != null) {
++      this.count = sr.getCounterValue(MAP_INPUT_RECORDS);
+     }
++
++    return result;
+   }
+ 
+   private static boolean isLocal(Dataset<?> dataset) {
+diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCSVImportCommand.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCSVImportCommand.java
+index 9f46d92..de7d89a 100644
+--- a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCSVImportCommand.java
++++ b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCSVImportCommand.java
+@@ -196,15 +196,10 @@ public class TestCSVImportCommand {
+ 
+     // This will fail because NaN isn't a valid long and the field is required
+     command.targets = Lists.newArrayList("target/incompatible.csv", datasetName);
+-    TestHelpers.assertThrows("Should complain about schema compatibility",
+-        DatasetRecordException.class, new Callable() {
+-          @Override
+-          public Object call() throws Exception {
+-            command.run();
+-            return null;
+-          }
+-        }
+-    );
++
++    int rc = command.run();
++    Assert.assertEquals(1, rc);
++
+     verify(console).trace(contains("repo:file:target/data"));
+     verifyNoMoreInteractions(console);
+   }
+-- 
+1.7.0.4
+

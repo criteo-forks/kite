@@ -1,0 +1,428 @@
+From 91c483a98ea4eb97ceb0576fab36fbd3d802cd8c Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Mon, 16 Mar 2015 13:18:47 -0700
+Subject: [PATCH 033/115] CDK-964: Allow replacing provided partitioners.
+
+This updates the update validation so that provided partitioners can be
+replaced with more specific partitioners. For example, if a version
+partition is initially provided but later added to the record data, the
+provided partitioner can be replaced with an identity partitioner. This
+is the only allowed migration added by this commit.
+---
+ .../java/org/kitesdk/data/spi/Compatibility.java   |   64 ++++++-
+ .../org/kitesdk/data/TestPartitionStrategy.java    |    2 +
+ .../kitesdk/data/spi/TestCompatibilityChecks.java  |  200 ++++++++++++++++++++
+ .../TestFileSystemDatasetRepository.java           |   32 +++
+ .../java/org/kitesdk/data/spi/hive/HiveUtils.java  |    9 +
+ .../kitesdk/cli/commands/UpdateDatasetCommand.java |    9 +
+ 6 files changed, 314 insertions(+), 2 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Compatibility.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Compatibility.java
+index 39de79d..a6c8b26 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Compatibility.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Compatibility.java
+@@ -27,8 +27,10 @@ import javax.annotation.Nullable;
+ import org.apache.avro.Schema;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.IncompatibleSchemaException;
++import org.kitesdk.data.PartitionStrategy;
+ import org.kitesdk.data.ValidationException;
+ import org.kitesdk.data.impl.Accessor;
++import org.kitesdk.data.spi.partition.ProvidedFieldPartitioner;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+@@ -246,8 +248,10 @@ public abstract class Compatibility {
+         existing.isPartitioned(), test.isPartitioned());
+ 
+     if (existing.isPartitioned()) {
+-      checkNotChanged("partition strategy",
+-          existing.getPartitionStrategy(), test.getPartitionStrategy());
++      checkStrategyUpdate(
++          existing.getPartitionStrategy(),
++          test.getPartitionStrategy(),
++          test.getSchema());
+     }
+ 
+     // check can read records written with old schema using new schema
+@@ -270,4 +274,60 @@ public abstract class Compatibility {
+         what, String.valueOf(existing), String.valueOf(test));
+   }
+ 
++  public static void checkStrategyUpdate(PartitionStrategy existing,
++                                         PartitionStrategy other,
++                                         Schema schema) {
++    List<FieldPartitioner> existingFields = Accessor.getDefault()
++        .getFieldPartitioners(existing);
++    List<FieldPartitioner> otherFields = Accessor.getDefault()
++        .getFieldPartitioners(other);
++    ValidationException.check(existingFields.size() == otherFields.size(),
++        "Not compatible: cannot replace %s partitioners with %s partitioners",
++        existingFields.size(), otherFields.size());
++
++    for (int i = 0; i < existingFields.size(); i += 1) {
++      FieldPartitioner fp = existingFields.get(i);
++      FieldPartitioner replacement = otherFields.get(i);
++      if (fp.equals(replacement)) {
++        continue;
++      }
++
++      ValidationException.check(fp instanceof ProvidedFieldPartitioner,
++          "Cannot replace partition %s: not a provided partitioner",
++          fp.getName());
++      ValidationException.check(fp.getName().equals(replacement.getName()),
++          "Cannot change the name of partition %s (to %s)",
++          fp.getName(), replacement.getName());
++      Class<?> outputType = SchemaUtil.getPartitionType(replacement, schema);
++      ValidationException.check(
++          isCompatibleWithProvidedType(fp.getType(), outputType),
++          "Cannot change the data type of partition %s", fp.getName());
++    }
++  }
++
++  /**
++   * Check whether data already written to a provided partition can be read
++   * using the new partition type.
++   * <p>
++   * For example, existing ints can be read as strings, but existing strings
++   * can't be read as ints.
++   *
++   * @param providedClass the class from a provided partitioner
++   * @param replacementClass the partition class of the replacement partitioner
++   * @return {@code true} iff replacement class can be used with existing data
++   */
++  private static boolean isCompatibleWithProvidedType(Class<?> providedClass,
++                                                      Class<?> replacementClass) {
++    if (Integer.class.isAssignableFrom(providedClass)) {
++      return (replacementClass == String.class ||
++          replacementClass == Integer.class ||
++          replacementClass == Long.class);
++    } else if (Long.class.isAssignableFrom(providedClass)) {
++      return (replacementClass == String.class ||
++          replacementClass == Long.class);
++    } else if (String.class.isAssignableFrom(providedClass)) {
++      return replacementClass == String.class;
++    }
++    return false;
++  }
+ }
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/TestPartitionStrategy.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/TestPartitionStrategy.java
+index 910a5a8..1889d7e 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/TestPartitionStrategy.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/TestPartitionStrategy.java
+@@ -16,6 +16,8 @@
+ package org.kitesdk.data;
+ 
+ import java.util.List;
++import org.apache.avro.Schema;
++import org.apache.avro.SchemaBuilder;
+ import org.junit.Assert;
+ import org.junit.Ignore;
+ import org.junit.Test;
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestCompatibilityChecks.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestCompatibilityChecks.java
+index cc2e297..54d35ef 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestCompatibilityChecks.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestCompatibilityChecks.java
+@@ -30,6 +30,13 @@ import static org.kitesdk.data.spi.Compatibility.isCompatibleName;
+ 
+ public class TestCompatibilityChecks {
+ 
++  public static final Schema PROVIDED_TEST_SCHEMA = SchemaBuilder
++      .record("Test").fields()
++      .requiredLong("l")
++      .requiredInt("i")
++      .requiredString("s")
++      .endRecord();
++
+   private static final Schema schema = SchemaBuilder.record("Record").fields()
+       .requiredString("message")
+       .requiredBoolean("bool")
+@@ -158,4 +165,197 @@ public class TestCompatibilityChecks {
+     });
+   }
+ 
++  @Test
++  public void testProvidedPartitionIntUpdate() {
++    final PartitionStrategy provided = new PartitionStrategy.Builder()
++        .provided("part", "int")
++        .build();
++
++    // existing partition data can be any int value
++
++    Compatibility.checkStrategyUpdate(
++        provided,
++        new PartitionStrategy.Builder()
++            .hash("s", "part", 16)
++            .build(),
++        PROVIDED_TEST_SCHEMA);
++
++    Compatibility.checkStrategyUpdate(
++        provided,
++        new PartitionStrategy.Builder()
++            .identity("l", "part")
++            .build(),
++        PROVIDED_TEST_SCHEMA);
++
++    Compatibility.checkStrategyUpdate(
++        provided,
++        new PartitionStrategy.Builder()
++            .identity("s", "part")
++            .build(),
++        PROVIDED_TEST_SCHEMA);
++
++  }
++
++  @Test
++  public void testProvidedPartitionLongUpdate() {
++    final PartitionStrategy provided = new PartitionStrategy.Builder()
++        .provided("part", "long")
++        .build();
++
++    // existing partition data can be any long value
++
++    Compatibility.checkStrategyUpdate(
++        provided,
++        new PartitionStrategy.Builder()
++            .identity("l", "part")
++            .build(),
++        PROVIDED_TEST_SCHEMA);
++
++    Compatibility.checkStrategyUpdate(
++        provided,
++        new PartitionStrategy.Builder()
++            .identity("s", "part")
++            .build(),
++        PROVIDED_TEST_SCHEMA);
++
++    TestHelpers.assertThrows("Should not allow long to int update",
++        ValidationException.class, new Runnable() {
++          @Override
++          public void run() {
++            Compatibility.checkStrategyUpdate(
++                provided,
++                new PartitionStrategy.Builder()
++                    .identity("i", "part")
++                    .build(),
++                PROVIDED_TEST_SCHEMA);
++          }
++        });
++  }
++
++  @Test
++  public void testProvidedPartitionStringUpdate() {
++    final PartitionStrategy provided = new PartitionStrategy.Builder()
++        .provided("part", "string")
++        .build();
++
++    // existing partition data can be any string value
++
++    Compatibility.checkStrategyUpdate(
++        provided,
++        new PartitionStrategy.Builder()
++            .identity("s", "part")
++            .build(),
++        PROVIDED_TEST_SCHEMA);
++
++    TestHelpers.assertThrows("Should not allow string to int update",
++        ValidationException.class, new Runnable() {
++          @Override
++          public void run() {
++            Compatibility.checkStrategyUpdate(
++                provided,
++                new PartitionStrategy.Builder()
++                    .identity("i", "part")
++                    .build(),
++                PROVIDED_TEST_SCHEMA);
++          }
++        });
++
++    TestHelpers.assertThrows("Should not allow string to long update",
++        ValidationException.class, new Runnable() {
++          @Override
++          public void run() {
++            Compatibility.checkStrategyUpdate(
++                provided,
++                new PartitionStrategy.Builder()
++                    .identity("i", "part")
++                    .build(),
++                PROVIDED_TEST_SCHEMA);
++          }
++        });
++  }
++
++  @Test
++  public void testProvidedPartitionNameUpdate() {
++    final PartitionStrategy provided = new PartitionStrategy.Builder()
++        .provided("part", "string")
++        .build();
++
++    TestHelpers.assertThrows("Should not allow changing the partition name",
++        ValidationException.class, new Runnable() {
++          @Override
++          public void run() {
++            Compatibility.checkStrategyUpdate(
++                provided,
++                new PartitionStrategy.Builder()
++                    .identity("s", "other")
++                    .build(),
++                PROVIDED_TEST_SCHEMA);
++          }
++        });
++  }
++
++  @Test
++  public void testProvidedPartitionSizeChange() {
++    final PartitionStrategy provided = new PartitionStrategy.Builder()
++        .provided("part", "string")
++        .provided("part2", "string")
++        .build();
++
++    TestHelpers.assertThrows("Should not allow fewer partitions",
++        ValidationException.class, new Runnable() {
++          @Override
++          public void run() {
++            Compatibility.checkStrategyUpdate(
++                provided,
++                new PartitionStrategy.Builder()
++                    .identity("s", "part")
++                    .build(),
++                PROVIDED_TEST_SCHEMA);
++          }
++        });
++
++    Compatibility.checkStrategyUpdate(
++        provided,
++        new PartitionStrategy.Builder()
++            .identity("s", "part")
++            .identity("s", "part2")
++            .build(),
++        PROVIDED_TEST_SCHEMA);
++
++    TestHelpers.assertThrows("Should not allow more partitions",
++        ValidationException.class, new Runnable() {
++          @Override
++          public void run() {
++            Compatibility.checkStrategyUpdate(
++                provided,
++                new PartitionStrategy.Builder()
++                    .identity("s", "part")
++                    .identity("s", "part2")
++                    .identity("s", "part3")
++                    .build(),
++                PROVIDED_TEST_SCHEMA);
++          }
++        });
++  }
++
++  @Test
++  public void testUpdateNonProvided() {
++    final PartitionStrategy provided = new PartitionStrategy.Builder()
++        .identity("s", "part")
++        .build();
++
++    TestHelpers.assertThrows("Should not allow replacing if not provided",
++        ValidationException.class, new Runnable() {
++          @Override
++          public void run() {
++            Compatibility.checkStrategyUpdate(
++                provided,
++                new PartitionStrategy.Builder()
++                    .dateFormat("l", "part", "yyyy-MM-dd")
++                    .build(),
++                PROVIDED_TEST_SCHEMA);
++          }
++        });
++  }
++
+ }
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDatasetRepository.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDatasetRepository.java
+index 2683785..5b8805b 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDatasetRepository.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDatasetRepository.java
+@@ -309,4 +309,36 @@ public class TestFileSystemDatasetRepository extends TestDatasetRepositories {
+       repo.delete(NAMESPACE, name);
+     }
+   }
++
++  @Test
++  public void testReplaceProvidedPartition() {
++    Schema event = SchemaBuilder.record("Event").fields()
++        .requiredLong("created_at")
++        .requiredLong("version")
++        .name("properties").type().optional().map().values().stringType()
++        .endRecord();
++
++    DatasetDescriptor descriptor = new DatasetDescriptor.Builder()
++        .schema(event)
++        .partitionStrategy(new PartitionStrategy.Builder()
++            .provided("v", "int")
++            .year("created_at")
++            .month("created_at")
++            .day("created_at")
++            .build())
++        .build();
++
++    Dataset<?> ds = repo.create("ns", "test", descriptor);
++
++    DatasetDescriptor update = new DatasetDescriptor.Builder(ds.getDescriptor())
++        .partitionStrategy(new PartitionStrategy.Builder()
++            .identity("version", "v")
++            .year("created_at")
++            .month("created_at")
++            .day("created_at")
++            .build())
++        .build();
++
++    repo.update("ns", "test", update);
++  }
+ }
+diff --git a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveUtils.java b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveUtils.java
+index a67ca03..af8e762 100644
+--- a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveUtils.java
++++ b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveUtils.java
+@@ -338,6 +338,15 @@ class HiveUtils {
+                 " not set on the descriptor.");
+       }
+     }
++
++    // copy partitioning info
++    if (descriptor.isPartitioned()) {
++      PartitionStrategy ps = descriptor.getPartitionStrategy();
++      table.getParameters().put(PARTITION_EXPRESSION_PROPERTY_NAME,
++          Accessor.getDefault().toExpression(ps));
++      table.setPartitionKeys(partitionColumns(ps, descriptor.getSchema()));
++    }
++
+     // keep the custom properties up-to-date
+     addPropertiesForDescriptor(table, descriptor);
+   }
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/UpdateDatasetCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/UpdateDatasetCommand.java
+index 3fec784..46ecf13 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/UpdateDatasetCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/UpdateDatasetCommand.java
+@@ -41,6 +41,10 @@ public class UpdateDatasetCommand extends BaseDatasetCommand {
+       description = "The file containing the Avro schema.")
+   String avroSchemaFile = null;
+ 
++  @Parameter(names = {"-p", "--partition-by"},
++      description = "A file containing a JSON-formatted partition strategy.")
++  String partitionStrategyFile;
++
+   @Parameter(names = {"--set", "--property"},
+       description = "Add a property pair: prop.name=value")
+   List<String> properties;
+@@ -66,6 +70,11 @@ public class UpdateDatasetCommand extends BaseDatasetCommand {
+       descriptorBuilder.schemaUri(qualifiedURI(avroSchemaFile));
+     }
+ 
++    if (partitionStrategyFile != null) {
++      descriptorBuilder.partitionStrategyUri(
++          qualifiedURI(partitionStrategyFile));
++    }
++
+     if (properties != null) {
+       for (String propValue : properties) {
+         Iterator<String> parts = PROP_VALUE_SEP.split(propValue).iterator();
+-- 
+1.7.0.4
+

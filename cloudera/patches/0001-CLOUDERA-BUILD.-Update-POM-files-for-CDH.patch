@@ -1,0 +1,1543 @@
+From 24528ea240c457085308ef95af0d3f28f06d40c3 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Tue, 24 Feb 2015 16:05:25 -0800
+Subject: [PATCH 001/115] CLOUDERA-BUILD. Update POM files for CDH.
+
+Most updates are setting the version to 1.0.0-cdh5.4.0-SNAPSHOT.
+
+The project compiles.
+
+Root pom updates:
+* Use CDH root pom for 5.4.0-SNAPSHOT
+* Remove all non-standard properties
+* Add -base properties for javadoc links
+* Use -cdh5 dependency aggregator artifacts
+* Remove unused dependency profiles, but not cdh5
+  (cdh5 may be used by build processes)
+* Update cdh5 profile to match default deps
+* Remove cloudera releases repo
+* Remove Sonatype distributionManagement
+
+Minicluster updates:
+* Use different factory method for Hive metastore server
+* Add test aggregator deps with compile scope (MiniHBaseCluster
+  is missing otherwise)
+
+Other updates:
+* Remove the parquet-hive bundle dep, this is part of Hive in CDH
+* Remove non-CDH5 dependency aggregators for HDFS and HBase
+* Remove all alternate (e.g., *-cdh5) version properties
+---
+ kite-app-parent/pom.xml                            |    4 +-
+ kite-data/kite-data-core/pom.xml                   |    2 +-
+ kite-data/kite-data-crunch/pom.xml                 |   14 +-
+ kite-data/kite-data-flume/pom.xml                  |    4 +-
+ kite-data/kite-data-hbase/pom.xml                  |    6 +-
+ kite-data/kite-data-hive/pom.xml                   |   16 +--
+ kite-data/kite-data-mapreduce/pom.xml              |   12 +-
+ kite-data/kite-data-spark/pom.xml                  |   14 +-
+ kite-data/pom.xml                                  |    2 +-
+ kite-hadoop-compatibility/pom.xml                  |    2 +-
+ kite-hadoop-dependencies/cdh4-test/pom.xml         |    4 +-
+ kite-hadoop-dependencies/cdh4/pom.xml              |    4 +-
+ kite-hadoop-dependencies/cdh5-test/pom.xml         |   10 +-
+ kite-hadoop-dependencies/cdh5/pom.xml              |    6 +-
+ kite-hadoop-dependencies/default-test/pom.xml      |    4 +-
+ kite-hadoop-dependencies/default/pom.xml           |    4 +-
+ kite-hadoop-dependencies/hadoop1-test/pom.xml      |    4 +-
+ kite-hadoop-dependencies/hadoop1/pom.xml           |    4 +-
+ kite-hadoop-dependencies/pom.xml                   |    4 +-
+ kite-hbase-dependencies/cdh4-test/pom.xml          |    4 +-
+ kite-hbase-dependencies/cdh4/pom.xml               |    4 +-
+ kite-hbase-dependencies/cdh5-test/pom.xml          |    6 +-
+ kite-hbase-dependencies/cdh5/pom.xml               |    8 +-
+ kite-hbase-dependencies/default-test/pom.xml       |    4 +-
+ kite-hbase-dependencies/default/pom.xml            |    4 +-
+ kite-hbase-dependencies/hadoop1-test/pom.xml       |    4 +-
+ kite-hbase-dependencies/hadoop1/pom.xml            |    4 +-
+ kite-hbase-dependencies/pom.xml                    |    4 +-
+ kite-maven-plugin/pom.xml                          |    8 +-
+ kite-minicluster/pom.xml                           |   25 ++--
+ .../java/org/kitesdk/minicluster/HiveService.java  |    2 +-
+ .../kite-morphlines-all-except-solr/pom.xml        |    2 +-
+ kite-morphlines/kite-morphlines-all/pom.xml        |    2 +-
+ kite-morphlines/kite-morphlines-avro/pom.xml       |    2 +-
+ kite-morphlines/kite-morphlines-core/pom.xml       |    2 +-
+ .../kite-morphlines-hadoop-core/pom.xml            |    2 +-
+ .../kite-morphlines-hadoop-parquet-avro/pom.xml    |    2 +-
+ .../kite-morphlines-hadoop-rcfile/pom.xml          |    2 +-
+ .../kite-morphlines-hadoop-sequencefile/pom.xml    |    2 +-
+ kite-morphlines/kite-morphlines-json/pom.xml       |    2 +-
+ kite-morphlines/kite-morphlines-maxmind/pom.xml    |    2 +-
+ .../kite-morphlines-metrics-servlets/pom.xml       |    2 +-
+ kite-morphlines/kite-morphlines-protobuf/pom.xml   |    2 +-
+ kite-morphlines/kite-morphlines-saxon/pom.xml      |    2 +-
+ kite-morphlines/kite-morphlines-solr-cell/pom.xml  |    2 +-
+ kite-morphlines/kite-morphlines-solr-core/pom.xml  |    2 +-
+ kite-morphlines/kite-morphlines-tika-core/pom.xml  |    2 +-
+ .../kite-morphlines-tika-decompress/pom.xml        |    2 +-
+ kite-morphlines/kite-morphlines-twitter/pom.xml    |    2 +-
+ kite-morphlines/kite-morphlines-useragent/pom.xml  |    2 +-
+ kite-morphlines/pom.xml                            |    2 +-
+ kite-tools-parent/kite-tools-cdh5/pom.xml          |    6 +-
+ kite-tools-parent/kite-tools/pom.xml               |    2 +-
+ kite-tools-parent/pom.xml                          |    2 +-
+ pom.xml                                            |  158 +++++---------------
+ 55 files changed, 153 insertions(+), 252 deletions(-)
+
+diff --git a/kite-app-parent/pom.xml b/kite-app-parent/pom.xml
+index 68788ce..baeedcd 100644
+--- a/kite-app-parent/pom.xml
++++ b/kite-app-parent/pom.xml
+@@ -19,13 +19,13 @@
+   <modelVersion>4.0.0</modelVersion>
+   <groupId>org.kitesdk</groupId>
+   <artifactId>kite-app-parent-modules</artifactId>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   <packaging>pom</packaging>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Application POM Modules</name>
+diff --git a/kite-data/kite-data-core/pom.xml b/kite-data/kite-data-core/pom.xml
+index 4072fcb..afc3a0d 100644
+--- a/kite-data/kite-data-core/pom.xml
++++ b/kite-data/kite-data-core/pom.xml
+@@ -22,7 +22,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-data</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Data Core Module</name>
+diff --git a/kite-data/kite-data-crunch/pom.xml b/kite-data/kite-data-crunch/pom.xml
+index f8d4200..47a2175 100644
+--- a/kite-data/kite-data-crunch/pom.xml
++++ b/kite-data/kite-data-crunch/pom.xml
+@@ -22,7 +22,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-data</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Data Crunch Module</name>
+@@ -114,23 +114,23 @@
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-core</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     </dependency>
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-mapreduce</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     </dependency>
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-hive</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+       <optional>true</optional>
+     </dependency>
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-hbase</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+       <optional>true</optional>
+     </dependency>
+ 
+@@ -208,14 +208,14 @@
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-core</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+       <type>test-jar</type>
+       <scope>test</scope>
+     </dependency>
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-hbase</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+       <type>test-jar</type>
+       <scope>test</scope>
+     </dependency>
+diff --git a/kite-data/kite-data-flume/pom.xml b/kite-data/kite-data-flume/pom.xml
+index 6dda72a..428462f 100644
+--- a/kite-data/kite-data-flume/pom.xml
++++ b/kite-data/kite-data-flume/pom.xml
+@@ -22,7 +22,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-data</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Data Flume Module</name>
+@@ -102,7 +102,7 @@
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-core</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     </dependency>
+     <dependency>
+       <groupId>junit</groupId>
+diff --git a/kite-data/kite-data-hbase/pom.xml b/kite-data/kite-data-hbase/pom.xml
+index 83069cf..1d3cc29 100644
+--- a/kite-data/kite-data-hbase/pom.xml
++++ b/kite-data/kite-data-hbase/pom.xml
+@@ -22,7 +22,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-data</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Data HBase Module</name>
+@@ -171,7 +171,7 @@
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-core</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     </dependency>
+ 
+     <!-- Hadoop and HBase -->
+@@ -228,7 +228,7 @@
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-core</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+       <type>test-jar</type>
+       <scope>test</scope>
+     </dependency>
+diff --git a/kite-data/kite-data-hive/pom.xml b/kite-data/kite-data-hive/pom.xml
+index b58da18..46eb43f 100644
+--- a/kite-data/kite-data-hive/pom.xml
++++ b/kite-data/kite-data-hive/pom.xml
+@@ -22,7 +22,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-data</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Data Hive Module</name>
+@@ -130,20 +130,6 @@
+       <groupId>org.apache.avro</groupId>
+       <artifactId>avro</artifactId>
+     </dependency>
+-    <dependency>
+-      <groupId>com.twitter</groupId>
+-      <artifactId>parquet-hive-bundle</artifactId>
+-      <exclusions>
+-        <exclusion>
+-          <groupId>org.apache.hadoop</groupId>
+-          <artifactId>hadoop-core</artifactId>
+-        </exclusion>
+-        <exclusion>
+-          <groupId>org.apache.hive</groupId>
+-          <artifactId>hive-exec</artifactId>
+-        </exclusion>
+-      </exclusions>
+-    </dependency>
+ 
+     <!-- These should be compile-dependencies
+          But, hive-exec includes classes from other modules at Hive-specific
+diff --git a/kite-data/kite-data-mapreduce/pom.xml b/kite-data/kite-data-mapreduce/pom.xml
+index d49f458..f6e04a9 100644
+--- a/kite-data/kite-data-mapreduce/pom.xml
++++ b/kite-data/kite-data-mapreduce/pom.xml
+@@ -22,7 +22,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-data</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Data MapReduce Module</name>
+@@ -99,18 +99,18 @@
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-core</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     </dependency>
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-hive</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+       <optional>true</optional>
+     </dependency>
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-hbase</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+       <optional>true</optional>
+     </dependency>
+ 
+@@ -165,14 +165,14 @@
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-core</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+       <type>test-jar</type>
+       <scope>test</scope>
+     </dependency>
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-hbase</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+       <type>test-jar</type>
+       <scope>test</scope>
+     </dependency>
+diff --git a/kite-data/kite-data-spark/pom.xml b/kite-data/kite-data-spark/pom.xml
+index c25d915..946b066 100644
+--- a/kite-data/kite-data-spark/pom.xml
++++ b/kite-data/kite-data-spark/pom.xml
+@@ -22,7 +22,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-data</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Data Spark Module</name>
+@@ -88,18 +88,18 @@
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-core</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     </dependency>
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-hbase</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+       <optional>true</optional>
+     </dependency>
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-mapreduce</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     </dependency>
+ 
+     <!-- Spark -->
+@@ -198,21 +198,21 @@
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-core</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+       <type>test-jar</type>
+       <scope>test</scope>
+     </dependency>
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-hbase</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+       <type>test-jar</type>
+       <scope>test</scope>
+     </dependency>
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-mapreduce</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+       <type>test-jar</type>
+       <scope>test</scope>
+     </dependency>
+diff --git a/kite-data/pom.xml b/kite-data/pom.xml
+index 20aa211..a400ede 100644
+--- a/kite-data/pom.xml
++++ b/kite-data/pom.xml
+@@ -35,7 +35,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Data Module</name>
+diff --git a/kite-hadoop-compatibility/pom.xml b/kite-hadoop-compatibility/pom.xml
+index 24556e5..d05c5f5 100644
+--- a/kite-hadoop-compatibility/pom.xml
++++ b/kite-hadoop-compatibility/pom.xml
+@@ -22,7 +22,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Hadoop Compatibility Module</name>
+diff --git a/kite-hadoop-dependencies/cdh4-test/pom.xml b/kite-hadoop-dependencies/cdh4-test/pom.xml
+index 8ca6264..2e0b0f2 100644
+--- a/kite-hadoop-dependencies/cdh4-test/pom.xml
++++ b/kite-hadoop-dependencies/cdh4-test/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hadoop-cdh4-test-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hadoop-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Hadoop CDH4 Test Dependencies Module</name>
+diff --git a/kite-hadoop-dependencies/cdh4/pom.xml b/kite-hadoop-dependencies/cdh4/pom.xml
+index 16e86db..dccd07b 100644
+--- a/kite-hadoop-dependencies/cdh4/pom.xml
++++ b/kite-hadoop-dependencies/cdh4/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hadoop-cdh4-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hadoop-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Hadoop CDH4 Dependencies Module</name>
+diff --git a/kite-hadoop-dependencies/cdh5-test/pom.xml b/kite-hadoop-dependencies/cdh5-test/pom.xml
+index 72137fd..c1c2937 100644
+--- a/kite-hadoop-dependencies/cdh5-test/pom.xml
++++ b/kite-hadoop-dependencies/cdh5-test/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hadoop-cdh5-test-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hadoop-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Hadoop CDH5 Test Dependencies Module</name>
+@@ -36,7 +36,7 @@
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-common</artifactId>
+-      <version>${vers.hadoop-cdh5}</version>
++      <version>${vers.hadoop}</version>
+       <type>test-jar</type>
+       <exclusions>
+         <!-- brings in earlier version of org.apache.httpcomponents:httpclient that doesn't work with webhdfs -->
+@@ -49,13 +49,13 @@
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-hdfs</artifactId>
+-      <version>${vers.hadoop-cdh5}</version>
++      <version>${vers.hadoop}</version>
+       <type>test-jar</type>
+     </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-minicluster</artifactId>
+-      <version>${vers.hadoop-cdh5}</version>
++      <version>${vers.hadoop}</version>
+     </dependency>
+   </dependencies>
+ 
+diff --git a/kite-hadoop-dependencies/cdh5/pom.xml b/kite-hadoop-dependencies/cdh5/pom.xml
+index 44daec0..3d328d1 100644
+--- a/kite-hadoop-dependencies/cdh5/pom.xml
++++ b/kite-hadoop-dependencies/cdh5/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hadoop-cdh5-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hadoop-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Hadoop CDH5 Dependencies Module</name>
+@@ -36,7 +36,7 @@
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-client</artifactId>
+-      <version>${vers.hadoop-cdh5}</version>
++      <version>${vers.hadoop}</version>
+       <!-- exclude server-side parts that conflict with running in a webapp -->
+       <exclusions>
+         <exclusion>
+diff --git a/kite-hadoop-dependencies/default-test/pom.xml b/kite-hadoop-dependencies/default-test/pom.xml
+index 342fbe7..ee08a82 100644
+--- a/kite-hadoop-dependencies/default-test/pom.xml
++++ b/kite-hadoop-dependencies/default-test/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hadoop-test-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hadoop-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Hadoop Default Test Dependencies Module</name>
+diff --git a/kite-hadoop-dependencies/default/pom.xml b/kite-hadoop-dependencies/default/pom.xml
+index 380bf0a..7ae1d16 100644
+--- a/kite-hadoop-dependencies/default/pom.xml
++++ b/kite-hadoop-dependencies/default/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hadoop-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hadoop-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Hadoop Default Dependencies Module</name>
+diff --git a/kite-hadoop-dependencies/hadoop1-test/pom.xml b/kite-hadoop-dependencies/hadoop1-test/pom.xml
+index e714237..c3b0ad7 100644
+--- a/kite-hadoop-dependencies/hadoop1-test/pom.xml
++++ b/kite-hadoop-dependencies/hadoop1-test/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hadoop1-test-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hadoop-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Hadoop-1 Test Dependencies Module</name>
+diff --git a/kite-hadoop-dependencies/hadoop1/pom.xml b/kite-hadoop-dependencies/hadoop1/pom.xml
+index a32a264..08460e3 100644
+--- a/kite-hadoop-dependencies/hadoop1/pom.xml
++++ b/kite-hadoop-dependencies/hadoop1/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hadoop1-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hadoop-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Hadoop-1 Dependencies Module</name>
+diff --git a/kite-hadoop-dependencies/pom.xml b/kite-hadoop-dependencies/pom.xml
+index db329a9..bca862d 100644
+--- a/kite-hadoop-dependencies/pom.xml
++++ b/kite-hadoop-dependencies/pom.xml
+@@ -21,12 +21,14 @@
+   <packaging>pom</packaging>
+ 
+   <modules>
++    <!--
+     <module>default</module>
+     <module>default-test</module>
+     <module>hadoop1</module>
+     <module>hadoop1-test</module>
+     <module>cdh4</module>
+     <module>cdh4-test</module>
++    -->
+     <module>cdh5</module>
+     <module>cdh5-test</module>
+   </modules>
+@@ -34,7 +36,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Hadoop Dependencies Module</name>
+diff --git a/kite-hbase-dependencies/cdh4-test/pom.xml b/kite-hbase-dependencies/cdh4-test/pom.xml
+index 14b28d7..bac2758 100644
+--- a/kite-hbase-dependencies/cdh4-test/pom.xml
++++ b/kite-hbase-dependencies/cdh4-test/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hbase-cdh4-test-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hbase-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite HBase CDH4 Test Dependencies Module</name>
+diff --git a/kite-hbase-dependencies/cdh4/pom.xml b/kite-hbase-dependencies/cdh4/pom.xml
+index c81cd89..42dc672 100644
+--- a/kite-hbase-dependencies/cdh4/pom.xml
++++ b/kite-hbase-dependencies/cdh4/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hbase-cdh4-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hbase-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite HBase CDH4 Dependencies Module</name>
+diff --git a/kite-hbase-dependencies/cdh5-test/pom.xml b/kite-hbase-dependencies/cdh5-test/pom.xml
+index 74ece2e..6b85a2a 100644
+--- a/kite-hbase-dependencies/cdh5-test/pom.xml
++++ b/kite-hbase-dependencies/cdh5-test/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hbase-cdh5-test-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hbase-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite HBase CDH5 Test Dependencies Module</name>
+@@ -36,7 +36,7 @@
+     <dependency>
+       <groupId>org.apache.hbase</groupId>
+       <artifactId>hbase-testing-util</artifactId>
+-      <version>${vers.hbase-cdh5}</version>
++      <version>${vers.hbase}</version>
+     </dependency>
+   </dependencies>
+ 
+diff --git a/kite-hbase-dependencies/cdh5/pom.xml b/kite-hbase-dependencies/cdh5/pom.xml
+index 9826adc..b92c962 100644
+--- a/kite-hbase-dependencies/cdh5/pom.xml
++++ b/kite-hbase-dependencies/cdh5/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hbase-cdh5-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hbase-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite HBase CDH5 Dependencies Module</name>
+@@ -36,7 +36,7 @@
+     <dependency>
+       <groupId>org.apache.hbase</groupId>
+       <artifactId>hbase-client</artifactId>
+-      <version>${vers.hbase-cdh5}</version>
++      <version>${vers.hbase}</version>
+       <!-- exclude server-side parts that conflict with running in a webapp -->
+       <exclusions>
+         <exclusion>
+@@ -73,7 +73,7 @@
+     <dependency>
+       <groupId>org.apache.hbase</groupId>
+       <artifactId>hbase-server</artifactId>
+-      <version>${vers.hbase-cdh5}</version>
++      <version>${vers.hbase}</version>
+       <!-- exclude server-side parts that conflict with running in a webapp -->
+       <exclusions>
+         <exclusion>
+diff --git a/kite-hbase-dependencies/default-test/pom.xml b/kite-hbase-dependencies/default-test/pom.xml
+index e8d3721..1ea6409 100644
+--- a/kite-hbase-dependencies/default-test/pom.xml
++++ b/kite-hbase-dependencies/default-test/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hbase-test-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hbase-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite HBase Default Test Dependencies Module</name>
+diff --git a/kite-hbase-dependencies/default/pom.xml b/kite-hbase-dependencies/default/pom.xml
+index 4e966cd..db59afa 100644
+--- a/kite-hbase-dependencies/default/pom.xml
++++ b/kite-hbase-dependencies/default/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hbase-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hbase-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite HBase Default Dependencies Module</name>
+diff --git a/kite-hbase-dependencies/hadoop1-test/pom.xml b/kite-hbase-dependencies/hadoop1-test/pom.xml
+index 3002fb1..9e7e8f8 100644
+--- a/kite-hbase-dependencies/hadoop1-test/pom.xml
++++ b/kite-hbase-dependencies/hadoop1-test/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hbase1-test-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hbase-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite HBase Hadoop-1 Test Dependencies Module</name>
+diff --git a/kite-hbase-dependencies/hadoop1/pom.xml b/kite-hbase-dependencies/hadoop1/pom.xml
+index b4855f0..c20399f 100644
+--- a/kite-hbase-dependencies/hadoop1/pom.xml
++++ b/kite-hbase-dependencies/hadoop1/pom.xml
+@@ -19,12 +19,12 @@
+   <modelVersion>4.0.0</modelVersion>
+   <artifactId>kite-hbase1-dependencies</artifactId>
+   <packaging>pom</packaging>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+ 
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-hbase-deps-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite HBase Hadoop-1 Dependencies Module</name>
+diff --git a/kite-hbase-dependencies/pom.xml b/kite-hbase-dependencies/pom.xml
+index 8a61c4a..3a95e85 100644
+--- a/kite-hbase-dependencies/pom.xml
++++ b/kite-hbase-dependencies/pom.xml
+@@ -21,12 +21,14 @@
+   <packaging>pom</packaging>
+ 
+   <modules>
++    <!--
+     <module>default</module>
+     <module>default-test</module>
+     <module>hadoop1</module>
+     <module>hadoop1-test</module>
+     <module>cdh4</module>
+     <module>cdh4-test</module>
++    -->
+     <module>cdh5</module>
+     <module>cdh5-test</module>
+   </modules>
+@@ -34,7 +36,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite HBase Dependencies Module</name>
+diff --git a/kite-maven-plugin/pom.xml b/kite-maven-plugin/pom.xml
+index acd8b97..22181eb 100644
+--- a/kite-maven-plugin/pom.xml
++++ b/kite-maven-plugin/pom.xml
+@@ -22,7 +22,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Maven Plugin</name>
+@@ -74,17 +74,17 @@
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-core</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     </dependency>
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-hbase</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     </dependency>
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-data-hive</artifactId>
+-      <version>1.0.0</version>
++      <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     </dependency>
+     <dependency>
+       <groupId>com.google.guava</groupId>
+diff --git a/kite-minicluster/pom.xml b/kite-minicluster/pom.xml
+index cd432b7..9204a47 100644
+--- a/kite-minicluster/pom.xml
++++ b/kite-minicluster/pom.xml
+@@ -15,14 +15,11 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+   <properties>
+-    <!-- TODO move to parent POM when building for multiple profiles -->
+-    <vers.hive-cdh5>0.12.0-cdh${cdh5.version}</vers.hive-cdh5>
+-    <vers.flume-cdh5>1.4.0-cdh${cdh5.version}</vers.flume-cdh5>
+   </properties>
+ 
+   <build>
+@@ -139,6 +136,7 @@
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-hadoop-cdh5-test-dependencies</artifactId>
+       <version>${project.version}</version>
++      <scope>compile</scope>
+       <type>pom</type>
+     </dependency>
+ 
+@@ -146,43 +144,44 @@
+       <groupId>org.kitesdk</groupId>
+       <artifactId>kite-hbase-cdh5-test-dependencies</artifactId>
+       <version>${project.version}</version>
++      <scope>compile</scope>
+       <type>pom</type>
+     </dependency>
+ 
+     <dependency>
+       <groupId>org.apache.hive</groupId>
+       <artifactId>hive-metastore</artifactId>
+-      <version>${vers.hive-cdh5}</version>
++      <version>${vers.hive}</version>
+     </dependency>
+ 
+     <dependency>
+       <groupId>org.apache.hive</groupId>
+       <artifactId>hive-common</artifactId>
+-      <version>${vers.hive-cdh5}</version>
++      <version>${vers.hive}</version>
+     </dependency>
+ 
+     <dependency>
+       <groupId>org.apache.hive</groupId>
+       <artifactId>hive-serde</artifactId>
+-      <version>${vers.hive-cdh5}</version>
++      <version>${vers.hive}</version>
+     </dependency>
+ 
+     <dependency>
+       <groupId>org.apache.hive</groupId>
+       <artifactId>hive-exec</artifactId>
+-      <version>${vers.hive-cdh5}</version>
++      <version>${vers.hive}</version>
+     </dependency>
+ 
+     <dependency>
+       <groupId>org.apache.hive</groupId>
+       <artifactId>hive-service</artifactId>
+-      <version>${vers.hive-cdh5}</version>
++      <version>${vers.hive}</version>
+     </dependency>
+ 
+     <dependency>
+       <groupId>org.apache.flume</groupId>
+       <artifactId>flume-ng-node</artifactId>
+-      <version>${vers.flume-cdh5}</version>
++      <version>${vers.flume}</version>
+       <exclusions>
+         <exclusion>
+           <groupId>org.mortbay.jetty</groupId>
+@@ -191,13 +190,10 @@
+       </exclusions>
+     </dependency>
+ 
+-    <!-- TODO: use the following instead of bundling the DatasetSink classes
+-         directly when FLUME-2469 is released -->
+-    <!--
+     <dependency>
+       <groupId>org.apache.flume.flume-ng-sinks</groupId>
+       <artifactId>flume-dataset-sink</artifactId>
+-      <version>${vers.flume-cdh5}</version>
++      <version>${vers.flume}</version>
+       <exclusions>
+         <exclusion>
+           <groupId>org.kitesdk</groupId>
+@@ -213,7 +209,6 @@
+         </exclusion>
+       </exclusions>
+     </dependency>
+-    -->
+ 
+     <dependency>
+       <groupId>org.kitesdk</groupId>
+diff --git a/kite-minicluster/src/main/java/org/kitesdk/minicluster/HiveService.java b/kite-minicluster/src/main/java/org/kitesdk/minicluster/HiveService.java
+index f379bb7..005e6a7 100644
+--- a/kite-minicluster/src/main/java/org/kitesdk/minicluster/HiveService.java
++++ b/kite-minicluster/src/main/java/org/kitesdk/minicluster/HiveService.java
+@@ -317,7 +317,7 @@ public class HiveService implements Service {
+       TProcessor processor;
+       TTransportFactory transFactory;
+ 
+-      IHMSHandler handler = HiveMetaStore.newHMSHandler("new db based metaserver", conf);
++      IHMSHandler handler = (IHMSHandler) HiveMetaStore.newRetryingHMSHandler("new db based metaserver", conf, true);
+ 
+       if (conf.getBoolVar(HiveConf.ConfVars.METASTORE_EXECUTE_SET_UGI)) {
+         transFactory = useFramedTransport ?
+diff --git a/kite-morphlines/kite-morphlines-all-except-solr/pom.xml b/kite-morphlines/kite-morphlines-all-except-solr/pom.xml
+index 6f9c119..96801c5 100644
+--- a/kite-morphlines/kite-morphlines-all-except-solr/pom.xml
++++ b/kite-morphlines/kite-morphlines-all-except-solr/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/kite-morphlines/kite-morphlines-all/pom.xml b/kite-morphlines/kite-morphlines-all/pom.xml
+index 6f06cd3..78c4e2d 100644
+--- a/kite-morphlines/kite-morphlines-all/pom.xml
++++ b/kite-morphlines/kite-morphlines-all/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/kite-morphlines/kite-morphlines-avro/pom.xml b/kite-morphlines/kite-morphlines-avro/pom.xml
+index ff4fa4b..a7f52c9 100644
+--- a/kite-morphlines/kite-morphlines-avro/pom.xml
++++ b/kite-morphlines/kite-morphlines-avro/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-avro</artifactId>
+diff --git a/kite-morphlines/kite-morphlines-core/pom.xml b/kite-morphlines/kite-morphlines-core/pom.xml
+index 3ee80a6..8dbf96b 100644
+--- a/kite-morphlines/kite-morphlines-core/pom.xml
++++ b/kite-morphlines/kite-morphlines-core/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-core</artifactId>
+diff --git a/kite-morphlines/kite-morphlines-hadoop-core/pom.xml b/kite-morphlines/kite-morphlines-hadoop-core/pom.xml
+index 3f70077..896e5be 100644
+--- a/kite-morphlines/kite-morphlines-hadoop-core/pom.xml
++++ b/kite-morphlines/kite-morphlines-hadoop-core/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-hadoop-core</artifactId>
+diff --git a/kite-morphlines/kite-morphlines-hadoop-parquet-avro/pom.xml b/kite-morphlines/kite-morphlines-hadoop-parquet-avro/pom.xml
+index 82d31c0..4cac224 100644
+--- a/kite-morphlines/kite-morphlines-hadoop-parquet-avro/pom.xml
++++ b/kite-morphlines/kite-morphlines-hadoop-parquet-avro/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-hadoop-parquet-avro</artifactId>
+diff --git a/kite-morphlines/kite-morphlines-hadoop-rcfile/pom.xml b/kite-morphlines/kite-morphlines-hadoop-rcfile/pom.xml
+index 6492388..8c48d09 100644
+--- a/kite-morphlines/kite-morphlines-hadoop-rcfile/pom.xml
++++ b/kite-morphlines/kite-morphlines-hadoop-rcfile/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-hadoop-rcfile</artifactId>
+diff --git a/kite-morphlines/kite-morphlines-hadoop-sequencefile/pom.xml b/kite-morphlines/kite-morphlines-hadoop-sequencefile/pom.xml
+index 21a3369..3a9ac97 100644
+--- a/kite-morphlines/kite-morphlines-hadoop-sequencefile/pom.xml
++++ b/kite-morphlines/kite-morphlines-hadoop-sequencefile/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-hadoop-sequencefile</artifactId>
+diff --git a/kite-morphlines/kite-morphlines-json/pom.xml b/kite-morphlines/kite-morphlines-json/pom.xml
+index 1c8ed53..5d4f6d8 100644
+--- a/kite-morphlines/kite-morphlines-json/pom.xml
++++ b/kite-morphlines/kite-morphlines-json/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-json</artifactId>
+diff --git a/kite-morphlines/kite-morphlines-maxmind/pom.xml b/kite-morphlines/kite-morphlines-maxmind/pom.xml
+index e4c00e4..87dd994 100644
+--- a/kite-morphlines/kite-morphlines-maxmind/pom.xml
++++ b/kite-morphlines/kite-morphlines-maxmind/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-maxmind</artifactId>
+diff --git a/kite-morphlines/kite-morphlines-metrics-servlets/pom.xml b/kite-morphlines/kite-morphlines-metrics-servlets/pom.xml
+index ccfb150..bf54dd2 100644
+--- a/kite-morphlines/kite-morphlines-metrics-servlets/pom.xml
++++ b/kite-morphlines/kite-morphlines-metrics-servlets/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-metrics-servlets</artifactId>
+diff --git a/kite-morphlines/kite-morphlines-protobuf/pom.xml b/kite-morphlines/kite-morphlines-protobuf/pom.xml
+index c51a382..d87fb79 100644
+--- a/kite-morphlines/kite-morphlines-protobuf/pom.xml
++++ b/kite-morphlines/kite-morphlines-protobuf/pom.xml
+@@ -11,7 +11,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+   <artifactId>kite-morphlines-protobuf</artifactId>
+ 
+diff --git a/kite-morphlines/kite-morphlines-saxon/pom.xml b/kite-morphlines/kite-morphlines-saxon/pom.xml
+index a810ae4..cc64069 100644
+--- a/kite-morphlines/kite-morphlines-saxon/pom.xml
++++ b/kite-morphlines/kite-morphlines-saxon/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-saxon</artifactId>
+diff --git a/kite-morphlines/kite-morphlines-solr-cell/pom.xml b/kite-morphlines/kite-morphlines-solr-cell/pom.xml
+index 3931720..040e8e9 100644
+--- a/kite-morphlines/kite-morphlines-solr-cell/pom.xml
++++ b/kite-morphlines/kite-morphlines-solr-cell/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-solr-cell</artifactId>
+diff --git a/kite-morphlines/kite-morphlines-solr-core/pom.xml b/kite-morphlines/kite-morphlines-solr-core/pom.xml
+index b7b3aaf..424e150 100644
+--- a/kite-morphlines/kite-morphlines-solr-core/pom.xml
++++ b/kite-morphlines/kite-morphlines-solr-core/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/kite-morphlines/kite-morphlines-tika-core/pom.xml b/kite-morphlines/kite-morphlines-tika-core/pom.xml
+index ad77955..d96df1e 100644
+--- a/kite-morphlines/kite-morphlines-tika-core/pom.xml
++++ b/kite-morphlines/kite-morphlines-tika-core/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-tika-core</artifactId>
+diff --git a/kite-morphlines/kite-morphlines-tika-decompress/pom.xml b/kite-morphlines/kite-morphlines-tika-decompress/pom.xml
+index 1e5a6f2..bfafe53 100644
+--- a/kite-morphlines/kite-morphlines-tika-decompress/pom.xml
++++ b/kite-morphlines/kite-morphlines-tika-decompress/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-tika-decompress</artifactId>
+diff --git a/kite-morphlines/kite-morphlines-twitter/pom.xml b/kite-morphlines/kite-morphlines-twitter/pom.xml
+index 81a0d02..ec7c104 100644
+--- a/kite-morphlines/kite-morphlines-twitter/pom.xml
++++ b/kite-morphlines/kite-morphlines-twitter/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-twitter</artifactId>
+diff --git a/kite-morphlines/kite-morphlines-useragent/pom.xml b/kite-morphlines/kite-morphlines-useragent/pom.xml
+index caf36b0..6119b67 100644
+--- a/kite-morphlines/kite-morphlines-useragent/pom.xml
++++ b/kite-morphlines/kite-morphlines-useragent/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-useragent</artifactId>
+diff --git a/kite-morphlines/pom.xml b/kite-morphlines/pom.xml
+index ff433f8..951c963 100644
+--- a/kite-morphlines/pom.xml
++++ b/kite-morphlines/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     <relativePath>../pom.xml</relativePath>
+   </parent>
+ 
+diff --git a/kite-tools-parent/kite-tools-cdh5/pom.xml b/kite-tools-parent/kite-tools-cdh5/pom.xml
+index 3952824..21055b9 100644
+--- a/kite-tools-parent/kite-tools-cdh5/pom.xml
++++ b/kite-tools-parent/kite-tools-cdh5/pom.xml
+@@ -23,7 +23,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-tools-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+     <relativePath>../</relativePath>
+   </parent>
+ 
+@@ -136,14 +136,14 @@
+     <dependency>
+       <groupId>org.apache.hive</groupId>
+       <artifactId>hive-exec</artifactId>
+-      <version>${vers.hive-cdh5}</version>
++      <version>${vers.hive}</version>
+       <scope>provided</scope>
+     </dependency>
+ 
+     <dependency>
+       <groupId>org.apache.hive</groupId>
+       <artifactId>hive-serde</artifactId>
+-      <version>${vers.hive-cdh5}</version>
++      <version>${vers.hive}</version>
+       <scope>provided</scope>
+     </dependency>
+ 
+diff --git a/kite-tools-parent/kite-tools/pom.xml b/kite-tools-parent/kite-tools/pom.xml
+index 0b63c9c..df2cdab 100644
+--- a/kite-tools-parent/kite-tools/pom.xml
++++ b/kite-tools-parent/kite-tools/pom.xml
+@@ -22,7 +22,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-tools-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Tools Runtime Module</name>
+diff --git a/kite-tools-parent/pom.xml b/kite-tools-parent/pom.xml
+index b7977c4..924c04f 100644
+--- a/kite-tools-parent/pom.xml
++++ b/kite-tools-parent/pom.xml
+@@ -23,7 +23,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-parent</artifactId>
+-    <version>1.0.0</version>
++    <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   </parent>
+ 
+   <modules>
+diff --git a/pom.xml b/pom.xml
+index 7bf8472..e1972a6 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -16,10 +16,17 @@
+ -->
+ <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+ 
++  <parent>
++    <groupId>com.cloudera.cdh</groupId>
++    <artifactId>cdh-root</artifactId>
++    <version>5.4.0-SNAPSHOT</version>
++    <relativePath/>
++  </parent>
++
+   <modelVersion>4.0.0</modelVersion>
+   <groupId>org.kitesdk</groupId>
+   <artifactId>kite-parent</artifactId>
+-  <version>1.0.0</version>
++  <version>1.0.0-cdh5.4.0-SNAPSHOT</version>
+   <packaging>pom</packaging>
+ 
+   <modules>
+@@ -112,69 +119,59 @@
+ 
+     <!-- Java versions -->
+     <javaVersion>1.7</javaVersion>
+-    <targetJavaVersion>1.6</targetJavaVersion>
++    <targetJavaVersion>1.7</targetJavaVersion>
+     <Xdoclint /> <!-- set by the java8 profile to turn off doclint -->
+ 
+     <!-- used by jdiff, semver rule -->
+     <previous.project.version>0.18.0</previous.project.version>
+ 
+-    <cdh4.version>4.4.0</cdh4.version>
+-    <cdh5.version>5.0.0</cdh5.version>
+-    <cdh.version>${cdh4.version}</cdh.version>
++    <cdh5.version>${cdh.parent.version}</cdh5.version>
+ 
+     <!-- artifacts that depend on profiles -->
+-    <artifact.hadoop-deps>kite-hadoop-dependencies</artifact.hadoop-deps>
+-    <artifact.hadoop-test-deps>kite-hadoop-test-dependencies</artifact.hadoop-test-deps>
+-    <artifact.hbase-deps>kite-hbase-dependencies</artifact.hbase-deps>
+-    <artifact.hbase-test-deps>kite-hbase-test-dependencies</artifact.hbase-test-deps>
++    <artifact.hadoop-deps>kite-hadoop-cdh5-dependencies</artifact.hadoop-deps>
++    <artifact.hadoop-test-deps>kite-hadoop-cdh5-test-dependencies</artifact.hadoop-test-deps>
++    <artifact.hbase-deps>kite-hbase-cdh5-dependencies</artifact.hbase-deps>
++    <artifact.hbase-test-deps>kite-hbase-cdh5-test-dependencies</artifact.hbase-test-deps>
+ 
+     <!-- Library versions -->
+-    <vers.avro>1.7.5</vers.avro>
++    <vers.avro-base>1.7.6</vers.avro-base> <!-- The version CDH is based on -->
++    <vers.avro>${cdh.avro.version}</vers.avro>
+     <vers.commons-codec>1.4</vers.commons-codec>
+     <vers.commons-io>2.1</vers.commons-io>
+-    <vers.commons-logging>1.1.1</vers.commons-logging>
+-    <vers.commons-lang>2.5</vers.commons-lang>
+-    <vers.crunch-base>0.10.0</vers.crunch-base>
+-    <vers.crunch>${vers.crunch-base}-hadoop2</vers.crunch>
+-    <vers.crunch-cdh5>0.9.0-cdh${cdh5.version}</vers.crunch-cdh5>
++    <vers.commons-logging>1.1.3</vers.commons-logging>
++    <vers.commons-lang>2.6</vers.commons-lang>
++    <vers.crunch-base>0.11.0</vers.crunch-base> <!-- The version CDH is based on -->
++    <vers.crunch>${cdh.crunch.version}</vers.crunch>
+     <vers.findbugs.jsr305>2.0.1</vers.findbugs.jsr305> <!-- don't update to 3.0.0 since that is JDK 1.7 or later -->
+-    <vers.flume>1.4.0</vers.flume>
++    <vers.flume>${cdh.flume-ng.version}</vers.flume>
+     <vers.guava>11.0.2</vers.guava>
+-    <vers.hadoop1>1.2.1</vers.hadoop1>
+-    <vers.hadoop2>2.3.0</vers.hadoop2>
+-    <vers.hadoop-cdh4>2.0.0-cdh${cdh4.version}</vers.hadoop-cdh4>
+-    <vers.hadoop-mr1-cdh4>2.0.0-mr1-cdh${cdh4.version}</vers.hadoop-mr1-cdh4>
+-    <vers.hadoop-cdh5>2.3.0-cdh${cdh5.version}</vers.hadoop-cdh5>
+-    <vers.hbase1>0.94.6</vers.hbase1>
+-    <vers.hbase2>0.98.3-hadoop2</vers.hbase2>
+-    <vers.hbase-cdh4>0.94.6-cdh${cdh4.version}</vers.hbase-cdh4>
+-    <vers.hbase-cdh5>0.96.1.1-cdh${cdh5.version}</vers.hbase-cdh5>
+-    <vers.hive>0.13.0</vers.hive>
+-    <vers.hive-cdh5>0.12.0-cdh${cdh5.version}</vers.hive-cdh5>
++    <vers.hadoop-base>2.6.0</vers.hadoop-base> <!-- The version CDH is based on -->
++    <vers.hadoop>${cdh.hadoop.version}</vers.hadoop>
++    <vers.hbase>${cdh.hbase.version}</vers.hbase>
++    <vers.hive>${cdh.hive.version}</vers.hive>
+     <vers.jetty>8.1.14.v20131031</vers.jetty>
+     <vers.jexl>2.1.1</vers.jexl>
+     <vers.compress>1.4.1</vers.compress>
+     <vers.junit>4.10</vers.junit>
+-    <vers.log4j>1.2.16</vers.log4j>
++    <vers.log4j>1.2.17</vers.log4j>
+     <vers.maven>2.0.6</vers.maven>
+     <vers.mockito>1.9.5</vers.mockito>
+     <vers.mojo-executor>1.5</vers.mojo-executor>
+-    <vers.oozie>3.3.2-cdh${cdh.version}</vers.oozie> <!-- OOZIE-1790 -->
+-    <vers.parquet>1.4.1</vers.parquet>
++    <vers.oozie>${cdh.oozie.version}</vers.oozie> <!-- OOZIE-1790 -->
++    <vers.parquet>${cdh.parquet.version}</vers.parquet>
+     <vers.plexus-utils>3.0</vers.plexus-utils>
+     <vers.rat>0.9</vers.rat>
+-    <vers.slf4j>1.6.1</vers.slf4j>
++    <vers.slf4j>${cdh.slf4j.version}</vers.slf4j>
+     <vers.codahale.metrics>3.0.2</vers.codahale.metrics>
+     <vers.typesafe.config>1.0.2</vers.typesafe.config>
+-    <vers.solr>4.10.3</vers.solr>
+-    <solr.expected.version>4.10.3</solr.expected.version> <!-- sanity check to verify we actually run against the expected version rather than some outdated version -->
+-    <vers.solr-cdh5>4.10.3</vers.solr-cdh5>
+-    <vers.tika>1.5</vers.tika>
++    <vers.solr>${cdh.solr.version}</vers.solr>
++    <solr.expected.version>${cdh.solr.version}</solr.expected.version> <!-- sanity check to verify we actually run against the expected version rather than some outdated version -->
++    <vers.tika>${cdh.tika.version}</vers.tika>
+     <vers.jackson>2.3.1</vers.jackson>
+     <vers.opencsv>2.3</vers.opencsv>
+     <vers.jodatime>2.3</vers.jodatime>
+     <vers.jcommander>1.35</vers.jcommander>
+-    <vers.spark>1.0.0</vers.spark>
++    <vers.spark>${cdh.spark.version}</vers.spark>
+ 
+     <!-- Plugin versions -->
+     <vers.doxia-module-markdown>1.4</vers.doxia-module-markdown>
+@@ -208,16 +205,6 @@
+ 
+   <repositories>
+     <repository>
+-      <id>com.cloudera.releases</id>
+-      <url>https://repository.cloudera.com/artifactory/cloudera-repos/</url>
+-      <releases>
+-        <enabled>true</enabled>
+-      </releases>
+-      <snapshots>
+-        <enabled>true</enabled>
+-      </snapshots>
+-    </repository>
+-    <repository>
+       <id>maven-twttr</id>
+       <name>Twitter Public Maven Repo</name>
+       <url>http://maven.twttr.com</url>
+@@ -433,9 +420,9 @@
+           <configuration>
+             <excludePackageNames>org.kitesdk.cli:org.kitesdk.compat:org.kitesdk.data.event,org.kitesdk.data.hbase:org.kitesdk.maven.plugins,org.kitesdk.minicluster.cli,org.kitesdk.morphline.shaded.*,*.spi,*.spi.*,*.impl,org.apache.*</excludePackageNames>
+             <links>
+-              <link>http://avro.apache.org/docs/${vers.avro}/api/java/</link>
++              <link>http://avro.apache.org/docs/${vers.avro-base}/api/java/</link>
+               <link>http://crunch.apache.org/apidocs/${vers.crunch-base}/</link>
+-              <link>http://hadoop.apache.org/docs/r${vers.hadoop2}/api/</link>
++              <link>http://hadoop.apache.org/docs/r${vers.hadoop-base}/api/</link>
+             </links>
+             <additionalparam>${Xdoclint}</additionalparam>
+             <maxmemory>1g</maxmemory>
+@@ -726,9 +713,9 @@
+             </group>
+           </groups>
+           <links>
+-            <link>http://avro.apache.org/docs/${vers.avro}/api/java/</link>
++            <link>http://avro.apache.org/docs/${vers.avro-base}/api/java/</link>
+             <link>http://crunch.apache.org/apidocs/${vers.crunch-base}/</link>
+-            <link>http://hadoop.apache.org/docs/r${vers.hadoop2}/api/</link>
++            <link>http://hadoop.apache.org/docs/r${vers.hadoop-base}/api/</link>
+           </links>
+         </configuration>
+         <reportSets>
+@@ -1102,22 +1089,6 @@
+     </dependencies>
+   </dependencyManagement>
+ 
+-  <distributionManagement>
+-    <snapshotRepository>
+-      <id>ossrh</id>
+-      <url>https://oss.sonatype.org/content/repositories/snapshots</url>
+-    </snapshotRepository>
+-    <repository>
+-      <id>ossrh</id>
+-      <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+-    </repository>
+-    <site>
+-      <id>kitesdk.website</id>
+-      <name>Kite SDK documentation</name>
+-      <url>docs/${project.version}</url>
+-    </site>
+-  </distributionManagement>
+-
+   <profiles>
+ 
+     <profile>
+@@ -1196,50 +1167,6 @@
+     </profile>
+ 
+     <profile>
+-      <id>hadoop-1</id>
+-      <activation>
+-        <property>
+-          <name>hadoop.profile</name>
+-          <value>1</value>
+-        </property>
+-      </activation>
+-      <properties>
+-        <!-- test hadoop-1 with the same jars that were produced for default profile -->
+-        <maven.main.skip>true</maven.main.skip>
+-        <artifact.hadoop-deps>kite-hadoop1-dependencies</artifact.hadoop-deps>
+-        <artifact.hadoop-test-deps>kite-hadoop1-test-dependencies</artifact.hadoop-test-deps>
+-        <artifact.hbase-deps>kite-hbase1-dependencies</artifact.hbase-deps>
+-        <artifact.hbase-test-deps>kite-hbase1-test-dependencies</artifact.hbase-test-deps>
+-        <vers.crunch>${vers.crunch-base}</vers.crunch>
+-        <vers.flume>1.4.0</vers.flume>
+-        <vers.hive>0.10.0</vers.hive>
+-        <vers.commons-lang>2.4</vers.commons-lang>
+-      </properties>
+-    </profile>
+-
+-    <profile>
+-      <id>cdh4</id>
+-      <activation>
+-        <property>
+-          <name>hadoop.profile</name>
+-          <value>cdh4</value>
+-        </property>
+-      </activation>
+-      <properties>
+-        <!-- test cdh4 with the same jars that were produced for default profile -->
+-        <maven.main.skip>true</maven.main.skip>
+-        <artifact.hadoop-deps>kite-hadoop-cdh4-dependencies</artifact.hadoop-deps>
+-        <artifact.hadoop-test-deps>kite-hadoop-cdh4-test-dependencies</artifact.hadoop-test-deps>
+-        <artifact.hbase-deps>kite-hbase-cdh4-dependencies</artifact.hbase-deps>
+-        <artifact.hbase-test-deps>kite-hbase-cdh4-test-dependencies</artifact.hbase-test-deps>
+-        <cdh.version>${cdh4.version}</cdh.version>
+-        <vers.flume>1.4.0-cdh${cdh4.version}</vers.flume>
+-        <vers.hive>0.10.0-cdh${cdh4.version}</vers.hive>
+-        <vers.oozie>3.3.2-cdh${cdh4.version}</vers.oozie>
+-      </properties>
+-    </profile>
+-
+-    <profile>
+       <id>cdh5</id>
+       <activation>
+         <property>
+@@ -1250,17 +1177,6 @@
+       <properties>
+         <!-- test cdh5 with the same jars that were produced for default profile -->
+         <maven.main.skip>true</maven.main.skip>
+-        <artifact.hadoop-deps>kite-hadoop-cdh5-dependencies</artifact.hadoop-deps>
+-        <artifact.hadoop-test-deps>kite-hadoop-cdh5-test-dependencies</artifact.hadoop-test-deps>
+-        <artifact.hbase-deps>kite-hbase-cdh5-dependencies</artifact.hbase-deps>
+-        <artifact.hbase-test-deps>kite-hbase-cdh5-test-dependencies</artifact.hbase-test-deps>
+-        <cdh.version>${cdh5.version}</cdh.version>
+-        <vers.crunch>${vers.crunch-cdh5}</vers.crunch>
+-        <vers.flume>1.4.0-cdh${cdh5.version}</vers.flume>
+-        <vers.hive>${vers.hive-cdh5}</vers.hive>
+-        <vers.oozie>4.0.0-cdh${cdh5.version}</vers.oozie>
+-        <vers.solr>${vers.solr-cdh5}</vers.solr>
+-        <solr.expected.version>${vers.solr-cdh5}</solr.expected.version> <!-- sanity check to verify we actually run against the expected version rather than some outdated version -->
+       </properties>
+     </profile>
+ 
+-- 
+1.7.0.4
+

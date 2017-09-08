@@ -1,0 +1,28 @@
+From 18572bdae903bd3cccb1fb48a013ba9fe63f272d Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Thu, 28 May 2015 10:34:52 -0700
+Subject: [PATCH 070/115] CDK-1005: Remove hadoop-1 test profile.
+
+Conflicts:
+	pom.xml
+Resolution:
+    Already removed, but avoids conflicts in Travis config.
+---
+ .travis.yml |    1 -
+ 1 files changed, 0 insertions(+), 1 deletions(-)
+
+diff --git a/.travis.yml b/.travis.yml
+index 141707e..646ff3c 100644
+--- a/.travis.yml
++++ b/.travis.yml
+@@ -4,7 +4,6 @@ jdk:
+ 
+ env:
+   - HADOOP_PROFILE=default
+-  - HADOOP_PROFILE=hadoop-1
+   - HADOOP_PROFILE=cdh4
+   - HADOOP_PROFILE=cdh5
+ cache:
+-- 
+1.7.0.4
+

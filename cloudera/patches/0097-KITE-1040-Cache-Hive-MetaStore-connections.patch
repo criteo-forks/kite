@@ -1,0 +1,318 @@
+From 7bbf0837ee6024ea6fbd950041f8b093d2dcb215 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 26 Aug 2015 12:16:01 -0700
+Subject: [PATCH 097/115] KITE-1040: Cache Hive MetaStore connections.
+
+This adds a MetaStoreUtil.get method that keeps track of util objects
+(and the internal MetaStore connection) by connection URIs. These are
+safe to share because they are thread-safe.
+---
+ .../data/crunch/TestCrunchDatasetsHive.java        |    2 +-
+ .../spi/hive/HiveAbstractMetadataProvider.java     |    2 +-
+ .../org/kitesdk/data/spi/hive/MetaStoreUtil.java   |   56 +++++++++++++++++--
+ .../hive/TestExternalBackwardCompatibility.java    |    4 +-
+ .../kitesdk/data/spi/hive/TestHiveDatasetURIs.java |    2 +-
+ .../spi/hive/TestHiveDatasetURIsCompatibility.java |    2 +-
+ ...estHiveDatasetURIsWithDefaultConfiguration.java |    2 +-
+ .../hive/TestHiveExternalDatasetRepository.java    |    2 +-
+ .../spi/hive/TestHiveExternalMetadataProvider.java |    2 +-
+ .../spi/hive/TestHiveManagedDatasetRepository.java |    2 +-
+ .../spi/hive/TestHiveManagedMetadataProvider.java  |    2 +-
+ .../data/spi/hive/TestHivePartitioning.java        |    2 +-
+ .../data/spi/hive/TestHiveRepositoryURIs.java      |    2 +-
+ .../data/spi/hive/TestManagedExternalHandling.java |    4 +-
+ 14 files changed, 65 insertions(+), 21 deletions(-)
+
+diff --git a/kite-data/kite-data-crunch/src/test/java/org/kitesdk/data/crunch/TestCrunchDatasetsHive.java b/kite-data/kite-data-crunch/src/test/java/org/kitesdk/data/crunch/TestCrunchDatasetsHive.java
+index f169b18..909a191 100644
+--- a/kite-data/kite-data-crunch/src/test/java/org/kitesdk/data/crunch/TestCrunchDatasetsHive.java
++++ b/kite-data/kite-data-crunch/src/test/java/org/kitesdk/data/crunch/TestCrunchDatasetsHive.java
+@@ -41,7 +41,7 @@ public class TestCrunchDatasetsHive extends TestCrunchDatasets {
+   @After
+   public void cleanHCatalog() {
+     // ensures all tables are removed
+-    MetaStoreUtil hcat = new MetaStoreUtil(fileSystem.getConf());
++    MetaStoreUtil hcat = MetaStoreUtil.get(fileSystem.getConf());
+ 
+     for (String database: hcat.getAllDatabases()) {
+       for (String tableName : hcat.getAllTables(database)) {
+diff --git a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveAbstractMetadataProvider.java b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveAbstractMetadataProvider.java
+index 21c3995..189cfcd 100644
+--- a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveAbstractMetadataProvider.java
++++ b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveAbstractMetadataProvider.java
+@@ -60,7 +60,7 @@ abstract class HiveAbstractMetadataProvider extends AbstractMetadataProvider imp
+ 
+   protected MetaStoreUtil getMetaStoreUtil() {
+     if (metastore == null) {
+-      metastore = new MetaStoreUtil(conf);
++      metastore = MetaStoreUtil.get(conf);
+     }
+     return metastore;
+   }
+diff --git a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/MetaStoreUtil.java b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/MetaStoreUtil.java
+index 56600ab..6fca1ee 100644
+--- a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/MetaStoreUtil.java
++++ b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/MetaStoreUtil.java
+@@ -15,16 +15,14 @@
+  */
+ package org.kitesdk.data.spi.hive;
+ 
+-import com.google.common.base.Joiner;
+ import com.google.common.collect.ImmutableList;
+ import com.google.common.collect.Lists;
+-import java.util.List;
++import com.google.common.collect.Maps;
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.hive.conf.HiveConf;
+ import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
+ import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
+ import org.apache.hadoop.hive.metastore.api.Database;
+-import org.apache.hadoop.hive.metastore.api.FieldSchema;
+ import org.apache.hadoop.hive.metastore.api.InvalidObjectException;
+ import org.apache.hadoop.hive.metastore.api.InvalidOperationException;
+ import org.apache.hadoop.hive.metastore.api.MetaException;
+@@ -38,6 +36,8 @@ import org.kitesdk.data.DatasetNotFoundException;
+ import org.kitesdk.data.DatasetOperationException;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
++import java.util.List;
++import java.util.Map;
+ 
+ public class MetaStoreUtil {
+ 
+@@ -72,6 +72,41 @@ public class MetaStoreUtil {
+     }
+   }
+ 
++  public static final Map<String, MetaStoreUtil> INSTANCES = Maps.newHashMap();
++
++  public static MetaStoreUtil get(Configuration conf) {
++    HiveConf hiveConf = new HiveConf(conf, HiveConf.class);
++    // Add the passed configuration back into the HiveConf to work around
++    // a Hive bug that resets to defaults
++    HiveUtils.addResource(hiveConf, conf);
++
++    if (isEmpty(hiveConf, Loader.HIVE_METASTORE_URI_PROP)) {
++      if (allowLocalMetaStore(hiveConf)) {
++        return new MetaStoreUtil(hiveConf);
++      } else {
++        LOG.warn("Aborting use of local MetaStore. " +
++                "Allow local MetaStore by setting {}=true in HiveConf",
++            ALLOW_LOCAL_METASTORE);
++        throw new IllegalArgumentException(
++            "Missing Hive MetaStore connection URI");
++      }
++    }
++
++    // get the URI and cache instances to a non-local metastore
++    String uris = hiveConf.get(Loader.HIVE_METASTORE_URI_PROP);
++    MetaStoreUtil util;
++    synchronized (INSTANCES) {
++      util = INSTANCES.get(uris);
++      if (util == null) {
++        util = new MetaStoreUtil(hiveConf);
++        INSTANCES.put(uris, util);
++      }
++    }
++
++    return util;
++  }
++
++  @Deprecated
+   public MetaStoreUtil(Configuration conf) {
+     this.hiveConf = new HiveConf(conf, HiveConf.class);
+     // Add the passed configuration back into the HiveConf to work around
+@@ -86,17 +121,26 @@ public class MetaStoreUtil {
+           "Missing Hive MetaStore connection URI");
+     }
+     try {
+-      client = new HiveMetaStoreClient(hiveConf);
++      this.client = new HiveMetaStoreClient(hiveConf);
++    } catch (TException e) {
++      throw new DatasetOperationException("Hive metastore exception", e);
++    }
++  }
++
++  private MetaStoreUtil(HiveConf conf) {
++    this.hiveConf = conf;
++    try {
++      this.client = new HiveMetaStoreClient(hiveConf);
+     } catch (TException e) {
+       throw new DatasetOperationException("Hive metastore exception", e);
+     }
+   }
+ 
+-  private boolean allowLocalMetaStore(HiveConf conf) {
++  private static boolean allowLocalMetaStore(HiveConf conf) {
+     return conf.getBoolean(ALLOW_LOCAL_METASTORE, false);
+   }
+ 
+-  private boolean isEmpty(HiveConf conf, String prop) {
++  private static boolean isEmpty(HiveConf conf, String prop) {
+     String value = conf.get(prop);
+     return (value == null || value.isEmpty());
+   }
+diff --git a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestExternalBackwardCompatibility.java b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestExternalBackwardCompatibility.java
+index 8c90b48..6b93a50 100644
+--- a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestExternalBackwardCompatibility.java
++++ b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestExternalBackwardCompatibility.java
+@@ -62,7 +62,7 @@ public class TestExternalBackwardCompatibility {
+   public void addTableToDefault() {
+     // this test uses the local FS because
+     this.conf = new Configuration();
+-    this.metastore = new MetaStoreUtil(conf);
++    this.metastore = MetaStoreUtil.get(conf);
+     cleanHive();
+     metastore.dropTable("default", "test");
+     this.descriptor = new DatasetDescriptor.Builder()
+@@ -77,7 +77,7 @@ public class TestExternalBackwardCompatibility {
+   @After
+   public void cleanHive() {
+     // ensures all tables are removed
+-    MetaStoreUtil metastore = new MetaStoreUtil(conf);
++    MetaStoreUtil metastore = MetaStoreUtil.get(conf);
+     for (String database : metastore.getAllDatabases()) {
+       for (String table : metastore.getAllTables(database)) {
+         metastore.dropTable(database, table);
+diff --git a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveDatasetURIs.java b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveDatasetURIs.java
+index 7a75319..24d30df 100644
+--- a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveDatasetURIs.java
++++ b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveDatasetURIs.java
+@@ -56,7 +56,7 @@ public class TestHiveDatasetURIs extends MiniDFSTest {
+   @After
+   public void cleanHive() {
+     // ensures all tables are removed
+-    MetaStoreUtil metastore = new MetaStoreUtil(getConfiguration());
++    MetaStoreUtil metastore = MetaStoreUtil.get(getConfiguration());
+     for (String database : metastore.getAllDatabases()) {
+       for (String table : metastore.getAllTables(database)) {
+         metastore.dropTable(database, table);
+diff --git a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveDatasetURIsCompatibility.java b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveDatasetURIsCompatibility.java
+index bb9061f..136ad50 100644
+--- a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveDatasetURIsCompatibility.java
++++ b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveDatasetURIsCompatibility.java
+@@ -36,7 +36,7 @@ public class TestHiveDatasetURIsCompatibility {
+       .schemaLiteral("\"string\"")
+       .build();
+ 
+-  private static final MetaStoreUtil metastore = new MetaStoreUtil(new Configuration());
++  private static final MetaStoreUtil metastore = MetaStoreUtil.get(new Configuration());
+ 
+   @Before
+   @After
+diff --git a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveDatasetURIsWithDefaultConfiguration.java b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveDatasetURIsWithDefaultConfiguration.java
+index c5d3f79..f902d36 100644
+--- a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveDatasetURIsWithDefaultConfiguration.java
++++ b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveDatasetURIsWithDefaultConfiguration.java
+@@ -63,7 +63,7 @@ public class TestHiveDatasetURIsWithDefaultConfiguration extends MiniDFSTest {
+   @After
+   public void cleanHive() {
+     // ensures all tables are removed
+-    MetaStoreUtil metastore = new MetaStoreUtil(getConfiguration());
++    MetaStoreUtil metastore = MetaStoreUtil.get(getConfiguration());
+     for (String database : metastore.getAllDatabases()) {
+       for (String table : metastore.getAllTables(database)) {
+         metastore.dropTable(database, table);
+diff --git a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveExternalDatasetRepository.java b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveExternalDatasetRepository.java
+index 8aeac2a..f9c264e 100644
+--- a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveExternalDatasetRepository.java
++++ b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveExternalDatasetRepository.java
+@@ -68,7 +68,7 @@ public class TestHiveExternalDatasetRepository extends TestFileSystemDatasetRepo
+   @After
+   public void cleanHive() {
+     // ensures all tables are removed
+-    MetaStoreUtil metastore = new MetaStoreUtil(getConfiguration());
++    MetaStoreUtil metastore = MetaStoreUtil.get(getConfiguration());
+     for (String database : metastore.getAllDatabases()) {
+       for (String table : metastore.getAllTables(database)) {
+         metastore.dropTable(database, table);
+diff --git a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveExternalMetadataProvider.java b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveExternalMetadataProvider.java
+index 7df90c2..2dea1fc 100644
+--- a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveExternalMetadataProvider.java
++++ b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveExternalMetadataProvider.java
+@@ -48,7 +48,7 @@ public class TestHiveExternalMetadataProvider extends TestMetadataProviders {
+   @After
+   public void cleanHive() {
+     // ensures all tables are removed
+-    MetaStoreUtil metastore = new MetaStoreUtil(getConfiguration());
++    MetaStoreUtil metastore = MetaStoreUtil.get(getConfiguration());
+     for (String database : metastore.getAllDatabases()) {
+       for (String table : metastore.getAllTables(database)) {
+         metastore.dropTable(database, table);
+diff --git a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveManagedDatasetRepository.java b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveManagedDatasetRepository.java
+index 2ad5139..a4fd5f3 100644
+--- a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveManagedDatasetRepository.java
++++ b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveManagedDatasetRepository.java
+@@ -57,7 +57,7 @@ public class TestHiveManagedDatasetRepository extends TestFileSystemDatasetRepos
+   @After
+   public void cleanHive() {
+     // ensures all tables are removed
+-    MetaStoreUtil metastore = new MetaStoreUtil(getConfiguration());
++    MetaStoreUtil metastore = MetaStoreUtil.get(getConfiguration());
+     for (String database : metastore.getAllDatabases()) {
+       for (String table : metastore.getAllTables(database)) {
+         metastore.dropTable(database, table);
+diff --git a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveManagedMetadataProvider.java b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveManagedMetadataProvider.java
+index fa4c826..9a5bb99 100644
+--- a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveManagedMetadataProvider.java
++++ b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveManagedMetadataProvider.java
+@@ -38,7 +38,7 @@ public class TestHiveManagedMetadataProvider extends TestMetadataProviders {
+   @After
+   public void cleanHive() {
+     // ensures all tables are removed
+-    MetaStoreUtil metastore = new MetaStoreUtil(getConfiguration());
++    MetaStoreUtil metastore = MetaStoreUtil.get(getConfiguration());
+     for (String database : metastore.getAllDatabases()) {
+       for (String table : metastore.getAllTables(database)) {
+         metastore.dropTable(database, table);
+diff --git a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHivePartitioning.java b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHivePartitioning.java
+index 93bcb57..dff7073 100644
+--- a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHivePartitioning.java
++++ b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHivePartitioning.java
+@@ -37,7 +37,7 @@ public class TestHivePartitioning {
+   @After
+   public void cleanHive() {
+     // ensures all tables are removed
+-    MetaStoreUtil metastore = new MetaStoreUtil(new Configuration());
++    MetaStoreUtil metastore = MetaStoreUtil.get(new Configuration());
+     for (String database : metastore.getAllDatabases()) {
+       for (String table : metastore.getAllTables(database)) {
+         metastore.dropTable(database, table);
+diff --git a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveRepositoryURIs.java b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveRepositoryURIs.java
+index 2be445c..9d4732f 100644
+--- a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveRepositoryURIs.java
++++ b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestHiveRepositoryURIs.java
+@@ -49,7 +49,7 @@ public class TestHiveRepositoryURIs extends TestFileSystemRepositoryURIs {
+   @After
+   public void cleanHive() {
+     // ensures all tables are removed
+-    MetaStoreUtil metastore = new MetaStoreUtil(getConfiguration());
++    MetaStoreUtil metastore = MetaStoreUtil.get(getConfiguration());
+     for (String database : metastore.getAllDatabases()) {
+       for (String table : metastore.getAllTables(database)) {
+         metastore.dropTable(database, table);
+diff --git a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestManagedExternalHandling.java b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestManagedExternalHandling.java
+index 2992eeb..d03dfd5 100644
+--- a/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestManagedExternalHandling.java
++++ b/kite-data/kite-data-hive/src/test/java/org/kitesdk/data/spi/hive/TestManagedExternalHandling.java
+@@ -62,7 +62,7 @@ public class TestManagedExternalHandling {
+   @After
+   public void cleanHive() {
+     // ensures all tables are removed
+-    MetaStoreUtil metastore = new MetaStoreUtil(new Configuration());
++    MetaStoreUtil metastore = MetaStoreUtil.get(new Configuration());
+     for (String database : metastore.getAllDatabases()) {
+       for (String table : metastore.getAllTables(database)) {
+         metastore.dropTable(database, table);
+@@ -146,7 +146,7 @@ public class TestManagedExternalHandling {
+   @Test
+   public void testRepositoryList() throws Exception {
+     // create unreadable hive tables
+-    MetaStoreUtil metastore = new MetaStoreUtil(new Configuration());
++    MetaStoreUtil metastore = MetaStoreUtil.get(new Configuration());
+     metastore.dropTable("default", "bad_type");
+     metastore.dropTable("bad", "bad_serde");
+     metastore.dropTable("bad", "bad_schema");
+-- 
+1.7.0.4
+

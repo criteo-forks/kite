@@ -1,0 +1,87 @@
+From 01e15b5233ef49cd5780a0aa3ce99f32c7fd2e89 Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Sun, 10 May 2015 12:26:36 +0300
+Subject: [PATCH 019/115] CDK-998: Nomore require "java" morphline command code blocks to explicitly catch exceptions
+
+---
+ .../scriptengine/java/ScriptEvaluator.java         |   21 +++++++++++++++++++-
+ .../org/kitesdk/morphline/stdlib/JavaBuilder.java  |    1 +
+ .../kitesdk/morphline/api/ScriptEvaluatorTest.java |    4 ++-
+ 3 files changed, 24 insertions(+), 2 deletions(-)
+
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/scriptengine/java/ScriptEvaluator.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/scriptengine/java/ScriptEvaluator.java
+index 2254402..fd23f77 100644
+--- a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/scriptengine/java/ScriptEvaluator.java
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/scriptengine/java/ScriptEvaluator.java
+@@ -59,6 +59,12 @@ public class ScriptEvaluator<T> {
+   public ScriptEvaluator(String javaImports, String javaCodeBlock, Class<T> returnType,
+       String[] parameterNames, Class[] parameterTypes,
+       String parseLocation) throws ScriptException {
++    this(javaImports, javaCodeBlock, returnType, parameterNames, parameterTypes, new Class[0], parseLocation);
++  }
++  
++  public ScriptEvaluator(String javaImports, String javaCodeBlock, Class<T> returnType, 
++      String[] parameterNames, Class[] parameterTypes, Class[] throwTypes,
++      String parseLocation) throws ScriptException {
+     
+     if (parameterNames.length != parameterTypes.length) { 
+       throw new IllegalArgumentException(
+@@ -88,7 +94,20 @@ public class ScriptEvaluator<T> {
+       }
+       script += parameterTypes[i].getCanonicalName() + " " + parameterNames[i];
+     }
+-    script += ") { " + javaCodeBlock + " }";     
++    script += ") ";
++    
++    if (throwTypes.length > 0) {
++      script += "throws ";
++      for (int i = 0; i < throwTypes.length; i++) {
++        if (i > 0) {
++          script += ", ";
++        }
++        script += throwTypes[i].getCanonicalName();
++      }
++      script += " ";
++    }
++    
++    script += "{ " + javaCodeBlock + " }";     
+     script += "\n }";
+     LOG.trace("Compiling script: \n{}", script);    
+     
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/JavaBuilder.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/JavaBuilder.java
+index 6fe9e02..b6db63d 100644
+--- a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/JavaBuilder.java
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/JavaBuilder.java
+@@ -86,6 +86,7 @@ public final class JavaBuilder implements CommandBuilder {
+           Boolean.class,
+           new String[] {"record", "config", "parent", "child", "context", "logger"}, 
+           new Class[] {Record.class, Config.class, Command.class, Command.class, MorphlineContext.class, Logger.class}, 
++          new Class[] {Exception.class},
+           javaCodeBlock
+           );
+     }
+diff --git a/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/ScriptEvaluatorTest.java b/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/ScriptEvaluatorTest.java
+index 764af20..a83d4d1 100644
+--- a/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/ScriptEvaluatorTest.java
++++ b/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/ScriptEvaluatorTest.java
+@@ -15,6 +15,8 @@
+  */
+ package org.kitesdk.morphline.api;
+ 
++import java.io.IOException;
++
+ import org.junit.Assert;
+ import org.junit.Before;
+ import org.junit.Test;
+@@ -38,7 +40,7 @@ public class ScriptEvaluatorTest extends Assert {
+   
+ 	@Test
+ 	public void testBasic() throws Exception {
+-		ScriptEvaluator script = new ScriptEvaluator(javaImports, "return x * 2; ", Integer.class, new String[] { "x" }, new Class[] { Integer.class }, "myQuery");
++		ScriptEvaluator script = new ScriptEvaluator(javaImports, "return x * 2; ", Integer.class, new String[] { "x" }, new Class[] { Integer.class }, new Class[] {RuntimeException.class, IOException.class}, "myQuery");
+ 		Object result = script.evaluate(new Object[] { new Integer(1) });
+ 		assertEquals(result, new Integer(2));
+ 	}
+-- 
+1.7.0.4
+

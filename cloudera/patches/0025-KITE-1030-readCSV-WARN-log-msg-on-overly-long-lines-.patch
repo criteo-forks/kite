@@ -1,0 +1,25 @@
+From 32d5716950be9ef52c3689cbcae55dceed5ecb88 Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Thu, 2 Jul 2015 13:52:31 -0700
+Subject: [PATCH 025/115] KITE-1030: readCSV WARN log msg on overly long lines where quoteChar is non-empty should print the whole record seen so far (addded small optimization)
+
+---
+ .../jcsv/fastreader/QuotedCSVTokenizer.java        |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/shaded/com/googlecode/jcsv/fastreader/QuotedCSVTokenizer.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/shaded/com/googlecode/jcsv/fastreader/QuotedCSVTokenizer.java
+index 40d58e8..f17e07e 100644
+--- a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/shaded/com/googlecode/jcsv/fastreader/QuotedCSVTokenizer.java
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/shaded/com/googlecode/jcsv/fastreader/QuotedCSVTokenizer.java
+@@ -148,7 +148,7 @@ public final class QuotedCSVTokenizer implements CSVTokenizer {
+       return true;
+     }
+     if (prefix != null && prefix.length() > 0) {
+-      line = prefix.toString() + line;
++      line = prefix + line;
+     }
+     if (line.length() > 10000) {
+       line = line.substring(0, 10000) + " ..."; // prevent gigantic messages
+-- 
+1.7.0.4
+

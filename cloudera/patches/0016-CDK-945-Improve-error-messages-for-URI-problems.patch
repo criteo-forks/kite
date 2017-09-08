@@ -1,0 +1,186 @@
+From f9f812510628fcc8c657c8a23dacd3ce5cd9148f Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 11 Mar 2015 17:32:13 -0700
+Subject: [PATCH 016/115] CDK-945: Improve error messages for URI problems.
+
+* Add a suggestion to make sure default HDFS URI is configured
+* Add known patterns for the matching URI scheme
+---
+ .../java/org/kitesdk/data/spi/Registration.java    |   29 +++++++++++++++----
+ .../main/java/org/kitesdk/data/spi/URIPattern.java |    8 +++++
+ .../org/kitesdk/data/spi/filesystem/Loader.java    |   10 +++++-
+ .../data/spi/filesystem/TestHDFSDatasetURIs.java   |   12 ++++++++
+ .../java/org/kitesdk/data/spi/hive/Loader.java     |   11 +++++--
+ 5 files changed, 59 insertions(+), 11 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Registration.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Registration.java
+index abc6ded..25862af 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Registration.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Registration.java
+@@ -17,8 +17,10 @@
+ package org.kitesdk.data.spi;
+ 
+ import com.google.common.base.Joiner;
++import com.google.common.collect.Lists;
+ import com.google.common.collect.Maps;
+ import java.net.URI;
++import java.util.List;
+ import java.util.Map;
+ import java.util.ServiceLoader;
+ import org.kitesdk.data.DatasetNotFoundException;
+@@ -69,7 +71,7 @@ public class Registration {
+         return Pair.of(datasetPattern, match);
+       }
+     }
+-    throw new IllegalArgumentException("Unknown repository URI: " + uri);
++    throw new IllegalArgumentException("Unknown repository URI pattern: dataset:" + uri);
+   }
+ 
+   public static Pair<URIPattern, Map<String, String>> lookupDatasetPattern(URI uri) {
+@@ -79,7 +81,7 @@ public class Registration {
+         return Pair.of(pattern, match);
+       }
+     }
+-    throw new IllegalArgumentException("Unknown dataset URI: " + uri);
++    throw new IllegalArgumentException("Unknown dataset URI pattern: dataset:" + uri);
+   }
+ 
+   public static Pair<DatasetRepository, Map<String, String>>
+@@ -90,7 +92,7 @@ public class Registration {
+         return Pair.of(REPO_PATTERNS.get(pattern).getFromOptions(match), match);
+       }
+     }
+-    throw new IllegalArgumentException("Unknown repository URI: " + repoUri);
++    throw new IllegalArgumentException("Unknown repository URI pattern: repo:" + repoUri);
+   }
+ 
+   @SuppressWarnings("unchecked")
+@@ -100,15 +102,30 @@ public class Registration {
+ 
+   public static Pair<DatasetRepository, Map<String, String>>
+       lookupDatasetUri(URI datasetUri) {
++    String scheme = datasetUri.getScheme();
++    List<String> schemeMatches = Lists.newArrayList();
++
+     for (URIPattern pattern : DATASET_PATTERNS.keySet()) {
+       Map<String, String> match = pattern.getMatch(datasetUri);
+       if (match != null) {
+         return Pair.of(DATASET_PATTERNS.get(pattern).getFromOptions(match), match);
++      } else if (pattern.getScheme() != null && pattern.getScheme().equals(scheme)) {
++        schemeMatches.add(pattern.getPatternString());
+       }
+     }
+-    throw new DatasetNotFoundException(String.format("Unknown dataset URI: %s. Check " +
+-        "that JARs for %s datasets are on the classpath.", datasetUri,
+-        datasetUri.getScheme()));
++
++    String message = "Unknown dataset URI pattern: dataset:" + datasetUri;
++    if (schemeMatches.isEmpty()) {
++      // no known patterns for the scheme, maybe jars are missing
++      message += "\nCheck that JARs for " + scheme +
++          " datasets are on the classpath";
++    } else {
++      // show the known patterns in case it's a simple error
++      message += "\nKnown patterns for " + scheme + ":\n  dataset:" +
++          Joiner.on("\n  dataset:").join(schemeMatches);
++    }
++
++    throw new DatasetNotFoundException(message);
+   }
+ 
+   static {
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/URIPattern.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/URIPattern.java
+index 076b15d..e3a2422 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/URIPattern.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/URIPattern.java
+@@ -86,6 +86,14 @@ public class URIPattern {
+     this(URI.create(uri));
+   }
+ 
++  public String getScheme() {
++    return pattern.getScheme();
++  }
++
++  public String getPatternString() {
++    return pattern.toString();
++  }
++
+   @Override
+   public boolean equals(Object o) {
+     if (this == o) return true;
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/Loader.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/Loader.java
+index 533b689..0898e72 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/Loader.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/Loader.java
+@@ -64,8 +64,14 @@ public class Loader implements Loadable {
+       FileSystem fs;
+       try {
+         fs = FileSystem.get(fileSystemURI(match), conf);
+-      } catch (IOException ex) {
+-        throw new DatasetIOException("Could not get a FileSystem", ex);
++      } catch (IOException e) {
++        // "Incomplete HDFS URI, no host" => add a helpful suggestion
++        if (e.getMessage().startsWith("Incomplete")) {
++          throw new DatasetIOException("Could not get a FileSystem: " +
++              "make sure the default " + match.get(URIPattern.SCHEME) +
++              " URI is configured.", e);
++        }
++        throw new DatasetIOException("Could not get a FileSystem", e);
+       }
+       return new FileSystemDatasetRepository.Builder()
+           .configuration(new Configuration(conf)) // make a modifiable copy
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestHDFSDatasetURIs.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestHDFSDatasetURIs.java
+index 7fe14d6..50fbeac 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestHDFSDatasetURIs.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestHDFSDatasetURIs.java
+@@ -26,6 +26,7 @@ import org.junit.Test;
+ import org.kitesdk.compat.Hadoop;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetDescriptor;
++import org.kitesdk.data.DatasetIOException;
+ import org.kitesdk.data.DatasetNotFoundException;
+ import org.kitesdk.data.Datasets;
+ import org.kitesdk.data.MiniDFSTest;
+@@ -47,6 +48,17 @@ public class TestHDFSDatasetURIs extends MiniDFSTest {
+   }
+ 
+   @Test
++  public void testMissingHDFSAuthority() {
++    try {
++      Datasets.load("dataset:hdfs:/tmp/data/ns/test", Object.class);
++      Assert.fail("Shouldn't be able to connect to HDFS");
++    } catch (DatasetIOException e) {
++      Assert.assertTrue("Should have helpful error message",
++          e.getMessage().contains("make sure the default hdfs URI is configured"));
++    }
++  }
++
++  @Test
+   public void testAbsolute() {
+     DatasetRepository repo = DatasetRepositories
+         .repositoryFor("repo:hdfs://" + hdfsAuth + "/tmp/data");
+diff --git a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/Loader.java b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/Loader.java
+index e0cf3f5..80b1776 100644
+--- a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/Loader.java
++++ b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/Loader.java
+@@ -76,9 +76,14 @@ public class Loader implements Loadable {
+       FileSystem fs;
+       try {
+         fs = FileSystem.get(fileSystemURI(match, conf), conf);
+-      } catch (IOException ex) {
+-        throw new DatasetIOException(
+-            "Could not get a FileSystem", ex);
++      } catch (IOException e) {
++        // "Incomplete HDFS URI, no host" => add a helpful suggestion
++        if (e.getMessage().startsWith("Incomplete")) {
++          throw new DatasetIOException("Could not get a FileSystem: " +
++              "make sure the default " + match.get(URIPattern.SCHEME) +
++              " URI is configured.", e);
++        }
++        throw new DatasetIOException("Could not get a FileSystem", e);
+       }
+ 
+       // setup the MetaStore URI
+-- 
+1.7.0.4
+

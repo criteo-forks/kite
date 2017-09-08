@@ -1,0 +1,117 @@
+From 5f263156077408c9bb48071138e2938b147dc39b Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 27 May 2015 19:11:04 -0700
+Subject: [PATCH 067/115] CDK-983: Fix in predicate ordering.
+
+Tracked down more hash sets in use and replaced with linked hash sets.
+---
+ .../java/org/kitesdk/data/spi/CharSequences.java   |   18 +++++++++++++++++-
+ .../java/org/kitesdk/data/spi/predicates/In.java   |    2 +-
+ .../kitesdk/data/spi/predicates/Predicates.java    |    3 +--
+ .../java/org/kitesdk/data/spi/TestViewUris.java    |   18 ++++++++++++++++++
+ 4 files changed, 37 insertions(+), 4 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/CharSequences.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/CharSequences.java
+index 6a1fb0d..23b9a60 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/CharSequences.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/CharSequences.java
+@@ -18,6 +18,7 @@ package org.kitesdk.data.spi;
+ 
+ import com.google.common.base.Preconditions;
+ import com.google.common.collect.HashMultimap;
++import com.google.common.collect.LinkedHashMultimap;
+ import java.util.AbstractSet;
+ import java.util.Iterator;
+ import java.util.Set;
+@@ -50,9 +51,24 @@ public class CharSequences {
+ 
+   @Immutable
+   public static class ImmutableCharSequenceSet extends AbstractSet<CharSequence> {
+-    private final HashMultimap<Integer, CharSequence> storage = HashMultimap.create();
++    private final LinkedHashMultimap<Integer, CharSequence> storage =
++        LinkedHashMultimap.create();
+     private final int size;
+ 
++    public ImmutableCharSequenceSet(Object... strings) {
++      int count = 0;
++      for (Object obj : strings) {
++        CharSequence seq = (CharSequence) obj;
++        // like guava collections, do not allow null
++        Preconditions.checkNotNull(seq, "Null values are not allowed");
++        if (!contains(seq)) { // don't add duplicates
++          storage.put(CharSequences.hashCode(seq), seq);
++          count += 1;
++        }
++      }
++      this.size = count;
++    }
++
+     public ImmutableCharSequenceSet(Iterable<? extends CharSequence> strings) {
+       int count = 0;
+       for (CharSequence seq : strings) {
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java
+index e22b878..130d9aa 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java
+@@ -42,7 +42,7 @@ public class In<T> extends RegisteredPredicate<T> {
+   }
+ 
+   public static <T> In<T> fromString(String set, Schema schema) {
+-    Set<T> values = Sets.newHashSet();
++    Set<T> values = Sets.newLinkedHashSet();
+     for (String value : Splitter.on(',').split(set)) {
+       values.add(SchemaUtil.<T>fromString(value, schema));
+     }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/Predicates.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/Predicates.java
+index 6870cab..f5056de 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/Predicates.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/Predicates.java
+@@ -44,8 +44,7 @@ public abstract class Predicates {
+   public static <T> In<T> in(T... set) {
+     T item = set[0];
+     if (item != null && item instanceof CharSequence) {
+-      return (In<T>) new In(new CharSequences.ImmutableCharSequenceSet(
+-          (Set<CharSequence>) Sets.newHashSet(set)));
++      return (In<T>) new In(new CharSequences.ImmutableCharSequenceSet(set));
+     }
+     return new In<T>(set);
+   }
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestViewUris.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestViewUris.java
+index fd39dee..a56d44e 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestViewUris.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestViewUris.java
+@@ -17,6 +17,7 @@
+ package org.kitesdk.data.spi;
+ 
+ import java.net.URI;
++import java.util.UUID;
+ import org.apache.avro.Schema;
+ import org.apache.avro.SchemaBuilder;
+ import org.apache.avro.generic.GenericRecord;
+@@ -121,6 +122,23 @@ public class TestViewUris {
+         test.with("color", "a,b", "c"));
+   }
+ 
++  @Test
++  public void testURIStringEquality() {
++    for(int i = 0; i < 10; i++) {
++      String a = UUID.randomUUID().toString();
++      String b = UUID.randomUUID().toString();
++      String originalUri = "view:file:/tmp/test_name?color="+ a + "," + b;
++      View<GenericRecord> view = Datasets.load(originalUri);
++      String afterUri = view.getUri().toString();
++      if(!originalUri.equals(afterUri)) {
++        System.out.println("Iteration: " + i);
++        System.out.println("Start: " + originalUri);
++        System.out.println("End  : " + afterUri);
++      }
++      Assert.assertEquals(originalUri, afterUri);
++    }
++  }
++
+   public void assertViewUriEquivalent(String desc, String uri,
+                                       View<GenericRecord> view) {
+     View<GenericRecord> loaded = Datasets.load(uri);
+-- 
+1.7.0.4
+

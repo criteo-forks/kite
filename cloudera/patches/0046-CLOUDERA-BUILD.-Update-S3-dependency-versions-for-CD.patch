@@ -1,0 +1,41 @@
+From b167c5d173e203d79b7cf0636d8dad47158c8e26 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Tue, 25 Aug 2015 15:19:59 -0700
+Subject: [PATCH 046/115] CLOUDERA-BUILD. Update S3 dependency versions for CDH.
+
+---
+ kite-data/pom.xml |    4 ++--
+ pom.xml           |    2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/kite-data/pom.xml b/kite-data/pom.xml
+index e30a135..3360dcd 100644
+--- a/kite-data/pom.xml
++++ b/kite-data/pom.xml
+@@ -49,8 +49,8 @@
+ 
+   <properties>
+     <!-- change s3-related versions for kite-data only -->
+-    <vers.apache-httpcomponents>4.2</vers.apache-httpcomponents>
+-    <vers.jets3t>0.9.0</vers.jets3t>
++    <vers.apache-httpcomponents>${cdh.httpcomponents.version}</vers.apache-httpcomponents>
++    <vers.jets3t>${cdh.jets3t.version}</vers.jets3t>
+   </properties>
+ 
+   <build>
+diff --git a/pom.xml b/pom.xml
+index f85fbf6..0766e61 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -172,7 +172,7 @@
+     <vers.jodatime>2.3</vers.jodatime>
+     <vers.jcommander>1.35</vers.jcommander>
+     <vers.spark>${cdh.spark.version}</vers.spark>
+-    <vers.hadoop-aws>2.6.0</vers.hadoop-aws>
++    <vers.hadoop-aws>${cdh.hadoop.version}</vers.hadoop-aws>
+ 
+     <!-- Plugin versions -->
+     <vers.doxia-module-markdown>1.4</vers.doxia-module-markdown>
+-- 
+1.7.0.4
+

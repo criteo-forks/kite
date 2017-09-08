@@ -1,0 +1,133 @@
+From ea4dcb7fd2d93a00bd64e9d6c4b8fe246e287933 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Thu, 11 Jun 2015 14:02:44 -0700
+Subject: [PATCH 083/115] CDK-1019: Move Hive token setup into TransformTask.
+
+This takes the delegation token code from the CopyCommand and moves it
+into TransformTask so that all of the transform-based commands will work
+with Hive.
+---
+ .../java/org/kitesdk/cli/commands/CopyCommand.java |   30 +--------------
+ .../main/java/org/kitesdk/tools/TransformTask.java |   41 ++++++++++++++++++++
+ 2 files changed, 42 insertions(+), 29 deletions(-)
+
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
+index b89d6d7..a1da019 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
+@@ -29,14 +29,6 @@ import org.kitesdk.data.View;
+ import org.kitesdk.tools.CopyTask;
+ import org.slf4j.Logger;
+ 
+-import org.apache.hadoop.hive.conf.HiveConf;
+-import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
+-import org.apache.hadoop.hive.thrift.DelegationTokenIdentifier;
+-import org.apache.hadoop.io.Text;
+-import org.apache.hadoop.mapred.JobConf;
+-import org.apache.hadoop.security.token.Token;
+-import org.apache.thrift.TException;
+-
+ @Parameters(commandDescription="Copy records from one Dataset to another")
+ public class CopyCommand extends BaseDatasetCommand {
+ 
+@@ -77,23 +69,7 @@ public class CopyCommand extends BaseDatasetCommand {
+ 
+     CopyTask task = new CopyTask<GenericRecord>(source, dest);
+ 
+-    JobConf conf = new JobConf(getConf());
+-
+-    try {
+-      if ((isHiveView(source) || isHiveView(dest))
+-          && conf.getBoolean(HiveConf.ConfVars.METASTORE_USE_THRIFT_SASL.varname, false)) {
+-        // Need to set up delegation token auth
+-        HiveMetaStoreClient metaStoreClient = new HiveMetaStoreClient(new HiveConf());
+-        String hiveTokenStr = metaStoreClient.getDelegationToken("yarn");
+-        Token<DelegationTokenIdentifier> hiveToken = new Token<DelegationTokenIdentifier>();
+-        hiveToken.decodeFromUrlString(hiveTokenStr);
+-        conf.getCredentials().addToken(new Text("HIVE_METASTORE_TOKEN"), hiveToken);
+-    }
+-    } catch (TException ex) {
+-      throw new RuntimeException("Unable to obtain Hive delegation token");
+-    }
+-
+-    task.setConf(conf);
++    task.setConf(getConf());
+ 
+     if (noCompaction) {
+       task.noCompaction();
+@@ -131,8 +107,4 @@ public class CopyCommand extends BaseDatasetCommand {
+         "movies dataset:hbase:zk-host/movies --no-compaction"
+     );
+   }
+-
+-  private boolean isHiveView(View<?> view) {
+-    return view.getDataset().getUri().toString().startsWith("dataset:hive:");
+-  }
+ }
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
+index 6f257a4..ed78801 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
+@@ -35,6 +35,12 @@ import org.apache.crunch.types.avro.Avros;
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.conf.Configured;
+ import org.apache.hadoop.hive.conf.HiveConf;
++import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
++import org.apache.hadoop.hive.thrift.DelegationTokenIdentifier;
++import org.apache.hadoop.io.Text;
++import org.apache.hadoop.mapred.JobConf;
++import org.apache.hadoop.security.token.Token;
++import org.apache.thrift.TException;
+ import org.kitesdk.compat.DynMethods;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetException;
+@@ -122,6 +128,10 @@ public class TransformTask<S, T> extends Configured {
+       setConf(conf);
+     }
+ 
++    if (isHive(from) || isHive(to)) {
++      setConf(addHiveDelegationToken(getConf()));
++    }
++
+     PType<T> toPType = ptype(to);
+     MapFn<T, T> validate = new CheckEntityClass<T>(to.getType());
+ 
+@@ -187,4 +197,35 @@ public class TransformTask<S, T> extends Configured {
+       }
+     }
+   }
++
++  private static boolean isHive(View<?> view) {
++    return "hive".equals(
++        URI.create(view.getUri().getSchemeSpecificPart()).getScheme());
++  }
++
++  private static final Text HIVE_MS_TOKEN_ALIAS = new Text("HIVE_METASTORE_TOKEN");
++
++  private static Configuration addHiveDelegationToken(Configuration conf) {
++    // this uses a JobConf because we don't have access to the MR Job
++    JobConf jobConf = new JobConf(conf);
++
++    try {
++      if (conf.getBoolean(
++          HiveConf.ConfVars.METASTORE_USE_THRIFT_SASL.varname, false)) {
++        // Need to set up delegation token auth
++        HiveMetaStoreClient metaStoreClient = new HiveMetaStoreClient(new HiveConf());
++        String hiveTokenStr = metaStoreClient.getDelegationToken("yarn");
++        Token<DelegationTokenIdentifier> hiveToken = new Token<DelegationTokenIdentifier>();
++        hiveToken.decodeFromUrlString(hiveTokenStr);
++        jobConf.getCredentials().addToken(HIVE_MS_TOKEN_ALIAS, hiveToken);
++      }
++
++      return jobConf;
++
++    } catch (IOException e) {
++      throw new RuntimeException("Unable to obtain Hive delegation token", e);
++    } catch (TException e) {
++      throw new RuntimeException("Unable to obtain Hive delegation token", e);
++    }
++  }
+ }
+-- 
+1.7.0.4
+

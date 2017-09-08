@@ -1,0 +1,66 @@
+From ed98e54f0e0adca57fae98d3e13dbb5a8bb47cfc Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 25 Mar 2015 21:48:10 -0700
+Subject: [PATCH 032/115] CDK-970: Fix IncompatibleSchemaException.check.
+
+Now throws IncompatibleSchemaException instead of ValidationException.
+---
+ .../kitesdk/data/IncompatibleSchemaException.java  |   20 ++++++++++++++++++++
+ .../cli/commands/TestSchemaCommandMerge.java       |    5 ++++-
+ 2 files changed, 24 insertions(+), 1 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/IncompatibleSchemaException.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/IncompatibleSchemaException.java
+index b875648..360e592 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/IncompatibleSchemaException.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/IncompatibleSchemaException.java
+@@ -36,4 +36,24 @@ public class IncompatibleSchemaException extends ValidationException {
+   public IncompatibleSchemaException(Throwable cause) {
+     super(cause);
+   }
++
++  /**
++   * Precondition-style validation that throws a {@link ValidationException}.
++   *
++   * @param isValid
++   *          {@code true} if valid, {@code false} if an exception should be
++   *          thrown
++   * @param message
++   *          A String message for the exception.
++   */
++  public static void check(boolean isValid, String message, Object... args) {
++    if (!isValid) {
++      String[] argStrings = new String[args.length];
++      for (int i = 0; i < args.length; i += 1) {
++        argStrings[i] = String.valueOf(args[i]);
++      }
++      throw new IncompatibleSchemaException(
++          String.format(String.valueOf(message), (Object[]) argStrings));
++    }
++  }
+ }
+diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestSchemaCommandMerge.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestSchemaCommandMerge.java
+index 94f8a4c..60a0588 100644
+--- a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestSchemaCommandMerge.java
++++ b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestSchemaCommandMerge.java
+@@ -34,6 +34,7 @@ import org.junit.Rule;
+ import org.junit.Test;
+ import org.junit.rules.TemporaryFolder;
+ import org.kitesdk.cli.TestUtil;
++import org.kitesdk.data.IncompatibleSchemaException;
+ import org.kitesdk.data.TestHelpers;
+ import org.kitesdk.data.ValidationException;
+ import org.slf4j.Logger;
+@@ -137,7 +138,9 @@ public class TestSchemaCommandMerge {
+         "resource:schema/string.avsc",
+         "resource:schema/user.avsc");
+ 
+-    TestHelpers.assertThrows("", ValidationException.class, new Callable() {
++    TestHelpers.assertThrows(
++        "Should reject incompatible schemas, not produce a union schema",
++        IncompatibleSchemaException.class, new Callable() {
+       @Override
+       public Integer call() throws IOException {
+         return command.run();
+-- 
+1.7.0.4
+

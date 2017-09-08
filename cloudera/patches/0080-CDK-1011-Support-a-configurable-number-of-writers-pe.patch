@@ -1,0 +1,623 @@
+From 036f936f7fb059eecd23d8172063541b51664448 Mon Sep 17 00:00:00 2001
+From: Micah Whitacre <micah.whitacre@cerner.com>
+Date: Thu, 4 Jun 2015 09:16:08 -0500
+Subject: [PATCH 080/115] CDK-1011: Support a configurable number of writers per partition when writing to a dataset, along with copying and compaction.
+
+CDK-1011: Adjusted the command option for files per partition and adjusted the logic on when num writers and writers per partition are specified.
+
+CDK-1011: Added tests for CompactCommand
+
+Conflicts:
+	kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java
+Resolution:
+    Fixed tests to use numRecords added for Crunch hash change.
+---
+ .../org/kitesdk/data/crunch/CrunchDatasets.java    |   55 ++++-
+ .../org/kitesdk/cli/commands/CompactCommand.java   |    8 +
+ .../java/org/kitesdk/cli/commands/CopyCommand.java |    8 +
+ .../java/org/kitesdk/tools/CompactionTask.java     |    4 +
+ .../main/java/org/kitesdk/tools/TransformTask.java |   12 +-
+ .../cli/commands/TestCompactCommandCluster.java    |  257 ++++++++++++++++++++
+ .../cli/commands/TestCopyCommandCluster.java       |   73 ++++++-
+ 7 files changed, 401 insertions(+), 16 deletions(-)
+ create mode 100644 kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCompactCommandCluster.java
+
+diff --git a/kite-data/kite-data-crunch/src/main/java/org/kitesdk/data/crunch/CrunchDatasets.java b/kite-data/kite-data-crunch/src/main/java/org/kitesdk/data/crunch/CrunchDatasets.java
+index 0db07ca..e043c0d 100644
+--- a/kite-data/kite-data-crunch/src/main/java/org/kitesdk/data/crunch/CrunchDatasets.java
++++ b/kite-data/kite-data-crunch/src/main/java/org/kitesdk/data/crunch/CrunchDatasets.java
+@@ -191,12 +191,40 @@ public class CrunchDatasets {
+   public static <E> PCollection<E> partition(PCollection<E> collection,
+                                              View<E> view,
+                                              int numWriters) {
++    return partition(collection, view, numWriters, 1);
++  }
++
++  /**
++   * Partitions {@code collection} to be stored efficiently in {@code View}.
++   * <p>
++   * This restructures the parallel collection so that all of the entities that
++   * will be stored in a given partition will be evenly distributed across a specified
++   * {@code numPartitionWriters}.
++   * <p>
++   * If the dataset is not partitioned, then this will structure all of the
++   * entities to produce a number of files equal to {@code numWriters}.
++   *
++   * @param collection a collection of entities
++   * @param view a {@link View} of a dataset to partition the collection for
++   * @param numWriters the number of writers that should be used
++   * @param numPartitionWriters the number of writers data for a single partition will be distributed across
++   * @param <E> the type of entities in the collection and underlying dataset
++   * @return an equivalent collection of entities partitioned for the view
++   * @see #partition(PCollection, View)
++   *
++   * @since 1.1.0
++   */
++  public static <E> PCollection<E> partition(PCollection<E> collection,
++                                             View<E> view,
++                                             int numWriters, int numPartitionWriters) {
++    //ensure the number of writers is honored whether it is per partition or total.
+     DatasetDescriptor descriptor = view.getDataset().getDescriptor();
+     if (descriptor.isPartitioned()) {
+-      GetStorageKey<E> getKey = new GetStorageKey<E>(view);
+-      PTable<GenericData.Record, E> table = collection
+-          .by(getKey, Avros.generics(getKey.schema()));
+-      PGroupedTable<GenericData.Record, E> grouped =
++      GetStorageKey<E> getKey = new GetStorageKey<E>(view,
++          numPartitionWriters > 0 ? numPartitionWriters : 1);
++      PTable<Pair<GenericData.Record, Integer>, E> table = collection
++          .by(getKey, Avros.pairs(Avros.generics(getKey.schema()), Avros.ints()));
++      PGroupedTable<Pair<GenericData.Record, Integer>, E> grouped =
+           numWriters > 0 ? table.groupByKey(numWriters) : table.groupByKey();
+       return grouped.ungroup().values();
+     } else {
+@@ -224,19 +252,20 @@ public class CrunchDatasets {
+     }
+   }
+ 
+-  @edu.umd.cs.findbugs.annotations.SuppressWarnings(
+-      value="SE_NO_SERIALVERSIONID",
+-      justification="Purposely not supported across versions")
+-  private static class GetStorageKey<E> extends MapFn<E, GenericData.Record> {
++  @edu.umd.cs.findbugs.annotations.SuppressWarnings(value={"SE_NO_SERIALVERSIONID","SE_TRANSIENT_FIELD_NOT_RESTORED"},
++      justification="Purposely not supported across versions, fields properly initialized")
++  private static class GetStorageKey<E> extends MapFn<E, Pair<GenericData.Record, Integer>> {
+     private final String strategyString;
+     private final String schemaString;
+     private final Class<E> type;
+     private final Map<String, String> constraints;
++    private final int numPartitionWriters;
+     private transient AvroStorageKey key = null;
+     private transient EntityAccessor<E> accessor = null;
+     private transient Map<String, Object> provided = null;
++    private transient int count;
+ 
+-    private GetStorageKey(View<E> view) {
++    private GetStorageKey(View<E> view, int numPartitionWriters) {
+       DatasetDescriptor descriptor = view.getDataset().getDescriptor();
+       // get serializable versions of transient objects
+       this.strategyString = descriptor.getPartitionStrategy()
+@@ -250,6 +279,7 @@ public class CrunchDatasets {
+       } else {
+         this.constraints = null;
+       }
++      this.numPartitionWriters = numPartitionWriters > 0 ? numPartitionWriters : 1;
+     }
+ 
+     public Schema schema() {
+@@ -271,11 +301,14 @@ public class CrunchDatasets {
+               .getProvidedValues();
+         }
+       }
++      count = 0;
+     }
+ 
+     @Override
+-    public AvroStorageKey map(E entity) {
+-      return key.reuseFor(entity, provided, accessor);
++    public Pair<GenericData.Record, Integer> map(E entity) {
++      int marker = count % numPartitionWriters;
++      count++;
++      return Pair.<GenericData.Record, Integer>of(key.reuseFor(entity, provided, accessor), marker);
+     }
+   }
+ 
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CompactCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CompactCommand.java
+index 9d92f6f..3b76eff 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CompactCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CompactCommand.java
+@@ -43,6 +43,10 @@ public class CompactCommand extends BaseDatasetCommand {
+       description="The number of writer processes to use")
+   int numWriters = -1;
+ 
++  @Parameter(names={"--files-per-partition"},
++      description="The number of files per partition to create")
++  int numPartitionWriters = -1;
++
+   @Override
+   public int run() throws IOException {
+     Preconditions.checkArgument(datasets.size() == 1,
+@@ -64,6 +68,10 @@ public class CompactCommand extends BaseDatasetCommand {
+       task.setNumWriters(numWriters);
+     }
+ 
++    if (numPartitionWriters >= 0) {
++      task.setNumPartitionWriters(numPartitionWriters);
++    }
++
+     PipelineResult result = task.run();
+ 
+     if (result.succeeded()) {
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
+index 84484ee..8ac4bd0 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CopyCommand.java
+@@ -55,6 +55,10 @@ public class CopyCommand extends BaseDatasetCommand {
+       description="The number of writer processes to use")
+   int numWriters = -1;
+ 
++  @Parameter(names={"--files-per-partition"},
++      description="The number of files per partition to create")
++  int numPartitionWriters = -1;
++
+   @Parameter(
+       names={"--overwrite"},
+       description="Remove any data already in the target view or dataset")
+@@ -99,6 +103,10 @@ public class CopyCommand extends BaseDatasetCommand {
+       task.setNumWriters(numWriters);
+     }
+ 
++    if (numPartitionWriters >= 0) {
++      task.setNumWriters(numPartitionWriters);
++    }
++
+     if (overwrite) {
+       task.setWriteMode(Target.WriteMode.OVERWRITE);
+     }
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/CompactionTask.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/CompactionTask.java
+index ed646be..902a180 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/CompactionTask.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/CompactionTask.java
+@@ -62,6 +62,10 @@ public class CompactionTask<T> implements Configurable {
+     return task.getConf();
+   }
+ 
++  public void setNumPartitionWriters(int numPartitionWriters) {
++    task.setNumPartitionWriters(numPartitionWriters);
++  }
++
+   @SuppressWarnings("unchecked")
+   private void checkCompactable(View<T> view) {
+     Dataset<T> dataset = view.getDataset();
+diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
+index ef66999..c9119bd 100644
+--- a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
++++ b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
+@@ -62,10 +62,12 @@ public class TransformTask<S, T> extends Configured {
+   private final DoFn<S, T> transform;
+   private boolean compact = true;
+   private int numWriters = -1;
++  private int numPartitionWriters = -1;
+   private Target.WriteMode mode = Target.WriteMode.APPEND;
+ 
+   private long count = 0;
+ 
++
+   public TransformTask(View<S> from, View<T> to, DoFn<S, T> transform) {
+     this.from = from;
+     this.to = to;
+@@ -79,6 +81,7 @@ public class TransformTask<S, T> extends Configured {
+   public TransformTask noCompaction() {
+     this.compact = false;
+     this.numWriters = 0;
++    this.numPartitionWriters = 0;
+     return this;
+   }
+ 
+@@ -93,6 +96,13 @@ public class TransformTask<S, T> extends Configured {
+     return this;
+   }
+ 
++  public TransformTask setNumPartitionWriters(int numPartitionWriters) {
++    Preconditions.checkArgument(numPartitionWriters >= 0,
++        "Invalid number of partition writers: " + numPartitionWriters);
++    this.numPartitionWriters = numPartitionWriters;
++    return this;
++  }
++
+   public TransformTask setWriteMode(Target.WriteMode mode) {
+     Preconditions.checkArgument(mode != Target.WriteMode.CHECKPOINT,
+         "Checkpoint is not an allowed write mode");
+@@ -125,7 +135,7 @@ public class TransformTask<S, T> extends Configured {
+ 
+     if (compact) {
+       // the transform must be run before partitioning
+-      collection = CrunchDatasets.partition(collection, to, numWriters);
++      collection = CrunchDatasets.partition(collection, to, numWriters, numPartitionWriters);
+     }
+ 
+     pipeline.write(collection, CrunchDatasets.asTarget(to), mode);
+diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCompactCommandCluster.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCompactCommandCluster.java
+new file mode 100644
+index 0000000..a873de3
+--- /dev/null
++++ b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCompactCommandCluster.java
+@@ -0,0 +1,257 @@
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *   http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.kitesdk.cli.commands;
++
++import com.beust.jcommander.internal.Lists;
++import com.google.common.collect.Iterators;
++import com.google.common.io.Files;
++import org.apache.avro.SchemaBuilder;
++import org.apache.avro.generic.GenericData;
++import org.apache.hadoop.conf.Configuration;
++import org.apache.hadoop.fs.Path;
++import org.apache.hadoop.mapred.LocalJobRunner;
++import org.apache.hadoop.mapreduce.Job;
++import org.junit.After;
++import org.junit.Assert;
++import org.junit.Assume;
++import org.junit.Before;
++import org.junit.Test;
++import org.kitesdk.cli.TestUtil;
++import org.kitesdk.compat.DynMethods;
++import org.kitesdk.compat.Hadoop;
++import org.kitesdk.data.Dataset;
++import org.kitesdk.data.DatasetDescriptor;
++import org.kitesdk.data.Datasets;
++import org.kitesdk.data.MiniDFSTest;
++import org.kitesdk.data.PartitionStrategy;
++import org.kitesdk.data.URIBuilder;
++import org.kitesdk.data.spi.DatasetRepositories;
++import org.kitesdk.data.spi.DatasetRepository;
++import org.kitesdk.data.spi.filesystem.DatasetTestUtilities;
++import org.kitesdk.data.spi.filesystem.FileSystemDataset;
++import org.slf4j.Logger;
++
++import java.io.BufferedWriter;
++import java.io.File;
++import java.net.URI;
++import java.util.Map;
++
++import static org.mockito.Mockito.mock;
++import static org.mockito.Mockito.verify;
++import static org.mockito.Mockito.verifyNoMoreInteractions;
++
++public class TestCompactCommandCluster extends MiniDFSTest {
++
++  private static final String source = "users_source";
++  private static final String source_partitioned = "users_source_partitioned";
++  private static final String avsc = "target/user.avsc";
++  private static String repoUri;
++  private int numRecords;
++
++  @Before
++  public void createDatasets() throws Exception {
++    repoUri = "hdfs://" + getDFS().getUri().getAuthority() + "/tmp/data";
++    TestUtil.run("delete", source, "-r", repoUri, "-d", "target/data");
++
++    String csv = "target/users.csv";
++    BufferedWriter writer = Files.newWriter(
++        new File(csv), CSVSchemaCommand.SCHEMA_CHARSET);
++
++    writer.append("id,username,email\n");
++    numRecords = 10;
++    for(int i = 0; i < numRecords; i++) {
++      writer.append(i+",test"+i+",test"+i+"@example.com\n");
++    }
++    writer.close();
++
++    TestUtil.run("-v", "csv-schema", csv, "-o", avsc, "--class", "User");
++    TestUtil.run("create", source, "-s", avsc,
++        "-r", repoUri, "-d", "target/data");
++
++    URI dsUri = URIBuilder.build("repo:" + repoUri, "default", source_partitioned);
++    Datasets.<Object, Dataset<Object>>create(dsUri, new DatasetDescriptor.Builder()
++        .partitionStrategy(new PartitionStrategy.Builder()
++            .hash("id", 2)
++            .build())
++        .schema(SchemaBuilder.record("User").fields()
++            .requiredLong("id")
++            .optionalString("username")
++            .optionalString("email")
++            .endRecord())
++        .build(), Object.class);
++
++
++    TestUtil.run("csv-import", csv, source, "-r", repoUri, "-d", "target/data");
++    TestUtil.run("csv-import", csv, source_partitioned, "-r", repoUri, "-d", "target/data");
++  }
++
++  @Before
++  public void createCommand(){
++    this.console = mock(Logger.class);
++    this.command = new CompactCommand(console);
++    command.setConf(new Configuration());
++  }
++
++  @After
++  public void deleteSourceDatasets() throws Exception {
++    TestUtil.run("delete", source, "-r", repoUri, "-d", "target/data");
++    TestUtil.run("delete", source_partitioned, "-r", repoUri, "-d", "target/data");
++  }
++
++  private Logger console;
++  private CompactCommand command;
++
++  @Test
++  public void testBasicCompact() throws Exception {
++    command.repoURI = repoUri;
++    command.datasets = Lists.newArrayList(source);
++
++    int rc = command.run();
++    Assert.assertEquals("Should return success", 0, rc);
++
++    DatasetRepository repo = DatasetRepositories.repositoryFor("repo:" + repoUri);
++    int size = DatasetTestUtilities.datasetSize(repo.load("default", source));
++    Assert.assertEquals("Should contain copied records", numRecords, size);
++
++    verify(console).info("Compacted {} records in \"{}\"", (long)numRecords, source);
++    verifyNoMoreInteractions(console);
++  }
++
++  @Test
++  @SuppressWarnings("unchecked")
++  public void testCompactWithNumWriters() throws Exception {
++    Assume.assumeTrue(setLocalReducerMax(getConfiguration(), 3));
++
++    command.repoURI = repoUri;
++    command.numWriters = 3;
++    command.datasets = Lists.newArrayList(source);
++
++    int rc = command.run();
++    Assert.assertEquals("Should return success", 0, rc);
++
++    DatasetRepository repo = DatasetRepositories.repositoryFor("repo:" + repoUri);
++    FileSystemDataset<GenericData.Record> ds =
++        (FileSystemDataset<GenericData.Record>) repo.<GenericData.Record>
++            load("default", source);
++    int size = DatasetTestUtilities.datasetSize(ds);
++    Assert.assertEquals("Should contain copied records", numRecords, size);
++
++    Assert.assertEquals("Should produce 3 files",
++        3, Iterators.size(ds.pathIterator()));
++
++    verify(console).info("Compacted {} records in \"{}\"",(long) numRecords, source);
++    verifyNoMoreInteractions(console);
++  }
++
++  @Test
++  @SuppressWarnings("unchecked")
++  public void testCompactWithNumPartitionWriters() throws Exception {
++    Assume.assumeTrue(setLocalReducerMax(getConfiguration(), 3));
++
++    command.repoURI = repoUri;
++    command.numWriters = 3;
++    command.numPartitionWriters = 4;
++    command.datasets = Lists.newArrayList(source);
++
++    int rc = command.run();
++    Assert.assertEquals("Should return success", 0, rc);
++
++    DatasetRepository repo = DatasetRepositories.repositoryFor("repo:" + repoUri);
++    FileSystemDataset<GenericData.Record> ds =
++        (FileSystemDataset<GenericData.Record>) repo.<GenericData.Record>
++            load("default", source);
++    int size = DatasetTestUtilities.datasetSize(ds);
++    Assert.assertEquals("Should contain copied records", numRecords, size);
++
++    //ignore the numPartitionWriters
++    Assert.assertEquals("Should produce 3 files",
++        3, Iterators.size(ds.pathIterator()));
++
++    verify(console).info("Compacted {} records in \"{}\"", (long)numRecords, source);
++    verifyNoMoreInteractions(console);
++  }
++
++  @Test
++  @SuppressWarnings("unchecked")
++  public void testPartitionedCompactWithNumWriters() throws Exception {
++    Assume.assumeTrue(setLocalReducerMax(getConfiguration(), 2));
++    command.repoURI = repoUri;
++    command.numWriters = 2;
++    command.numPartitionWriters = 1;
++    command.datasets = Lists.newArrayList(source_partitioned);
++
++    int rc = command.run();
++    Assert.assertEquals("Should return success", 0, rc);
++
++    DatasetRepository repo = DatasetRepositories.repositoryFor("repo:" + repoUri);
++    FileSystemDataset<GenericData.Record> ds =
++        (FileSystemDataset<GenericData.Record>) repo.<GenericData.Record>
++            load("default", source_partitioned);
++    int size = DatasetTestUtilities.datasetSize(ds);
++    Assert.assertEquals("Should contain copied records", numRecords, size);
++
++    Assert.assertEquals("Should produce 2 partitions", 2, Iterators.size(ds.getCoveringPartitions().iterator()));
++
++    verify(console).info("Compacted {} records in \"{}\"", (long) numRecords, source_partitioned);
++    verifyNoMoreInteractions(console);
++  }
++
++  @Test
++  @SuppressWarnings("unchecked")
++  public void testPartitionedCompactWithNumWritersNumFilesPerPartition() throws Exception {
++    Assume.assumeTrue(setLocalReducerMax(getConfiguration(), 5));
++    command.repoURI = repoUri;
++    command.numWriters = 1;
++    command.numPartitionWriters = 5;
++    command.datasets = Lists.newArrayList(source_partitioned);
++
++    int rc = command.run();
++    Assert.assertEquals("Should return success", 0, rc);
++
++    DatasetRepository repo = DatasetRepositories.repositoryFor("repo:" + repoUri);
++    FileSystemDataset<GenericData.Record> ds =
++        (FileSystemDataset<GenericData.Record>) repo.<GenericData.Record>
++            load("default", source_partitioned);
++    int size = DatasetTestUtilities.datasetSize(ds);
++    Assert.assertEquals("Should contain copied records", numRecords, size);
++
++    Assert.assertEquals("Should produce 2 partitions", 2, Iterators.size(ds.getCoveringPartitions().iterator()));
++
++    verify(console).info("Compacted {} records in \"{}\"", (long)numRecords, source_partitioned);
++    verifyNoMoreInteractions(console);
++  }
++
++  private boolean setLocalReducerMax(Configuration conf, int max) {
++    try {
++      Job job = Hadoop.Job.newInstance.invoke(new Configuration(false));
++      DynMethods.StaticMethod setReducerMax = new DynMethods
++          .Builder("setLocalMaxRunningReduces")
++          .impl(LocalJobRunner.class,
++              org.apache.hadoop.mapreduce.JobContext.class, Integer.TYPE)
++          .buildStaticChecked();
++      setReducerMax.invoke(job, max);
++      // copy the setting into the passed configuration
++      Configuration jobConf = Hadoop.JobContext.getConfiguration.invoke(job);
++      for (Map.Entry<String, String> entry : jobConf) {
++        conf.set(entry.getKey(), entry.getValue());
++      }
++      return true;
++    } catch (NoSuchMethodException e) {
++      return false;
++    }
++  }
++}
+diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java
+index 1771c5c..2c2622d 100644
+--- a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java
++++ b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java
+@@ -60,6 +60,7 @@ public class TestCopyCommandCluster extends MiniDFSTest {
+ 
+   protected static final String source = "users_source";
+   protected static final String dest = "users_dest";
++  protected static final String dest_partitioned = "users_dest_partitioned";
+   protected static final String avsc = "target/user.avsc";
+   protected static String repoUri;
+   private static int numRecords;
+@@ -119,6 +120,7 @@ public class TestCopyCommandCluster extends MiniDFSTest {
+   @After
+   public void deleteDestination() throws Exception {
+     TestUtil.run("delete", dest, "-r", repoUri, "-d", "target/data");
++    TestUtil.run("delete", dest_partitioned, "-r", repoUri, "-d", "target/data");
+   }
+ 
+   @Test
+@@ -195,6 +197,33 @@ public class TestCopyCommandCluster extends MiniDFSTest {
+     verifyNoMoreInteractions(console);
+   }
+ 
++  @Test
++  @SuppressWarnings("unchecked")
++  public void testCopyWithNumPartitionWriters() throws Exception {
++    Assume.assumeTrue(setLocalReducerMax(getConfiguration(), 3));
++
++    command.repoURI = repoUri;
++    command.numWriters = 3;
++    command.numPartitionWriters = 4;
++    command.datasets = Lists.newArrayList(source, dest);
++
++    int rc = command.run();
++    Assert.assertEquals("Should return success", 0, rc);
++
++    DatasetRepository repo = DatasetRepositories.repositoryFor("repo:" + repoUri);
++    FileSystemDataset<GenericData.Record> ds =
++        (FileSystemDataset<GenericData.Record>) repo.<GenericData.Record>
++            load("default", dest);
++    int size = DatasetTestUtilities.datasetSize(ds);
++    Assert.assertEquals("Should contain copied records", numRecords, size);
++
++    Assert.assertEquals("Should produce 4 files",
++        4, Iterators.size(ds.pathIterator()));
++
++    verify(console).info("Added {} records to \"{}\"", (long) numRecords, dest);
++    verifyNoMoreInteractions(console);
++  }
++
+   private boolean setLocalReducerMax(Configuration conf, int max) {
+     try {
+       Job job = Hadoop.Job.newInstance.invoke(new Configuration(false));
+@@ -220,8 +249,44 @@ public class TestCopyCommandCluster extends MiniDFSTest {
+   public void testPartitionedCopyWithNumWriters() throws Exception {
+     command.repoURI = repoUri;
+     command.numWriters = 3;
+-    command.datasets = Lists.newArrayList(source, "dest_partitioned");
+-    URI dsUri = URIBuilder.build("repo:" + repoUri, "default", "dest_partitioned");
++    command.datasets = Lists.newArrayList(source, dest_partitioned);
++    URI dsUri = URIBuilder.build("repo:" + repoUri, "default", dest_partitioned);
++    Datasets.<Object, Dataset<Object>>create(dsUri, new DatasetDescriptor.Builder()
++        .partitionStrategy(new PartitionStrategy.Builder()
++            .hash("id", 2)
++            .build())
++        .schema(SchemaBuilder.record("User").fields()
++            .requiredLong("id")
++            .optionalString("username")
++            .optionalString("email")
++            .endRecord())
++        .build(), Object.class);
++
++    int rc = command.run();
++    Assert.assertEquals("Should return success", 0, rc);
++
++    DatasetRepository repo = DatasetRepositories.repositoryFor("repo:" + repoUri);
++    FileSystemDataset<GenericData.Record> ds =
++        (FileSystemDataset<GenericData.Record>) repo.<GenericData.Record>
++            load("default", dest_partitioned);
++    int size = DatasetTestUtilities.datasetSize(ds);
++    Assert.assertEquals("Should contain copied records", numRecords, size);
++
++    Assert.assertEquals("Should produce 2 partitions",
++        2, Iterators.size(ds.pathIterator()));
++
++    verify(console).info("Added {} records to \"{}\"", (long) numRecords, dest_partitioned);
++    verifyNoMoreInteractions(console);
++  }
++
++  @Test
++  @SuppressWarnings("unchecked")
++  public void testPartitionedCopyWithNumWritersNumFilesPerPartition() throws Exception {
++    command.repoURI = repoUri;
++    command.numWriters = 1;
++    command.numPartitionWriters = 5;
++    command.datasets = Lists.newArrayList(source, dest_partitioned);
++    URI dsUri = URIBuilder.build("repo:" + repoUri, "default", dest_partitioned);
+     Datasets.<Object, Dataset<Object>>create(dsUri, new DatasetDescriptor.Builder()
+         .partitionStrategy(new PartitionStrategy.Builder()
+             .hash("id", 2)
+@@ -239,14 +304,14 @@ public class TestCopyCommandCluster extends MiniDFSTest {
+     DatasetRepository repo = DatasetRepositories.repositoryFor("repo:" + repoUri);
+     FileSystemDataset<GenericData.Record> ds =
+         (FileSystemDataset<GenericData.Record>) repo.<GenericData.Record>
+-            load("default", "dest_partitioned");
++            load("default", dest_partitioned);
+     int size = DatasetTestUtilities.datasetSize(ds);
+     Assert.assertEquals("Should contain copied records", numRecords, size);
+ 
+     Assert.assertEquals("Should produce 2 partitions",
+         2, Iterators.size(ds.pathIterator()));
+ 
+-    verify(console).info("Added {} records to \"{}\"", (long) numRecords, "dest_partitioned");
++    verify(console).info("Added {} records to \"{}\"", (long) numRecords, dest_partitioned);
+     verifyNoMoreInteractions(console);
+   }
+ 
+-- 
+1.7.0.4
+

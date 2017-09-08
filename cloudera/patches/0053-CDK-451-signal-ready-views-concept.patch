@@ -1,0 +1,1606 @@
+From 56cc0a705de7f0537ec2eac86213d9a8bb64ba33 Mon Sep 17 00:00:00 2001
+From: Ben Brown <benjamin.l.brown@gmail.com>
+Date: Tue, 12 May 2015 10:24:23 -0400
+Subject: [PATCH 053/115] CDK-451, signal ready views concept
+
+    implementation for hdfs and hive based views, hbase is currently
+    unimplemented.
+
+    includes an additional interface for views "Signalable" for the basic signalReady/isReady concept
+
+    signals are currently stored in the dataset data directory in a .signals directory
+    signal files match a normalized form of the query portion of a URI
+
+    Constraints and Predicates have a few updates made to be able to request normalized
+    forms
+
+    MapReduce updated to create these signals when possible when a write to a dataset
+    is successful. Crunch updated to support using these signals for WriteMode.CHECKPOINT
+    (with a 'ready' view essentially indicating a previous success)
+---
+ .gitignore                                         |    3 +-
+ .../src/main/java/org/kitesdk/data/Signalable.java |   52 +++++
+ .../java/org/kitesdk/data/spi/Constraints.java     |   22 ++-
+ .../data/spi/filesystem/FileSystemDataset.java     |   35 ++--
+ .../data/spi/filesystem/FileSystemView.java        |   34 +++-
+ .../kitesdk/data/spi/filesystem/SignalManager.java |  159 ++++++++++++++
+ .../java/org/kitesdk/data/spi/predicates/In.java   |   11 +
+ .../kitesdk/data/spi/predicates/Predicates.java    |   20 ++
+ .../data/spi/predicates/RegisteredPredicate.java   |   16 ++
+ .../org/kitesdk/data/spi/TestRefinableViews.java   |  130 +++++++++++
+ .../filesystem/TestDatasetWriterCacheLoader.java   |    2 +-
+ .../data/spi/filesystem/TestFileSystemDataset.java |   54 +++++-
+ .../data/spi/filesystem/TestFileSystemView.java    |   31 +++
+ .../filesystem/TestPartitionedDatasetWriter.java   |    2 +-
+ .../data/spi/filesystem/TestSignalManager.java     |  228 ++++++++++++++++++++
+ .../data/spi/predicates/TestInToFromString.java    |   20 ++
+ .../TestRegisteredPredicateToFromString.java       |   70 ++++++
+ .../org/kitesdk/data/crunch/DatasetTarget.java     |   12 +-
+ .../kitesdk/data/crunch/TestCrunchDatasets.java    |   89 ++++++++-
+ .../data/mapreduce/DatasetKeyOutputFormat.java     |   25 ++-
+ .../org/kitesdk/data/mapreduce/TestMapReduce.java  |   66 ++++++
+ 21 files changed, 1047 insertions(+), 34 deletions(-)
+ create mode 100644 kite-data/kite-data-core/src/main/java/org/kitesdk/data/Signalable.java
+ create mode 100644 kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/SignalManager.java
+ create mode 100644 kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestSignalManager.java
+
+diff --git a/.gitignore b/.gitignore
+index 3e1670a..e1ea508 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -8,8 +8,9 @@ build
+ test-output
+ .surefire-*
+ .DS_Store
++.fbExcludeFilterFile
+ kite-data/kite-data-hcatalog/metastore_db
+-kite-data/kite-data-hcatalog/derby.log
++derby.log
+ .idea
+ *.iml
+ nbactions.xml
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/Signalable.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/Signalable.java
+new file mode 100644
+index 0000000..3f8351f
+--- /dev/null
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/Signalable.java
+@@ -0,0 +1,52 @@
++/*
++ * Copyright 2015 Cloudera.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.data;
++
++/**
++ * Signalable views may signal consumers when their underlying data is ready for
++ * consumption. Not all View implementations provide this capability.
++ */
++public interface Signalable<E> extends View<E> {
++
++  /**
++   * Signal that the view's data is ready for consumption.
++   *
++   * Note that an {@link #isEmpty() empty} view may be signaled as ready.
++   *
++   * @since 1.1.0
++   */
++  public void signalReady();
++
++  /**
++   * Returns {@code true} if the view's data is ready for consumption.
++   *
++   * A view is considered ready if
++   * <ul>
++   * <li>it has been {@link #signalReady() signaled ready}</li>
++   * <li>it is a subset of a ready view (may not be implemented)</li>
++   * <li>
++   *   it is completely covered by a union of ready views, or is a subset of such
++   *   a union (may not be implemented)
++   * </li>
++   * <ul>
++   *
++   * Note that ready views may also be {@link #isEmpty() empty}.
++   *
++   * @since 1.1.0
++   */
++  public boolean isReady();
++
++}
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Constraints.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Constraints.java
+index 88133df..0662bfe 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Constraints.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Constraints.java
+@@ -448,12 +448,30 @@ public class Constraints {
+ 
+   public Map<String, String> toQueryMap() {
+     Map<String, String> query = Maps.newLinkedHashMap();
++    return toQueryMap(query, false);
++  }
++
++  /**
++   * Get a normalized query map for the constraints. A normalized query map will
++   * be equal in value and iteration order for any logically equivalent set of
++   * constraints.
++   */
++  public Map<String, String> toNormalizedQueryMap() {
++    Map<String, String> query = Maps.newTreeMap();
++    return toQueryMap(query, true);
++  }
++
++  private Map<String, String> toQueryMap(Map<String, String> queryMap, boolean normalized) {
+     for (Map.Entry<String, Predicate> entry : constraints.entrySet()) {
+       String name = entry.getKey();
+       Schema fieldSchema = SchemaUtil.fieldSchema(schema, strategy, name);
+-      query.put(name, Predicates.toString(entry.getValue(), fieldSchema));
++      if(normalized) {
++        queryMap.put(name, Predicates.toNormalizedString(entry.getValue(), fieldSchema));
++      } else {
++        queryMap.put(name, Predicates.toString(entry.getValue(), fieldSchema));
++      }
+     }
+-    return query;
++    return queryMap;
+   }
+ 
+   public static Constraints fromQueryMap(Schema schema,
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+index a315f11..36e2818 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+@@ -22,6 +22,7 @@ import java.util.Set;
+ import org.apache.hadoop.mapreduce.InputFormat;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetIOException;
++import org.kitesdk.data.Signalable;
+ import org.kitesdk.data.spi.Compatibility;
+ import org.kitesdk.data.spi.PartitionKey;
+ import org.kitesdk.data.PartitionStrategy;
+@@ -56,7 +57,7 @@ import org.kitesdk.data.Formats;
+ @SuppressWarnings("deprecation")
+ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+     Mergeable<FileSystemDataset<E>>, InputFormatAccessor<E>, LastModifiedAccessor,
+-    PartitionedDataset<E>, SizeAccessor {
++    PartitionedDataset<E>, SizeAccessor, Signalable<E> {
+ 
+   private static final Logger LOG = LoggerFactory
+     .getLogger(FileSystemDataset.class);
+@@ -69,6 +70,8 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+   private PartitionKey partitionKey;
+   private final URI uri;
+ 
++  private static final String SIGNALS_DIRECTORY_NAME = ".signals";
++
+   private final PartitionStrategy partitionStrategy;
+   private final PartitionListener partitionListener;
+ 
+@@ -101,7 +104,10 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+     this.convert = new PathConversion(descriptor.getSchema());
+     this.uri = uri;
+ 
+-    this.unbounded = new FileSystemView<E>(this, partitionListener, type);
++    Path signalsPath = new Path(directory, SIGNALS_DIRECTORY_NAME);
++    SignalManager signalManager = new SignalManager(fileSystem, signalsPath);
++
++    this.unbounded = new FileSystemView<E>(this, partitionListener, signalManager, type);
+     // remove this.partitionKey for 0.14.0
+     this.partitionKey = null;
+   }
+@@ -450,20 +456,7 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+ 
+   @Override
+   public long getLastModified() {
+-    long lastMod = -1;
+-    for (Iterator<Path> i = dirIterator(); i.hasNext(); ) {
+-      Path dir = i.next();
+-      try {
+-        for (FileStatus st : fileSystem.listStatus(dir)) {
+-          if (lastMod < st.getModificationTime()) {
+-            lastMod = st.getModificationTime();
+-          }
+-        }
+-      } catch (IOException e) {
+-        throw new DatasetIOException("Cannot find last modified time of of " + dir, e);
+-      }
+-    }
+-    return lastMod;
++    return unbounded.getLastModified();
+   }
+ 
+   @Override
+@@ -471,6 +464,16 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+     return unbounded.isEmpty();
+   }
+ 
++  @Override
++  public void signalReady() {
++    unbounded.signalReady();
++  }
++
++  @Override
++  public boolean isReady() {
++    return unbounded.isReady();
++  }
++
+   public static class Builder<E> {
+ 
+     private Configuration conf;
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
+index 5616943..4202228 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemView.java
+@@ -25,6 +25,7 @@ import org.kitesdk.data.DatasetException;
+ import org.kitesdk.data.DatasetIOException;
+ import org.kitesdk.data.DatasetReader;
+ import org.kitesdk.data.DatasetWriter;
++import org.kitesdk.data.Signalable;
+ import org.kitesdk.data.spi.AbstractDatasetReader;
+ import org.kitesdk.data.spi.AbstractDatasetWriter;
+ import org.kitesdk.data.spi.AbstractRefinableView;
+@@ -54,7 +55,7 @@ import org.slf4j.LoggerFactory;
+  */
+ @Immutable
+ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatAccessor<E>,
+-    LastModifiedAccessor, SizeAccessor {
++    LastModifiedAccessor, SizeAccessor, Signalable<E> {
+ 
+   private static final Logger LOG = LoggerFactory.getLogger(FileSystemView.class);
+ 
+@@ -63,11 +64,14 @@ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatA
+ 
+   private final PartitionListener listener;
+ 
+-  FileSystemView(FileSystemDataset<E> dataset, @Nullable PartitionListener listener, Class<E> type) {
++  private final SignalManager signalManager;
++
++  FileSystemView(FileSystemDataset<E> dataset, @Nullable PartitionListener listener, @Nullable SignalManager signalManager, Class<E> type) {
+     super(dataset, type);
+     this.fs = dataset.getFileSystem();
+     this.root = dataset.getDirectory();
+     this.listener = listener;
++    this.signalManager = signalManager;
+   }
+ 
+   private FileSystemView(FileSystemView<E> view, Constraints c) {
+@@ -75,6 +79,7 @@ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatA
+     this.fs = view.fs;
+     this.root = view.root;
+     this.listener = view.listener;
++    this.signalManager = view.signalManager;
+   }
+ 
+   @Override
+@@ -214,6 +219,31 @@ class FileSystemView<E> extends AbstractRefinableView<E> implements InputFormatA
+         throw new DatasetIOException("Cannot find last modified time of of " + dir, e);
+       }
+     }
++
++    // if view was marked ready more recently count it as the modified time
++    if (signalManager != null) {
++      long readyTimestamp = signalManager.getReadyTimestamp(getConstraints());
++      if (lastMod < readyTimestamp) {
++        lastMod = readyTimestamp;
++      }
++    }
++
+     return lastMod;
+   }
++
++  @Override
++  public void signalReady() {
++    if (signalManager != null) {
++      signalManager.signalReady(getConstraints());
++    }
++  }
++
++  @Override
++  public boolean isReady() {
++    if (signalManager != null) {
++      long readyTimestamp = signalManager.getReadyTimestamp(getConstraints());
++      return readyTimestamp != -1;
++    }
++    return false;
++  }
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/SignalManager.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/SignalManager.java
+new file mode 100644
+index 0000000..b0b502b
+--- /dev/null
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/SignalManager.java
+@@ -0,0 +1,159 @@
++/**
++ * Copyright 2015 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.data.spi.filesystem;
++
++import java.io.FileNotFoundException;
++import java.io.IOException;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Map;
++import org.apache.hadoop.fs.FSDataOutputStream;
++import org.apache.hadoop.fs.FileStatus;
++import org.apache.hadoop.fs.FileSystem;
++import org.apache.hadoop.fs.Path;
++import org.kitesdk.data.DatasetException;
++import org.kitesdk.data.DatasetIOException;
++import org.kitesdk.data.spi.Constraints;
++import org.kitesdk.data.Signalable;
++
++import com.google.common.base.Joiner;
++
++/**
++ * Manager for creating, and checking {@link Signalable#isReady() ready} signals.
++ * Stored in a filesystem, typically HDFS.
++ */
++public class SignalManager {
++
++  private final Path signalDirectory;
++  private final FileSystem rootFileSystem;
++
++  private static final String UNBOUNDED_CONSTRAINT = "unbounded";
++
++  /**
++   * Creates a new signal manager using the given signal directory.
++   *
++   * @param conf the Hadoop configuration
++   * @param signalDirectory directory in which the manager
++   *                        stores signals.
++   *
++   * @return a signal manager instance.
++   */
++  public SignalManager(FileSystem fileSystem, Path signalDirectory) {
++    this.signalDirectory = signalDirectory;
++    this.rootFileSystem = fileSystem;
++  }
++
++  /**
++   * Create a signal for the specified constraints.
++   *
++   * @param viewConstraints The constraints to create a signal for.
++   *
++   * @throws DatasetException if the signal could not be created.
++   */
++  public void signalReady(Constraints viewConstraints) {
++    try {
++      rootFileSystem.mkdirs(signalDirectory);
++    } catch (IOException e) {
++      throw new DatasetIOException("Unable to create signal manager directory: "
++              + signalDirectory, e);
++    }
++
++    String normalizedConstraints = getNormalizedConstraints(viewConstraints);
++
++    Path signalPath = new Path(signalDirectory, normalizedConstraints);
++    try{
++      // create the output stream to overwrite the current contents, if the directory or file
++      // exists it will be overwritten to get a new timestamp
++      FSDataOutputStream os = rootFileSystem.create(signalPath, true);
++      os.close();
++    } catch (IOException e) {
++      throw new DatasetIOException("Could not access signal path: " + signalPath, e);
++    }
++  }
++
++  /**
++   * Check the last time the specified constraints have been signaled as ready.
++   *
++   * @param viewConstraints The constraints to check for a signal.
++   *
++   * @return the timestamp of the last time the constraints were signaled as ready.
++   *          if the constraints have never been signaled, -1 will be returned.
++   *
++   * @throws DatasetException if the signals could not be accessed.
++   */
++  public long getReadyTimestamp(Constraints viewConstraints) {
++    String normalizedConstraints = getNormalizedConstraints(viewConstraints);
++
++    Path signalPath = new Path(signalDirectory, normalizedConstraints);
++    // check if the signal exists
++    try {
++      try {
++        FileStatus signalStatus = rootFileSystem.getFileStatus(signalPath);
++        return signalStatus.getModificationTime();
++      } catch (final FileNotFoundException ex) {
++        // empty, will be thrown when the signal path doesn't exist
++      }
++      return -1;
++    } catch (IOException e) {
++      throw new DatasetIOException("Could not access signal path: " + signalPath, e);
++    }
++  }
++
++  /**
++   * Get a normalized query string for the {@link Constraints} that identifies a
++   * logical {@code View}.
++   *
++   * The normalized constraints will match to the query portion of a URI that will
++   * be exactly the same as another logically equivalent URI.
++   * (where, for example, the query parameters may be re-ordered)
++   *
++   * If the constraints are {@link Constraints#isUnbounded() unbounded} a special case
++   * of "unbounded" will be returned.
++   *
++   * @return a normalized query string for the specified constraints.
++   *
++   * @since 1.1
++   */
++  public static String getNormalizedConstraints(Constraints constraints) {
++    // the constraints map isn't naturally ordered
++    // we want to ensure that our output is
++
++    if (constraints.isUnbounded()) {
++      // unbounded constrains is a special case, here we just use
++      // "unbounded" as the constraint
++      return UNBOUNDED_CONSTRAINT;
++    }
++
++    Map<String, String> orderedConstraints = constraints.toNormalizedQueryMap();
++
++    List<String> parts = new ArrayList<String>();
++    // build a query portion of the URI
++    for (Map.Entry<String, String> entry : orderedConstraints.entrySet()) {
++      StringBuilder builder = new StringBuilder();
++      String key = entry.getKey();
++      String value = entry.getValue();
++      builder.append(key);
++      builder.append("=");
++      if (value != null) {
++        builder.append(value);
++      }
++      parts.add(builder.toString());
++    }
++
++    return Joiner.on('&').join(parts);
++  }
++
++}
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java
+index 85b55c7..e22b878 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/In.java
+@@ -120,6 +120,17 @@ public class In<T> extends RegisteredPredicate<T> {
+         Iterables.transform(set, new ToString<T>(schema)));
+   }
+ 
++  @Override
++  public String toNormalizedString(Schema schema) {
++    // we want the string this returns to be consistent
++    // ensure the set is sorted before joining it.
++    // ToString first allows us to consistently sort even when
++    // the value may not be comparable
++
++    Iterable<String> strings = Iterables.transform(set, new ToString<T>(schema));
++    return Joiner.on(',').join(Sets.newTreeSet(strings));
++  }
++
+   private static class ToString<T> implements Function<T, String> {
+     private final Schema schema;
+ 
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/Predicates.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/Predicates.java
+index e13b2ba..6870cab 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/Predicates.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/Predicates.java
+@@ -70,6 +70,26 @@ public abstract class Predicates {
+     }
+   }
+ 
++  public static <T> String toNormalizedString(Predicate<T> predicate, Schema schema) {
++    if (predicate instanceof Exists) {
++      return "";
++    } else if (predicate instanceof Range) {
++      return ((Range) predicate).toString(schema);
++    } else if (predicate instanceof In) {
++      String values = ((In) predicate).toNormalizedString(schema);
++      if (values.length() != 0) {
++        return values;
++      }
++      // "" is a special case that conflicts with exists, use the named version
++      return "in()";
++    } else if (predicate instanceof RegisteredPredicate) {
++      return RegisteredPredicate.toNormalizedString(
++          (RegisteredPredicate) predicate, schema);
++    } else {
++      throw new DatasetException("Unknown predicate: " + predicate);
++    }
++  }
++
+   public static <T> Predicate<T> fromString(String pString, Schema schema) {
+     if (pString.length() == 0) {
+       return exists();
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/RegisteredPredicate.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/RegisteredPredicate.java
+index b39d850..c1f9d98 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/RegisteredPredicate.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/predicates/RegisteredPredicate.java
+@@ -48,6 +48,13 @@ public abstract class RegisteredPredicate<T> implements Predicate<T> {
+     return predicate.getName() + "(" + predicate.toString(schema) + ")";
+   }
+ 
++  public static String toNormalizedString(RegisteredPredicate<?> predicate, Schema schema) {
++    // ensure fromString will be successful
++    Preconditions.checkArgument(REGISTRY.containsKey(predicate.getName()),
++        "Predicate is not registered: " + predicate.getName());
++    return predicate.getName() + "(" + predicate.toNormalizedString(schema) + ")";
++  }
++
+   public static <T> RegisteredPredicate<T> fromString(String predicate, Schema schema) {
+     Matcher match = FUNCTION.matcher(predicate);
+     if (match.matches()) {
+@@ -59,4 +66,13 @@ public abstract class RegisteredPredicate<T> implements Predicate<T> {
+ 
+   public abstract String getName();
+   public abstract String toString(Schema schema);
++
++  /**
++   * Return a normalized form of the predicate such that any logically equivalent
++   * predicate returns the same string. Some predicates may need to override
++   * this method to ensure they are normalized correctly.
++   */
++  public String toNormalizedString(Schema schema) {
++    return toString(schema);
++  }
+ }
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestRefinableViews.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestRefinableViews.java
+index 95cf5ac..14568fd 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestRefinableViews.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestRefinableViews.java
+@@ -17,6 +17,7 @@
+ package org.kitesdk.data.spi;
+ 
+ import com.google.common.io.Closeables;
++
+ import java.io.IOException;
+ import java.util.concurrent.Callable;
+ import org.joda.time.DateTime;
+@@ -30,6 +31,7 @@ import java.util.Set;
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.fs.FileSystem;
+ import org.junit.Assert;
++import org.junit.Assume;
+ import org.junit.Before;
+ import org.junit.Test;
+ import org.junit.runner.RunWith;
+@@ -819,4 +821,132 @@ public abstract class TestRefinableViews extends MiniDFSTest {
+     Assert.assertNotNull("with should succeed",
+         notPartitioned.with("timestamp", now));
+   }
++
++  @Test
++  @SuppressWarnings("rawtypes")
++  public void testReadySignalWithConstraint() {
++    Assume.assumeTrue(unbounded instanceof Signalable);
++    final long instant = new DateTime(2013, 10, 1, 0, 0, DateTimeZone.UTC).getMillis();
++    final Signalable withSpecificTimestamp =
++        (Signalable) unbounded.with("timestamp", instant);
++
++    Assert.assertFalse("Should not be ready initially", withSpecificTimestamp.isReady());
++    withSpecificTimestamp.signalReady();
++    Assert.assertTrue("Should be ready after signal", withSpecificTimestamp.isReady());
++
++    Signalable multipleWithView = (Signalable)unbounded.with("timestamp", instant+1, instant+2);
++
++    Assert.assertFalse("Should not be ready initially", multipleWithView.isReady());
++    multipleWithView.signalReady();
++    Assert.assertTrue("Should be ready after signal", multipleWithView.isReady());
++  }
++
++  @Test
++  @SuppressWarnings("rawtypes")
++  public void testReadySignalFromConstraint() {
++    Assume.assumeTrue(unbounded instanceof Signalable);
++    final long instant = new DateTime(2013, 10, 1, 0, 0, DateTimeZone.UTC).getMillis();
++    final Signalable fromSpecificTimestamp =
++        (Signalable) unbounded.from("timestamp", instant);
++
++    Assert.assertFalse("Should not be ready initially", fromSpecificTimestamp.isReady());
++    fromSpecificTimestamp.signalReady();
++    Assert.assertTrue("Should be ready after signal", fromSpecificTimestamp.isReady());
++  }
++
++  @Test
++  @SuppressWarnings("rawtypes")
++  public void testReadySignalFromAfterConstraint() {
++    Assume.assumeTrue(unbounded instanceof Signalable);
++    final long instant = new DateTime(2013, 10, 1, 0, 0, DateTimeZone.UTC).getMillis();
++    final Signalable fromAfterSpecificTimestamp =
++        (Signalable) unbounded.from("timestamp", instant);
++
++    Assert.assertFalse("Should not be ready initially", fromAfterSpecificTimestamp.isReady());
++    fromAfterSpecificTimestamp.signalReady();
++    Assert.assertTrue("Should be ready after signal", fromAfterSpecificTimestamp.isReady());
++  }
++
++  @Test
++  @SuppressWarnings("rawtypes")
++  public void testReadySignalToConstraint() {
++    Assume.assumeTrue(unbounded instanceof Signalable);
++    final long instant = new DateTime(2013, 10, 1, 0, 0, DateTimeZone.UTC).getMillis();
++    final Signalable toSpecificTimestamp =
++        (Signalable) unbounded.to("timestamp", instant);
++
++    Assert.assertFalse("Should not be ready initially", toSpecificTimestamp.isReady());
++    toSpecificTimestamp.signalReady();
++    Assert.assertTrue("Should be ready after signal", toSpecificTimestamp.isReady());
++  }
++
++  @Test
++  @SuppressWarnings("rawtypes")
++  public void testReadySignalToBeforeConstraint() {
++    Assume.assumeTrue(unbounded instanceof Signalable);
++    final long instant = new DateTime(2013, 10, 1, 0, 0, DateTimeZone.UTC).getMillis();
++    final Signalable toBeforeSpecificTimestamp =
++        (Signalable) unbounded.toBefore("timestamp", instant);
++
++    Assert.assertFalse("Should not be ready initially", toBeforeSpecificTimestamp.isReady());
++    toBeforeSpecificTimestamp.signalReady();
++    Assert.assertTrue("Should be ready after signal", toBeforeSpecificTimestamp.isReady());
++  }
++
++  @Test
++  @SuppressWarnings("rawtypes")
++  public void testReadySignalMultipleConstraints() {
++    Assume.assumeTrue(unbounded instanceof Signalable);
++    final long instant = new DateTime(2013, 10, 1, 0, 0, DateTimeZone.UTC).getMillis();
++    final Signalable withTwoConstrainedFields =
++        (Signalable) unbounded.with("timestamp", instant).with("user_id", 0L);
++
++    Assert.assertFalse("Should not be ready initially", withTwoConstrainedFields.isReady());
++    withTwoConstrainedFields.signalReady();
++    Assert.assertTrue("Should be ready after signal", withTwoConstrainedFields.isReady());
++  }
++
++  @Test
++  @SuppressWarnings("rawtypes")
++  public void testReadySignalsAroundComparableBoundaries() {
++    Assume.assumeTrue(unbounded instanceof Signalable);
++    final long instant = new DateTime(2013, 10, 1, 0, 0, DateTimeZone.UTC).getMillis();
++    final Signalable withSpecificTimestamp =
++        (Signalable) unbounded.with("timestamp", instant);
++
++    Assert.assertFalse("Base view should not be ready initially",
++        ((Signalable)unbounded).isReady());
++
++    Assert.assertFalse("Should not be ready initially",
++        withSpecificTimestamp.isReady());
++    withSpecificTimestamp.signalReady();
++    Assert.assertTrue("Should be ready after signal",
++        withSpecificTimestamp.isReady());
++
++    final Signalable beforeSpecificTimestamp =
++        (Signalable) unbounded.toBefore("timestamp", instant);
++    Assert.assertFalse("To before the instant should not be ready",
++        beforeSpecificTimestamp.isReady());
++
++    final Signalable afterSpecificTimestamp =
++        (Signalable) unbounded.fromAfter("timestamp", instant);
++    Assert.assertFalse("To after the instant should not be ready",
++        afterSpecificTimestamp.isReady());
++
++    final Signalable immediatelyAfterSpecificTimestamp =
++        (Signalable) unbounded.with("timestamp", instant+1);
++    Assert.assertFalse("After the instant should not be ready",
++        immediatelyAfterSpecificTimestamp.isReady());
++
++    final Signalable immediatelyBeforeSpecificTimestamp =
++        (Signalable) unbounded.with("timestamp", instant-1);
++    Assert.assertFalse("Before the instant should not be ready",
++        immediatelyBeforeSpecificTimestamp.isReady());
++
++    final Signalable includingSpecificTimestamp =
++        (Signalable) unbounded.from("timestamp", instant-1).to("timestamp", instant+1);
++    Assert.assertFalse("Including the instant should not be ready",
++        includingSpecificTimestamp.isReady());
++  }
++
+ }
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestDatasetWriterCacheLoader.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestDatasetWriterCacheLoader.java
+index cf92492..e33e6b7 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestDatasetWriterCacheLoader.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestDatasetWriterCacheLoader.java
+@@ -55,7 +55,7 @@ public class TestDatasetWriterCacheLoader {
+       .schema(USER_SCHEMA)
+       .partitionStrategy(partitionStrategy)
+       .build());
+-    view = new FileSystemView<Object>(users, null, Object.class);
++    view = new FileSystemView<Object>(users, null, null, Object.class);
+   }
+ 
+   @After
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDataset.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDataset.java
+index cdf15e3..c4caff8 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDataset.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDataset.java
+@@ -15,6 +15,7 @@
+  */
+ package org.kitesdk.data.spi.filesystem;
+ 
++import org.kitesdk.data.Signalable;
+ import com.google.common.collect.Lists;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetDescriptor;
+@@ -23,6 +24,7 @@ import org.kitesdk.data.DatasetReader;
+ import org.kitesdk.data.Format;
+ import org.kitesdk.data.Formats;
+ import org.kitesdk.data.MiniDFSTest;
++import org.kitesdk.data.URIBuilder;
+ import org.kitesdk.data.ValidationException;
+ import org.kitesdk.data.impl.Accessor;
+ import org.kitesdk.data.spi.PartitionKey;
+@@ -30,6 +32,7 @@ import org.kitesdk.data.PartitionStrategy;
+ import com.google.common.collect.Sets;
+ import com.google.common.io.Files;
+ import java.io.IOException;
++import java.net.URI;
+ import java.util.Arrays;
+ import java.util.Collection;
+ import java.util.List;
+@@ -49,7 +52,6 @@ import org.kitesdk.data.TestHelpers;
+ import org.kitesdk.data.spi.PartitionedDataset;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+-
+ import static org.kitesdk.data.spi.filesystem.DatasetTestUtilities.*;
+ import org.kitesdk.data.spi.FieldPartitioner;
+ 
+@@ -609,6 +611,56 @@ public class TestFileSystemDataset extends MiniDFSTest {
+     checkReaderBehavior(ds.newReader(), 0, (RecordValidator<Record>) null);
+   }
+ 
++  @Test
++  public void signalReadyOnUnboundedDataset() {
++    final FileSystemDataset<Record> ds = new FileSystemDataset.Builder<Record>()
++        .namespace("ns")
++        .name("users")
++        .configuration(getConfiguration())
++        .descriptor(
++            new DatasetDescriptor.Builder().schema(USER_SCHEMA).format(format)
++                .location(testDirectory).build())
++        .type(Record.class)
++        .uri(URIBuilder.build(URI.create("repo:" + testDirectory.toUri()), "ns", "name"))
++        .build();
++    Assert.assertFalse("Unbounded dataset has not been signaled", ds.isReady());
++    ds.signalReady();
++    Assert.assertTrue("Unbounded dataset has been signaled and should be ready", ds.isReady());
++  }
++
++  @Test
++  public void testReadySignalUpdatesModifiedTime() {
++    final FileSystemDataset<Record> ds = new FileSystemDataset.Builder<Record>()
++        .namespace("ns")
++        .name("users")
++        .configuration(getConfiguration())
++        .descriptor(
++            new DatasetDescriptor.Builder().schema(USER_SCHEMA).format(format)
++                .location(testDirectory).build())
++        .type(Record.class)
++        .uri(URIBuilder.build(URI.create("repo:" + testDirectory.toUri()), "ns", "name"))
++        .build();
++
++     Assert.assertFalse("Dataset should not be ready before being signaled",
++        ds.isReady());
++
++    // the modified time depends on the filesystem, and may only be granular to the second
++    // signal and check until the modified time is after the current time, or until
++    // enough time has past that the signal should have been distinguishable
++    long signaledTime = 0;
++    long currentTime = System.currentTimeMillis();
++    while(currentTime >= signaledTime && (System.currentTimeMillis() - currentTime) <= 2000) {
++      ds.signalReady();
++      signaledTime = ds.getLastModified();
++    }
++
++    Assert.assertTrue("Dataset should have been signaled as ready", ds.isReady());
++    Assert.assertTrue("Signal should update the modified time",
++        signaledTime > currentTime);
++    Assert.assertFalse("Only the dataset should have been signaled",
++        ((Signalable)ds.with("username", "bob")).isReady());
++  }
++
+   @SuppressWarnings("deprecation")
+   private int readTestUsersInPartition(FileSystemDataset<Record> ds, PartitionKey key,
+       String subpartitionName) {
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemView.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemView.java
+index 18106a2..bf40e05 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemView.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemView.java
+@@ -16,6 +16,7 @@
+ 
+ package org.kitesdk.data.spi.filesystem;
+ 
++import org.kitesdk.data.Signalable;
+ import com.google.common.io.Closeables;
+ import java.util.Iterator;
+ import org.joda.time.DateTime;
+@@ -25,6 +26,7 @@ import org.kitesdk.data.DatasetWriter;
+ import org.kitesdk.data.TestHelpers;
+ import org.kitesdk.data.View;
+ import org.kitesdk.data.spi.DatasetRepository;
++import org.kitesdk.data.spi.LastModifiedAccessor;
+ import org.kitesdk.data.spi.TestRefinableViews;
+ import org.kitesdk.data.event.StandardEvent;
+ import org.apache.hadoop.fs.FileSystem;
+@@ -272,6 +274,35 @@ public class TestFileSystemView extends TestRefinableViews {
+     assertDirectoriesExist(fs, root);
+   }
+ 
++  @Test
++  @SuppressWarnings("rawtypes")
++  public void testSignalUpdatesLastModified() {
++    long lastModified = ((LastModifiedAccessor)unbounded).getLastModified();
++
++    long signaledTime = -1;
++    long spinStart = System.currentTimeMillis();
++    while(lastModified >= signaledTime && (System.currentTimeMillis() - spinStart) <= 2000) {
++      ((Signalable)unbounded).signalReady();
++      signaledTime = ((LastModifiedAccessor)unbounded).getLastModified();
++    }
++    Assert.assertTrue("Signaling should update last modified time", signaledTime > lastModified);
++  }
++
++  @Test
++  public void testNullSignalManager() {
++    FileSystemDataset<StandardEvent> ds =
++        (FileSystemDataset<StandardEvent>) unbounded.getDataset();
++    FileSystemView<StandardEvent> view =
++        new FileSystemView<StandardEvent>(ds, null, null, StandardEvent.class);
++
++    // getlast modified
++    Assert.assertTrue("Last modified does not require access to signal manager",
++        view.getLastModified() >= -1);
++
++    view.signalReady();
++    Assert.assertFalse("View should not be signaled without manager", view.isReady());
++  }
++
+   @SuppressWarnings("deprecation")
+   public static void assertDirectoriesExist(FileSystem fs, Path... dirs)
+       throws IOException {
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestPartitionedDatasetWriter.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestPartitionedDatasetWriter.java
+index 50abc53..a158a82 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestPartitionedDatasetWriter.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestPartitionedDatasetWriter.java
+@@ -66,7 +66,7 @@ public class TestPartitionedDatasetWriter {
+             .build());
+ 
+     writer = PartitionedDatasetWriter.newWriter(
+-        new FileSystemView<Object>(users, null, Object.class));
++        new FileSystemView<Object>(users, null, null, Object.class));
+   }
+ 
+   @After
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestSignalManager.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestSignalManager.java
+new file mode 100644
+index 0000000..664be17
+--- /dev/null
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestSignalManager.java
+@@ -0,0 +1,228 @@
++/**
++ * Copyright 2015 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.data.spi.filesystem;
++
++import java.io.IOException;
++import java.util.Arrays;
++import java.util.Collection;
++import org.apache.hadoop.conf.Configuration;
++import org.apache.hadoop.fs.FSDataOutputStream;
++import org.apache.hadoop.fs.FileSystem;
++import org.apache.hadoop.fs.Path;
++import org.junit.Assert;
++import org.junit.Before;
++import org.junit.Test;
++import org.junit.runner.RunWith;
++import org.junit.runners.Parameterized;
++import org.kitesdk.data.MiniDFSTest;
++import org.kitesdk.data.spi.Constraints;
++import com.google.common.io.Files;
++
++@RunWith(Parameterized.class)
++public class TestSignalManager extends MiniDFSTest {
++
++  Path testDirectory;
++  Configuration conf;
++  FileSystem fileSystem;
++
++  boolean distributed;
++
++  @Parameterized.Parameters
++  public static Collection<Object[]> data() {
++    Object[][] data = new Object[][] {
++            { false },  // default to local FS
++            { true } }; // default to distributed FS
++    return Arrays.asList(data);
++  }
++
++  public TestSignalManager(boolean distributed) {
++    this.distributed = distributed;
++  }
++
++  @Before
++  public void setup() throws IOException {
++    this.conf = (distributed ?
++            MiniDFSTest.getConfiguration() :
++            new Configuration());
++
++    this.fileSystem = FileSystem.get(conf);
++
++    Path baseDirectory = fileSystem.makeQualified(
++        new Path(Files.createTempDir().getAbsolutePath()));
++    this.testDirectory = new Path(baseDirectory, ".signals");
++  }
++
++  @Test
++  public void testNormalizeConstraints() throws IOException {
++    Constraints constraints = new Constraints(DatasetTestUtilities.USER_SCHEMA).
++        with("email", "user@domain.com");
++
++    String normalizedConstraints = SignalManager.getNormalizedConstraints(constraints);
++
++    Assert.assertEquals("email=user%40domain.com", normalizedConstraints);
++  }
++
++  @Test
++  public void testNormalizeConstraintsUnbounded() throws IOException {
++    Constraints constraints = new Constraints(DatasetTestUtilities.USER_SCHEMA);
++
++    String normalizedConstraints = SignalManager.getNormalizedConstraints(constraints);
++
++    Assert.assertEquals("unbounded", normalizedConstraints);
++  }
++
++  @Test
++  public void testNormalizeConstraintsValueExists() throws IOException {
++    Constraints constraints = new Constraints(DatasetTestUtilities.USER_SCHEMA).
++        with("email", "");
++
++    String normalizedConstraints = SignalManager.getNormalizedConstraints(constraints);
++
++    Assert.assertEquals("email=in()", normalizedConstraints);
++  }
++
++  @Test
++  public void testNormalizeConstraintsOrderedSets() throws IOException {
++    Constraints constraints = new Constraints(DatasetTestUtilities.OLD_VALUE_SCHEMA).
++        with("value", 7L,2L,3L);
++
++    String normalizedConstraints = SignalManager.getNormalizedConstraints(constraints);
++
++    Assert.assertEquals("value=2,3,7", normalizedConstraints);
++  }
++
++  @Test
++  public void testNormalizeConstraintsIntervals() throws IOException {
++    Constraints constraints = new Constraints(DatasetTestUtilities.OLD_VALUE_SCHEMA).
++        toBefore("value", 12L);
++
++    String normalizedConstraints = SignalManager.getNormalizedConstraints(constraints);
++
++    Assert.assertEquals("value=(,12)", normalizedConstraints);
++  }
++
++  @Test
++  public void testNormalizeConstraintsOrderedKeys() throws IOException {
++    Constraints constraints = new Constraints(DatasetTestUtilities.USER_SCHEMA).
++        with("username", "kite").with("email", "kite@domain.com");
++
++    String normalizedConstraints = SignalManager.getNormalizedConstraints(constraints);
++
++    Assert.assertEquals("email=kite%40domain.com&username=kite", normalizedConstraints);
++  }
++
++  @Test
++  public void testSignalDirectoryCreatedOnSignal() throws IOException {
++    SignalManager manager = new SignalManager(fileSystem, testDirectory);
++
++    Assert.assertFalse("Signal directory shouldn't exist before signals",
++        fileSystem.exists(testDirectory));
++
++    Constraints constraints = new Constraints(DatasetTestUtilities.USER_SCHEMA).
++        with("email", "signalCreatesDir@domain.com");
++    manager.signalReady(constraints);
++
++    Assert.assertTrue("Signal directory created on signals",
++        fileSystem.exists(testDirectory));
++  }
++
++  @Test
++  public void testConstraintsSignaledReady() throws IOException {
++    SignalManager manager = new SignalManager(fileSystem, testDirectory);
++
++    Constraints constraints = new Constraints(DatasetTestUtilities.USER_SCHEMA).
++        with("email", "testConstraintsSignaledReady@domain.com");
++    manager.signalReady(constraints);
++
++    String normalizedConstraints = SignalManager.getNormalizedConstraints(constraints);
++    Assert.assertTrue(this.fileSystem.exists(new Path(this.testDirectory,
++        normalizedConstraints)));
++  }
++
++  @Test
++  public void testMultiConstraintsSignaledReady() throws IOException {
++    SignalManager manager = new SignalManager(fileSystem, testDirectory);
++
++    Constraints constraints = new Constraints(DatasetTestUtilities.USER_SCHEMA).
++        with("email", "kiteuser@domain.com").with("username", "kiteuser");
++    manager.signalReady(constraints);
++
++    String normalizedConstraints = SignalManager.getNormalizedConstraints(constraints);
++    Assert.assertTrue(this.fileSystem.exists(new Path(this.testDirectory,
++        normalizedConstraints)));
++  }
++
++  @Test
++  public void testConstraintsSignaledReadyPreviouslySignaled()
++      throws IOException, InterruptedException {
++    SignalManager manager = new SignalManager(fileSystem, testDirectory);
++
++    Constraints constraints =
++        new Constraints(DatasetTestUtilities.USER_SCHEMA)
++          .with("email",
++              "testConstraintsSignaledReadyPreviouslySignaled@domain.com");
++
++    String normalizedConstraints = SignalManager.getNormalizedConstraints(constraints);
++    Path signalFilePath = new Path(this.testDirectory,normalizedConstraints);
++
++    manager.signalReady(constraints);
++
++    Assert.assertTrue(this.fileSystem.exists(signalFilePath));
++    long firstSignalContents = this.fileSystem.getFileStatus(signalFilePath).getModificationTime();
++
++    // the modified time depends on the filesystem, and may only be granular to the second
++    // signal and check until the modified time is after the current time, or until
++    // enough time has past that the signal should have been distinguishable
++    long spinStart = System.currentTimeMillis();
++    long signaledTime = 0;
++    while(firstSignalContents >= signaledTime && (System.currentTimeMillis() - spinStart) <= 2000) {
++      manager.signalReady(constraints);
++      signaledTime = manager.getReadyTimestamp(constraints);
++    }
++
++    Assert.assertFalse("Second signal should not match the first",
++        signaledTime == firstSignalContents);
++  }
++
++  @Test
++  public void testConstraintsGetReadyTimestamp() throws IOException {
++    SignalManager manager = new SignalManager(fileSystem, testDirectory);
++
++    Constraints constraints = new Constraints(DatasetTestUtilities.USER_SCHEMA).
++        with("email", "testConstraintsReady@domain.com");
++
++    Path signalFilePath = new Path(this.testDirectory,
++        "email=testConstraintsReady%40domain.com");
++    // drop a file at the signal path
++    FSDataOutputStream stream = this.fileSystem.create(signalFilePath, true);
++    stream.writeUTF(String.valueOf(System.currentTimeMillis()));
++    stream.close();
++
++    Assert.assertTrue(manager.getReadyTimestamp(constraints) != -1);
++  }
++
++  @Test
++  public void testConstraintsGetReadyTimestampNotYetSignaled() throws IOException {
++    SignalManager manager = new SignalManager(fileSystem, testDirectory);
++
++    Constraints constraints = new Constraints(DatasetTestUtilities.USER_SCHEMA).
++        with("email", "testConstraintsGetReadyTimestampNotYetSignaled@domain.com");
++
++    Assert.assertEquals("A constraint that is not signaled should show -1",
++        -1, manager.getReadyTimestamp(constraints));
++  }
++
++}
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/predicates/TestInToFromString.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/predicates/TestInToFromString.java
+index c6a5211..ef623d4 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/predicates/TestInToFromString.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/predicates/TestInToFromString.java
+@@ -85,6 +85,16 @@ public class TestInToFromString {
+   }
+ 
+   @Test
++  public void testMultipleStringValuesNormalized() {
++    Assert.assertEquals("In<Utf8>#toNormalizedString(STRING)",
++        "ab,al,m,z",
++        Predicates.in(new Utf8("z"), new Utf8("al"), new Utf8("ab"), new Utf8("m"))
++        .toNormalizedString(STRING));
++    Assert.assertEquals("In#toNormalizedString(STRING)",
++        "ab,al,m,z", Predicates.in("z", "al", "ab", "m").toNormalizedString(STRING));
++  }
++
++  @Test
+   public void testSingleBooleanValue() {
+     Assert.assertEquals("In#toString(BOOL)",
+         "false", Predicates.in(false, false).toString(BOOL));
+@@ -117,6 +127,16 @@ public class TestInToFromString {
+   }
+ 
+   @Test
++  public void testMultipleIntegerValuesNormalized() {
++    // normalized predicate normalizes the string values,
++    // so they won't be sorted numerically.
++    // ensures that cases where the type may not be comparable directly
++    // that they will be consistently sorted
++    Assert.assertEquals("In#toString(INT)",
++        "123,45", Predicates.in(45,123).toNormalizedString(INT));
++  }
++
++  @Test
+   public void testSingleLongValue() {
+     Assert.assertEquals("In#toString(LONG)",
+         "34", Predicates.in(34L).toString(LONG));
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/predicates/TestRegisteredPredicateToFromString.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/predicates/TestRegisteredPredicateToFromString.java
+index e8709eb..e3fc88b 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/predicates/TestRegisteredPredicateToFromString.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/predicates/TestRegisteredPredicateToFromString.java
+@@ -16,7 +16,11 @@
+ 
+ package org.kitesdk.data.spi.predicates;
+ 
++import java.util.Set;
++import com.google.common.base.Joiner;
+ import com.google.common.base.Objects;
++import com.google.common.collect.Lists;
++import com.google.common.collect.Sets;
+ import javax.annotation.Nullable;
+ import org.apache.avro.Schema;
+ import org.apache.avro.SchemaBuilder;
+@@ -97,6 +101,65 @@ public class TestRegisteredPredicateToFromString {
+     }
+   }
+ 
++  /**
++   * A test RegisteredPredicate. Checks that a value isn't contained in a set of values.
++   * Do not use elsewhere, used to test registered predicate toNormalizedString.
++   */
++  public static class NotOneOf<T> extends RegisteredPredicate<T> {
++    static {
++      RegisteredPredicate.register("notOneOf", new Factory() {
++        @Override
++        public <T> RegisteredPredicate<T> fromString(String predicate, Schema schema) {
++          String[] values = predicate.split(",");
++          return new NotOneOf<T>(Sets.newLinkedHashSet(Lists.newArrayList(values)));
++        }
++      });
++    }
++
++    private final Set<String> restrictedValues;
++
++    public NotOneOf(Set<String> restrictedValues) {
++      this.restrictedValues = restrictedValues;
++    }
++
++    @Override
++    public String getName() {
++      return "notOneOf";
++    }
++
++    @Override
++    public String toString(Schema schema) {
++      return Joiner.on(',').join(restrictedValues);
++    }
++
++    @Override
++    public String toNormalizedString(Schema schema) {
++      return Joiner.on(',').join(Sets.newTreeSet(restrictedValues));
++    }
++
++    @Override
++    public boolean apply(@Nullable T value) {
++      return value == null ||  !restrictedValues.contains(value.toString());
++    }
++
++    @Override
++    public int hashCode() {
++      return Objects.hashCode(restrictedValues);
++    }
++
++    @Override
++    public boolean equals(Object obj) {
++      if (this == obj) {
++        return true;
++      }
++      if (obj == null || getClass() != obj.getClass()) {
++        return false;
++      }
++      NotOneOf other = (NotOneOf) obj;
++      return Objects.equal(restrictedValues, other.restrictedValues);
++    }
++  }
++
+   public static Contains<String> contains(String contained) {
+     return new Contains<String>(contained);
+   }
+@@ -113,4 +176,11 @@ public class TestRegisteredPredicateToFromString {
+         a, RegisteredPredicate.<String>fromString("contains(a)", STRING));
+   }
+ 
++  @Test
++  public void testNormalizedNotOneOf() {
++    NotOneOf<String> notAorB = new NotOneOf<String>(Sets.newLinkedHashSet(Lists.newArrayList("b","a")));
++    Assert.assertEquals("Should wrap delegate toNormalizedString in name function",
++        "notOneOf(a,b)", RegisteredPredicate.toNormalizedString(notAorB, STRING));
++  }
++
+ }
+diff --git a/kite-data/kite-data-crunch/src/main/java/org/kitesdk/data/crunch/DatasetTarget.java b/kite-data/kite-data-crunch/src/main/java/org/kitesdk/data/crunch/DatasetTarget.java
+index c366871..cac0688 100644
+--- a/kite-data/kite-data-crunch/src/main/java/org/kitesdk/data/crunch/DatasetTarget.java
++++ b/kite-data/kite-data-crunch/src/main/java/org/kitesdk/data/crunch/DatasetTarget.java
+@@ -34,6 +34,7 @@ import org.apache.hadoop.mapreduce.Job;
+ import org.kitesdk.data.DatasetException;
+ import org.kitesdk.data.DatasetNotFoundException;
+ import org.kitesdk.data.Datasets;
++import org.kitesdk.data.Signalable;
+ import org.kitesdk.data.View;
+ import org.kitesdk.data.mapreduce.DatasetKeyOutputFormat;
+ import org.kitesdk.data.spi.LastModifiedAccessor;
+@@ -85,7 +86,12 @@ class DatasetTarget<E> implements MapReduceTarget {
+       }
+     }
+ 
+-    boolean exists = !view.isEmpty();
++    boolean ready = false;
++    if (view instanceof Signalable) {
++      ready = ((Signalable)view).isReady();
++    }
++    // a view exists if it isn't empty, or if it has been marked ready
++    boolean exists = ready || !view.isEmpty();
+     if (exists) {
+       switch (writeMode) {
+         case DEFAULT:
+@@ -99,12 +105,12 @@ class DatasetTarget<E> implements MapReduceTarget {
+           LOG.info("Writing to existing dataset/view: " + view);
+           break;
+         case CHECKPOINT:
+-          boolean ready = true; // dataset.isReady(); // TODO: add when CDK-451 is ready
+           long lastModForTarget = -1;
+           if (view instanceof LastModifiedAccessor) {
+             lastModForTarget = ((LastModifiedAccessor) view).getLastModified();
+           }
+-          if (ready && lastModForTarget > lastModForSource) {
++
++          if (ready && (lastModForTarget > lastModForSource)) {
+             LOG.info("Re-starting pipeline from checkpoint dataset/view: " + view);
+             break;
+           } else {
+diff --git a/kite-data/kite-data-crunch/src/test/java/org/kitesdk/data/crunch/TestCrunchDatasets.java b/kite-data/kite-data-crunch/src/test/java/org/kitesdk/data/crunch/TestCrunchDatasets.java
+index fb5ac37..f2cf302 100644
+--- a/kite-data/kite-data-crunch/src/test/java/org/kitesdk/data/crunch/TestCrunchDatasets.java
++++ b/kite-data/kite-data-crunch/src/test/java/org/kitesdk/data/crunch/TestCrunchDatasets.java
+@@ -37,10 +37,12 @@ import org.apache.hadoop.fs.FileSystem;
+ import org.apache.hadoop.fs.Path;
+ import org.junit.After;
+ import org.junit.Assert;
++import org.junit.Assume;
+ import org.junit.Before;
+ import org.junit.Test;
+ import org.junit.runner.RunWith;
+ import org.junit.runners.Parameterized;
++import org.kitesdk.compat.Hadoop;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetReader;
+@@ -48,6 +50,7 @@ import org.kitesdk.data.DatasetWriter;
+ import org.kitesdk.data.Datasets;
+ import org.kitesdk.data.Formats;
+ import org.kitesdk.data.MiniDFSTest;
++import org.kitesdk.data.Signalable;
+ import org.kitesdk.data.spi.PartitionKey;
+ import org.kitesdk.data.PartitionStrategy;
+ import org.kitesdk.data.spi.DatasetRepository;
+@@ -399,6 +402,12 @@ public abstract class TestCrunchDatasets extends MiniDFSTest {
+     Thread.sleep(1000); // ensure output is newer than input on local filesystems with 1s granularity
+     runCheckpointPipeline(inputDataset, outputDataset);
+ 
++    // under hadoop1 the issues with LocalJobRunner (MAPREDUCE-2350) require that we
++    // manually ready the output dataset
++    if (Hadoop.isHadoop1()) {
++      ((Signalable)outputDataset).signalReady();
++    }
++
+     checkTestUsers(outputDataset, 1);
+ 
+     long lastModified = ((LastModifiedAccessor) outputDataset).getLastModified();
+@@ -419,6 +428,50 @@ public abstract class TestCrunchDatasets extends MiniDFSTest {
+     checkTestUsers(outputDataset, 1);
+     Assert.assertTrue(((LastModifiedAccessor) outputDataset).getLastModified() > lastModified);
+   }
++
++  @Test
++  public void testWriteModeCheckpointToNotReadyOutput() throws Exception {
++    //identity partition so we can overwrite the output
++    PartitionStrategy partitionStrategy = new PartitionStrategy.Builder().
++      identity("username").build();
++
++    Dataset<Record> inputDataset = repo.create("ns", "in", new DatasetDescriptor.
++        Builder().schema(USER_SCHEMA).partitionStrategy(partitionStrategy).build());
++    Dataset<Record> outputDataset = repo.create("ns", "out", new DatasetDescriptor.
++        Builder().schema(USER_SCHEMA).partitionStrategy(partitionStrategy).build());
++
++    writeTestUsers(inputDataset, 1, 0);
++
++    // ensure output is newer than input on local filesystems with 1s granularity
++    Thread.sleep(1000);
++
++    runCheckpointPipeline(inputDataset, outputDataset);
++
++    checkTestUsers(outputDataset, 1);
++
++    // under hadoop1 the issues with LocalJobRunner (MAPREDUCE-2350) require that we
++    // manually ready the output dataset
++    if (Hadoop.isHadoop1()) {
++      ((Signalable)outputDataset).signalReady();
++    } else {
++      //under hadoop2 the output will have been marked ready
++      Assert.assertTrue("output dataset should be ready after mapreduce", ((Signalable)outputDataset).isReady());
++    }
++
++    long lastModified = ((LastModifiedAccessor) outputDataset).getLastModified();
++
++    // ensure output is newer than input on local filesystems with 1s granularity
++    Thread.sleep(1000);
++
++    // now output to a view, this ensures that the view isn't ready
++    View<Record> outputView = outputDataset.with("username", "test-0");
++
++    // re-run without changing input and output should change since the view is not ready
++    runCheckpointPipeline(inputDataset, outputView);
++    checkTestUsers(outputDataset, 1);
++    Assert.assertTrue(((LastModifiedAccessor) outputView).getLastModified() > lastModified);
++  }
++
+   // Statically typed identify function to ensure the expected record is used.
+   static class UserRecordIdentityFn extends MapFn<NewUserRecord, NewUserRecord> {
+ 
+@@ -539,13 +592,41 @@ public abstract class TestCrunchDatasets extends MiniDFSTest {
+     }
+   }
+ 
++  @Test
++  public void testSignalReadyOutputView() {
++    Assume.assumeTrue(!Hadoop.isHadoop1());
++    Dataset<Record> inputDataset = repo.create("ns", "in", new DatasetDescriptor.Builder()
++        .schema(USER_SCHEMA).build());
++
++    Dataset<Record> outputDataset = repo.create("ns", "out", new DatasetDescriptor.Builder()
++        .schema(USER_SCHEMA).build());
++
++    writeTestUsers(inputDataset, 10);
++
++    View<Record> inputView = inputDataset.with("username", "test-8", "test-9");
++    View<Record> outputView = outputDataset.with("username", "test-8", "test-9");
++    Assert.assertEquals(2, datasetSize(inputView));
+ 
+-  private void runCheckpointPipeline(Dataset<Record> inputDataset,
+-      Dataset<Record> outputDataset) {
+     Pipeline pipeline = new MRPipeline(TestCrunchDatasets.class);
+     PCollection<GenericData.Record> data = pipeline.read(
+-        CrunchDatasets.asSource(inputDataset));
+-    pipeline.write(data, CrunchDatasets.asTarget((View<Record>) outputDataset),
++        CrunchDatasets.asSource(inputView));
++    pipeline.write(data, CrunchDatasets.asTarget(outputView), Target.WriteMode.APPEND);
++    pipeline.run();
++
++    Assert.assertEquals(2, datasetSize(outputView));
++
++    Assert.assertFalse("Output dataset should not be signaled ready",
++        ((Signalable)outputDataset).isReady());
++    Assert.assertTrue("Output view should be signaled ready",
++        ((Signalable)outputView).isReady());
++  }
++
++  private void runCheckpointPipeline(View<Record> inputView,
++      View<Record> outputView) {
++    Pipeline pipeline = new MRPipeline(TestCrunchDatasets.class);
++    PCollection<GenericData.Record> data = pipeline.read(
++        CrunchDatasets.asSource(inputView));
++    pipeline.write(data, CrunchDatasets.asTarget(outputView),
+         Target.WriteMode.CHECKPOINT);
+     pipeline.done();
+   }
+diff --git a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyOutputFormat.java b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyOutputFormat.java
+index 6a215c1..da57ca0 100644
+--- a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyOutputFormat.java
++++ b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyOutputFormat.java
+@@ -38,6 +38,7 @@ import org.kitesdk.data.DatasetException;
+ import org.kitesdk.data.DatasetWriter;
+ import org.kitesdk.data.Datasets;
+ import org.kitesdk.data.PartitionStrategy;
++import org.kitesdk.data.Signalable;
+ import org.kitesdk.data.TypeNotFoundException;
+ import org.kitesdk.data.View;
+ import org.kitesdk.data.spi.AbstractDataset;
+@@ -334,11 +335,20 @@ public class DatasetKeyOutputFormat<E> extends OutputFormat<E, Void> {
+     }
+   }
+ 
+-  static class NullOutputCommitter extends OutputCommitter {
++  static class NullOutputCommitter<E> extends OutputCommitter {
+     @Override
+     public void setupJob(JobContext jobContext) { }
+ 
+     @Override
++    public void commitJob(JobContext jobContext) throws IOException {
++      View<E> targetView = load(jobContext);
++
++      if (targetView instanceof Signalable) {
++        ((Signalable)targetView).signalReady();
++      }
++    }
++
++    @Override
+     public void setupTask(TaskAttemptContext taskContext) { }
+ 
+     @Override
+@@ -370,6 +380,10 @@ public class DatasetKeyOutputFormat<E> extends OutputFormat<E, Void> {
+       Dataset<E> jobDataset = repo.load(TEMP_NAMESPACE, jobDatasetName);
+       ((Mergeable<Dataset<E>>) targetView.getDataset()).merge(jobDataset);
+ 
++      if (targetView instanceof Signalable) {
++        ((Signalable)targetView).signalReady();
++      }
++
+       if (isTemp) {
+         ((TemporaryDatasetRepository) repo).delete();
+       } else {
+@@ -462,8 +476,13 @@ public class DatasetKeyOutputFormat<E> extends OutputFormat<E, Void> {
+         break;
+       default:
+       case DEFAULT:
+-        if (!target.isEmpty()) {
+-          throw new DatasetException("View is not empty: " + target);
++        boolean isReady = false;
++        if (target instanceof Signalable) {
++          isReady = ((Signalable)target).isReady();
++        }
++        if (isReady || !target.isEmpty()) {
++          throw new DatasetException(
++              "View is not empty or has been signaled as ready: " + target);
+         }
+         break;
+     }
+diff --git a/kite-data/kite-data-mapreduce/src/test/java/org/kitesdk/data/mapreduce/TestMapReduce.java b/kite-data/kite-data-mapreduce/src/test/java/org/kitesdk/data/mapreduce/TestMapReduce.java
+index 62ae048..5d85823 100644
+--- a/kite-data/kite-data-mapreduce/src/test/java/org/kitesdk/data/mapreduce/TestMapReduce.java
++++ b/kite-data/kite-data-mapreduce/src/test/java/org/kitesdk/data/mapreduce/TestMapReduce.java
+@@ -19,6 +19,7 @@ import java.io.IOException;
+ import java.util.HashMap;
+ import java.util.Map;
+ import org.apache.avro.generic.GenericData;
++import org.apache.avro.generic.GenericData.Record;
+ import org.apache.avro.util.Utf8;
+ import org.apache.hadoop.io.IntWritable;
+ import org.apache.hadoop.io.Text;
+@@ -26,16 +27,20 @@ import org.apache.hadoop.mapreduce.Job;
+ import org.apache.hadoop.mapreduce.Mapper;
+ import org.apache.hadoop.mapreduce.Reducer;
+ import org.junit.Assert;
++import org.junit.Assume;
+ import org.junit.Before;
+ import org.junit.Test;
+ import org.junit.runner.RunWith;
+ import org.junit.runners.Parameterized;
++import org.kitesdk.compat.Hadoop;
+ import org.kitesdk.data.Dataset;
+ import org.kitesdk.data.DatasetDescriptor;
+ import org.kitesdk.data.DatasetException;
+ import org.kitesdk.data.DatasetReader;
+ import org.kitesdk.data.Format;
+ import org.kitesdk.data.DatasetWriter;
++import org.kitesdk.data.Signalable;
++import org.kitesdk.data.View;
+ 
+ @RunWith(Parameterized.class)
+ public class TestMapReduce extends FileSystemTestBase {
+@@ -116,6 +121,17 @@ public class TestMapReduce extends FileSystemTestBase {
+     job.waitForCompletion(true);
+   }
+ 
++  @Test(expected = DatasetException.class)
++  public void testJobFailsWithEmptyButReadyOutput() throws Exception {
++    Assume.assumeTrue(!Hadoop.isHadoop1());
++    populateInputDataset();
++    // don't populate the output, but signal it as ready
++    ((Signalable)outputDataset).signalReady();
++
++    Job job = createJob();
++    job.waitForCompletion(true);
++  }
++
+   @Test
+   @SuppressWarnings("deprecation")
+   public void testJobOverwrite() throws Exception {
+@@ -158,6 +174,56 @@ public class TestMapReduce extends FileSystemTestBase {
+     checkOutput(true);
+   }
+ 
++  @Test
++  @SuppressWarnings("deprecation")
++  public void testJobOutputDatasetSignaledReady() throws Exception {
++    Assume.assumeTrue(!Hadoop.isHadoop1());
++    populateInputDataset();
++    populateOutputDataset(); // existing output will be overwritten
++
++    Job job = new Job();
++    DatasetKeyInputFormat.configure(job).readFrom(inputDataset).withType(GenericData.Record.class);
++
++    job.setMapperClass(LineCountMapper.class);
++    job.setMapOutputKeyClass(Text.class);
++    job.setMapOutputValueClass(IntWritable.class);
++
++    job.setReducerClass(GenericStatsReducer.class);
++
++    DatasetKeyOutputFormat.configure(job).overwrite(outputDataset).withType(GenericData.Record.class);
++
++    Assert.assertTrue(job.waitForCompletion(true));
++    Assert.assertTrue("Output dataset should be signaled ready",
++        ((Signalable)outputDataset).isReady());
++  }
++
++  @Test
++  @SuppressWarnings("deprecation")
++  public void testSignalReadyOutputView() throws Exception {
++    Assume.assumeTrue(!Hadoop.isHadoop1());
++    populateInputDataset();
++    populateOutputDataset(); // existing output will be overwritten
++
++    Job job = new Job();
++    DatasetKeyInputFormat.configure(job).readFrom(inputDataset).withType(GenericData.Record.class);
++
++    job.setMapperClass(LineCountMapper.class);
++    job.setMapOutputKeyClass(Text.class);
++    job.setMapOutputValueClass(IntWritable.class);
++
++    job.setReducerClass(GenericStatsReducer.class);
++
++    View<Record> outputView = outputDataset.with("name", "apple", "banana", "carrot");
++    DatasetKeyOutputFormat.configure(job).overwrite(outputView).withType(GenericData.Record.class);
++
++    Assert.assertTrue(job.waitForCompletion(true));
++
++    Assert.assertFalse("Output dataset should not be signaled ready",
++        ((Signalable)outputDataset).isReady());
++    Assert.assertTrue("Output view should be signaled ready",
++        ((Signalable)outputView).isReady());
++  }
++
+   private void populateInputDataset() {
+     DatasetWriter<GenericData.Record> writer = inputDataset.newWriter();
+     writer.write(newStringRecord("apple"));
+-- 
+1.7.0.4
+

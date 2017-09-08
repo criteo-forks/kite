@@ -1,0 +1,346 @@
+From f38e4bc36748f7d29bdd1cc980cc874b9e4728ae Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 24 Jun 2015 14:16:32 -0700
+Subject: [PATCH 100/115] KITE-1023: Fix PartitionView URI escaping.
+
+This adds test for URIs with escaped characters and fixes handling in
+the FS PartitionView implementation. The implementation was accidentally
+unescaping URIs by using URI.create, which expects escaped characters,
+along with URI#getPath, which will remove escapes.
+
+This also fixes the URI returned by getLocation. This previously used
+Path#getUri, but that method returns the Path's internal URI that
+is double-escaped. Returning a URI created from Path#toString is the
+correct behavior because it matches the Path passed in. Similarly,
+the merge and replace methods in the FS dataset implementation that rely
+on Paths created from those locations have been updated to correctly
+construct a Path from a URI by converting the URI to a String rather
+than setting the internal URI directly.
+---
+ .../data/spi/filesystem/FileSystemDataset.java     |   14 ++++--
+ .../spi/filesystem/FileSystemPartitionView.java    |   30 ++++++-------
+ .../data/spi/filesystem/TestFileSystemDataset.java |    2 +-
+ .../filesystem/TestFileSystemPartitionView.java    |   45 ++++++++++++++++++-
+ .../data/spi/filesystem/TestFileSystemUtil.java    |   47 +++++++++++++++++--
+ 5 files changed, 111 insertions(+), 27 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+index 1b7a7e9..0f8f1bb 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
+@@ -399,8 +399,12 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+           partitionListener.partitionAdded(namespace, name, relative.toString());
+         }
+ 
++        // use new Path(String) for locations because setting the URI directly
++        // results in the location URI being unescaped. the URI from
++        // #getLocation() is not a Path internal URI from with extra escapes
+         List<Pair<Path, Path>> staged = FileSystemUtil.stageMove(fileSystem,
+-            new Path(src.getLocation()), new Path(dest.getLocation()),
++            new Path(src.getLocation().toString()),
++            new Path(dest.getLocation().toString()),
+             "tmp" /* data should be added to recover from a failure */ );
+         FileSystemUtil.finishMove(fileSystem, staged);
+ 
+@@ -451,7 +455,7 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+           for (PartitionView<E> partition : existingPartitions) {
+             FileSystemPartitionView<E> toReplace =
+                 (FileSystemPartitionView<E>) partition;
+-            Path path = new Path(toReplace.getLocation());
++            Path path = new Path(toReplace.getLocation().toString());
+             removals.add(path);
+             notReplaced.remove(toReplace);
+             if (partitionListener != null && descriptor.isPartitioned()) {
+@@ -462,7 +466,8 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+ 
+           // replace the directory all at once
+           FileSystemUtil.replace(fileSystem, directory,
+-              new Path(dest.getLocation()), new Path(src.getLocation()),
++              new Path(dest.getLocation().toString()),
++              new Path(src.getLocation().toString()),
+               removals);
+ 
+           if (partitionListener != null && descriptor.isPartitioned()) {
+@@ -486,7 +491,8 @@ public class FileSystemDataset<E> extends AbstractDataset<E> implements
+       PartitionView<E> srcPartition = Iterables.getOnlyElement(
+           replacement.getCoveringPartitions());
+       List<Pair<Path, Path>> staged = FileSystemUtil.stageMove(fileSystem,
+-          new Path(srcPartition.getLocation()), new Path(unbounded.getLocation()),
++          new Path(srcPartition.getLocation().toString()),
++          new Path(unbounded.getLocation().toString()),
+           "replace" /* data should replace to recover from a failure */ );
+       deleteAll(); // remove all existing files
+       FileSystemUtil.finishMove(fileSystem, staged);
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemPartitionView.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemPartitionView.java
+index 0298992..0886dbf 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemPartitionView.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemPartitionView.java
+@@ -33,7 +33,6 @@ import org.kitesdk.data.PartitionStrategy;
+ import org.kitesdk.data.PartitionView;
+ import org.kitesdk.data.impl.Accessor;
+ import org.kitesdk.data.spi.Constraints;
+-import org.kitesdk.data.spi.Conversions;
+ import org.kitesdk.data.spi.FieldPartitioner;
+ import org.kitesdk.data.spi.PartitionListener;
+ import org.kitesdk.data.spi.SchemaUtil;
+@@ -47,7 +46,6 @@ class FileSystemPartitionView<E> extends FileSystemView<E>
+     implements PartitionView<E> {
+ 
+   private static final Splitter PATH_SPLITTER = Splitter.on('/');
+-  private static final Splitter KV_SPLITTER = Splitter.on('=').limit(2);
+ 
+   private final Path location;
+   private final URI relativeLocation;
+@@ -63,7 +61,7 @@ class FileSystemPartitionView<E> extends FileSystemView<E>
+ 
+   static <E> FileSystemPartitionView<E> getPartition(
+       FileSystemPartitionView<E> base, URI location) {
+-    URI relative = relativize(base.root.toUri(), location);
++    URI relative = relativize(URI.create(base.root.toString()), location);
+ 
+     if (relative == null) {
+       return base;
+@@ -75,7 +73,8 @@ class FileSystemPartitionView<E> extends FileSystemView<E>
+   static <E> FileSystemPartitionView<E> getPartition(
+       FileSystemPartitionView<E> base, Path location) {
+     URI relative = relativize(
+-        base.root.toUri(), (location == null ? null : location.toUri()));
++        URI.create(base.root.toString()),
++        (location == null ? null : URI.create(location.toString())));
+ 
+     if (relative == null) {
+       return base;
+@@ -93,7 +92,8 @@ class FileSystemPartitionView<E> extends FileSystemView<E>
+ 
+   @Override
+   public URI getLocation() {
+-    return location.toUri();
++    // location.toUri() returns an internal URI that is escaped
++    return URI.create(location.toString());
+   }
+ 
+   URI getRelativeLocation() {
+@@ -111,8 +111,8 @@ class FileSystemPartitionView<E> extends FileSystemView<E>
+         new Predicate<PartitionView<E>>() {
+           @Override
+           public boolean apply(@Nullable PartitionView<E> input) {
+-            return input != null &&
+-                contains(location.toUri(), root, input.getLocation());
++            return input != null && contains(
++                URI.create(location.toString()), root, input.getLocation());
+           }
+         });
+   }
+@@ -169,7 +169,7 @@ class FileSystemPartitionView<E> extends FileSystemView<E>
+     }
+ 
+     String scheme = location.getScheme();
+-    String path = location.getPath();
++    String path = location.getRawPath();
+     URI relative;
+     if (scheme == null && !path.startsWith("/")) {
+       // already a relative location
+@@ -182,7 +182,7 @@ class FileSystemPartitionView<E> extends FileSystemView<E>
+           "%s is not contained in %s", location, root);
+ 
+       // use just the paths to avoid authority mismatch errors
+-      URI rootPath = URI.create(root.getPath());
++      URI rootPath = URI.create(root.getRawPath());
+       relative = rootPath.relativize(URI.create(path));
+       if (relative.getPath().isEmpty()) {
+         return null;
+@@ -190,7 +190,7 @@ class FileSystemPartitionView<E> extends FileSystemView<E>
+     }
+ 
+     // remove a trailing slash
+-    String relativePath = relative.getPath();
++    String relativePath = relative.getRawPath();
+     if (relativePath.endsWith("/")) {
+       relative = URI.create(relativePath.substring(0, relativePath.length()-1));
+     }
+@@ -225,16 +225,14 @@ class FileSystemPartitionView<E> extends FileSystemView<E>
+     Schema schema = descriptor.getSchema();
+     PartitionStrategy strategy = descriptor.getPartitionStrategy();
+ 
+-    Iterator<String> parts = PATH_SPLITTER.split(relative.getPath()).iterator();
+-    for (FieldPartitioner fp : Accessor.getDefault().getFieldPartitioners(strategy)) {
++    PathConversion conversion = new PathConversion(schema);
++    Iterator<String> parts = PATH_SPLITTER.split(relative.getRawPath()).iterator();
++    for (FieldPartitioner<?, ?> fp : Accessor.getDefault().getFieldPartitioners(strategy)) {
+       if (!parts.hasNext()) {
+         break;
+       }
+-      String directory = parts.next();
+-      String value = Iterables.getLast(KV_SPLITTER.split(directory));
+-      Schema fieldSchema = SchemaUtil.fieldSchema(schema, strategy, fp.getName());
+       constraints = constraints.with(
+-          fp.getName(), Conversions.convert(value, fieldSchema));
++          fp.getName(), conversion.valueForDirname(fp, parts.next()));
+     }
+ 
+     Preconditions.checkArgument(!parts.hasNext(),
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDataset.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDataset.java
+index c4caff8..b5a9189 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDataset.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemDataset.java
+@@ -97,7 +97,7 @@ public class TestFileSystemDataset extends MiniDFSTest {
+   @Before
+   public void setUp() throws IOException {
+     testDirectory = fileSystem.makeQualified(
+-        new Path(Files.createTempDir().getAbsolutePath()));
++        new Path(Files.createTempDir().getAbsolutePath() + "/test%2F-0"));
+   }
+ 
+   @After
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionView.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionView.java
+index c68d824..0ac5c94 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionView.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemPartitionView.java
+@@ -75,6 +75,49 @@ public class TestFileSystemPartitionView {
+   }
+ 
+   @Test
++  public void testEscapedURIs() {
++    Datasets.delete("dataset:file:/tmp/datasets/string_partitioned");
++
++    // build a new dataset with a string partition field
++    DatasetDescriptor descriptor = new DatasetDescriptor.Builder()
++        .partitionStrategy(new PartitionStrategy.Builder()
++            .identity("data", "d_copy")
++            .build())
++        .schema(TestRecord.class)
++        .build();
++
++    FileSystemDataset<TestRecord> d = Datasets.create(
++        "dataset:file:/tmp/datasets/string_partitioned",
++        descriptor, TestRecord.class);
++
++    writeTestRecords(d);
++
++    FileSystemPartitionView<TestRecord> partition = d.getPartitionView(
++        URI.create("file:/tmp/datasets/string_partitioned/d_copy=test%2F-0"));
++    Assert.assertEquals("Should accept escaped full URI",
++        URI.create("file:/tmp/datasets/string_partitioned/d_copy=test%2F-0"),
++        partition.getLocation());
++    Assert.assertEquals("Should should have correctly escaped relative URI",
++        URI.create("d_copy=test%2F-0"), partition.getRelativeLocation());
++    Assert.assertEquals("Should have correctly escaped constraints",
++        d.unbounded.getConstraints().with("d_copy", "test/-0"),
++        partition.getConstraints());
++
++    partition = d.getPartitionView(
++        new Path("file:/tmp/datasets/string_partitioned/d_copy=test%2F-0"));
++    Assert.assertEquals("Should accept escaped full URI",
++        URI.create("file:/tmp/datasets/string_partitioned/d_copy=test%2F-0"),
++        partition.getLocation());
++    Assert.assertEquals("Should should have correctly escaped relative URI",
++        URI.create("d_copy=test%2F-0"), partition.getRelativeLocation());
++    Assert.assertEquals("Should have correctly escaped constraints",
++        d.unbounded.getConstraints().with("d_copy", "test/-0"),
++        partition.getConstraints());
++
++    Datasets.delete("dataset:file:/tmp/datasets/string_partitioned");
++  }
++
++  @Test
+   public void testFullPaths() {
+     FileSystemPartitionView<TestRecord> partition = partitioned
+         .getPartitionView(URI.create("file:/tmp/datasets/partitioned"));
+@@ -388,7 +431,7 @@ public class TestFileSystemPartitionView {
+       for (int i = 0; i < 10; i += 1) {
+         TestRecord record = new TestRecord();
+         record.id = i;
+-        record.data = "test-" + i;
++        record.data = "test/-" + i;
+         writer.write(record);
+       }
+ 
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemUtil.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemUtil.java
+index 4901b3a..497348a 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemUtil.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemUtil.java
+@@ -45,6 +45,7 @@ import org.kitesdk.data.Formats;
+ import org.kitesdk.data.LocalFileSystem;
+ import org.kitesdk.data.PartitionStrategy;
+ import org.kitesdk.data.TestHelpers;
++import org.kitesdk.data.View;
+ import org.kitesdk.data.spi.DescriptorUtil;
+ 
+ import static org.kitesdk.data.CompressionType.Uncompressed;
+@@ -106,8 +107,8 @@ public class TestFileSystemUtil {
+     Dataset<GenericRecord> dataset = Datasets.create(datasetUri, descriptor);
+ 
+     // write two so that the descriptor uses the directory rather than a file
+-    writeUserToDataset(dataset);
+-    writeUserToDataset(dataset);
++    writeUserToView(dataset);
++    writeUserToView(dataset);
+ 
+     DatasetDescriptor expected = dataset.getDescriptor();
+     DatasetDescriptor actual = Iterables.getOnlyElement(
+@@ -133,8 +134,8 @@ public class TestFileSystemUtil {
+     Dataset<GenericRecord> dataset = Datasets.create(datasetUri, descriptor);
+ 
+     // write two so that the descriptor uses the directory rather than a file
+-    writeUserToDataset(dataset);
+-    writeUserToDataset(dataset);
++    writeUserToView(dataset);
++    writeUserToView(dataset);
+ 
+     Path datasetPath = new Path(folder.toURI());
+     Path partitionPath = new Path(datasetPath, "id_hash=1");
+@@ -154,6 +155,42 @@ public class TestFileSystemUtil {
+   }
+ 
+   @Test
++  public void testPartitionedDatasetWithEscapedChars() throws Exception {
++    File folder = temp.newFolder("a/b/c/d/e/dataset_name");
++    Path root = new Path(temp.getRoot().toURI());
++    FileSystem fs = LocalFileSystem.getInstance();
++    URI datasetUri = URI.create("dataset:file:" + folder.getAbsolutePath());
++    DatasetDescriptor descriptor = new DatasetDescriptor.Builder()
++        .schema(USER_SCHEMA)
++        .partitionStrategy(new PartitionStrategy.Builder()
++            .provided("s")
++            .build())
++        .build();
++
++    Dataset<GenericRecord> dataset = Datasets.create(datasetUri, descriptor);
++
++    // write two so that the descriptor uses the directory rather than a file
++    writeUserToView(dataset.with("s", "test/-0"));
++    writeUserToView(dataset.with("s", "test/-0"));
++
++    Path datasetPath = new Path(folder.toURI());
++    Path partitionPath = new Path(datasetPath, "s=test%2F-0");
++
++    DatasetDescriptor actual = Iterables.getOnlyElement(
++        FileSystemUtil.findPotentialDatasets(fs, root));
++
++    Assert.assertFalse("Should not flag at mixed depth",
++        descriptor.hasProperty("kite.filesystem.mixed-depth"));
++    Assert.assertEquals("Location should be at the partition directory",
++        partitionPath.toUri(), actual.getLocation());
++    Assert.assertEquals("Should use user schema",
++        USER_SCHEMA, actual.getSchema());
++    Assert.assertEquals("Should have Avro format",
++        Formats.AVRO, actual.getFormat());
++    Assert.assertFalse("Should not be partitioned", actual.isPartitioned());
++  }
++
++  @Test
+   public void testSingleAvroFile() throws Exception {
+     File folder = temp.newFolder("a/b/c/d/e");
+     Path root = new Path(temp.getRoot().toURI());
+@@ -664,7 +701,7 @@ public class TestFileSystemUtil {
+     return new Path(file).getParent().toUri();
+   }
+ 
+-  public void writeUserToDataset(Dataset<GenericRecord> dataset) {
++  public void writeUserToView(View<GenericRecord> dataset) {
+     DatasetWriter<GenericRecord> writer = null;
+     try {
+       writer = dataset.newWriter();
+-- 
+1.7.0.4
+

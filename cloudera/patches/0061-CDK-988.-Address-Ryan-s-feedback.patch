@@ -1,0 +1,266 @@
+From 0fb8052b3d31cb4e0046253b8aecb5208bf1084a Mon Sep 17 00:00:00 2001
+From: Tom White <tom@cloudera.com>
+Date: Tue, 19 May 2015 15:40:37 +0100
+Subject: [PATCH 061/115] CDK-988. Address Ryan's feedback.
+
+---
+ .../java/org/kitesdk/data/PartitionStrategy.java   |   16 ++++++------
+ .../kitesdk/data/spi/PartitionStrategyParser.java  |   20 +++++++-------
+ .../partition/FixedLongRangeFieldPartitioner.java  |   26 ++++++++++----------
+ .../data/spi/partition/PartitionFunctions.java     |    2 +-
+ .../data/spi/TestPartitionStrategyParser.java      |   10 ++++----
+ .../TestFixedLongRangeFieldPartitioner.java        |   12 ++++----
+ 6 files changed, 43 insertions(+), 43 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionStrategy.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionStrategy.java
+index daa0b81..d1a502d 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionStrategy.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionStrategy.java
+@@ -370,7 +370,7 @@ public class PartitionStrategy {
+ 
+     /**
+      * Configure a range partitioner with fixed-size ranges. A value <code>v</code>
+-     * is placed in the partition <code>floor(v/range)</code>.
++     * is placed in the partition <code>floor(v/size)*size</code>.
+      *
+      * The partition name will be the source field name with a "_range" suffix.
+      * For example, fixedRange("number", 10) creates "number_range"
+@@ -379,19 +379,19 @@ public class PartitionStrategy {
+      * @param sourceName
+      *          The entity field name from which to get values to be
+      *          partitioned.
+-     * @param range
++     * @param size
+      *          The size of the range.
+      * @return An instance of the builder for method chaining.
+      * @see IntRangeFieldPartitioner
+      */
+-    public Builder fixedRange(String sourceName, int range) {
+-      add(new FixedLongRangeFieldPartitioner(sourceName, range));
++    public Builder fixedRange(String sourceName, long size) {
++      add(new FixedLongRangeFieldPartitioner(sourceName, size));
+       return this;
+     }
+ 
+     /**
+      * Configure a range partitioner with fixed-size ranges. A value <code>v</code>
+-     * is placed in the partition <code>floor(v/range)</code>.
++     * is placed in the partition <code>floor(v/size)*size</code>.
+      *
+      * If name is null, the partition name will be the source field name with a "_range" suffix.
+      * For example, fixedRange("number", 10) creates "number_range"
+@@ -402,13 +402,13 @@ public class PartitionStrategy {
+      *          partitioned.
+      * @param name
+      *          The entity field name of the partition.
+-     * @param range
++     * @param size
+      *          The size of the range.
+      * @return An instance of the builder for method chaining.
+      * @see IntRangeFieldPartitioner
+      */
+-    public Builder fixedRange(String sourceName, @Nullable String name, int range) {
+-      add(new FixedLongRangeFieldPartitioner(sourceName, name, range));
++    public Builder fixedRange(String sourceName, @Nullable String name, long size) {
++      add(new FixedLongRangeFieldPartitioner(sourceName, name, size));
+       return this;
+     }
+ 
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/PartitionStrategyParser.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/PartitionStrategyParser.java
+index 7ebb2d9..79c2621 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/PartitionStrategyParser.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/PartitionStrategyParser.java
+@@ -71,7 +71,7 @@ public class PartitionStrategyParser {
+   private static final String BUCKETS = "buckets";
+   private static final String FORMAT = "format";
+   private static final String VALUES = "values";
+-  private static final String RANGE = "range";
++  private static final String SIZE = "size";
+ 
+   /**
+    * Parses a PartitionStrategy from a JSON string.
+@@ -178,15 +178,15 @@ public class PartitionStrategyParser {
+             fieldPartitioner.get(BUCKETS).asText());
+         builder.hash(source, name, buckets);
+       } else if (type.equals("range")) {
+-        ValidationException.check(fieldPartitioner.has(RANGE),
++        ValidationException.check(fieldPartitioner.has(SIZE),
+             "Range partitioner %s must have attribute %s",
+-            name == null ? source : name, RANGE);
+-        int range = fieldPartitioner.get(RANGE).asInt();
+-        ValidationException.check(range > 0,
+-            "Invalid number of buckets for range partitioner %s: %s",
++            name == null ? source : name, SIZE);
++        long size = fieldPartitioner.get(SIZE).asLong();
++        ValidationException.check(size > 0,
++            "Invalid size for range partitioner %s: %s",
+             name == null ? source : name,
+-            fieldPartitioner.get(RANGE).asText());
+-        builder.fixedRange(source, name, range);
++            fieldPartitioner.get(SIZE).asText());
++        builder.fixedRange(source, name, size);
+       } else if (type.equals("year")) {
+         builder.year(source, name);
+       } else if (type.equals("month")) {
+@@ -235,8 +235,8 @@ public class PartitionStrategyParser {
+       } else if (fp instanceof FixedLongRangeFieldPartitioner) {
+         partitioner.set(SOURCE, TextNode.valueOf(fp.getSourceName()));
+         partitioner.set(TYPE, TextNode.valueOf("range"));
+-        partitioner.set(RANGE,
+-            LongNode.valueOf(((FixedLongRangeFieldPartitioner) fp).getRange()));
++        partitioner.set(SIZE,
++            LongNode.valueOf(((FixedLongRangeFieldPartitioner) fp).getSize()));
+       } else if (fp instanceof YearFieldPartitioner) {
+         partitioner.set(SOURCE, TextNode.valueOf(fp.getSourceName()));
+         partitioner.set(TYPE, TextNode.valueOf("year"));
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/FixedLongRangeFieldPartitioner.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/FixedLongRangeFieldPartitioner.java
+index 439822e..beba6fe 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/FixedLongRangeFieldPartitioner.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/FixedLongRangeFieldPartitioner.java
+@@ -35,24 +35,24 @@ import org.kitesdk.data.spi.predicates.Ranges;
+ @Immutable
+ public class FixedLongRangeFieldPartitioner extends FieldPartitioner<Long, Long> {
+ 
+-  private final long range;
++  private final long size;
+ 
+-  public FixedLongRangeFieldPartitioner(String sourceName, long range) {
+-    this(sourceName, null, range);
++  public FixedLongRangeFieldPartitioner(String sourceName, long size) {
++    this(sourceName, null, size);
+   }
+ 
+   public FixedLongRangeFieldPartitioner(String sourceName, @Nullable String name,
+-      long range) {
++      long size) {
+     super(sourceName, (name == null ? sourceName + "_range" : name),
+         Long.class, Long.class);
+-    this.range = range;
+-    Preconditions.checkArgument(range > 0,
+-        "Size of range buckets is not positive: %s", range);
++    this.size = size;
++    Preconditions.checkArgument(size > 0,
++        "Size of range buckets is not positive: %s", size);
+   }
+ 
+   @Override
+   public Long apply(Long value) {
+-    return Math.round(Math.floor(value/((double) range)));
++    return Math.round(Math.floor(value / ((double) size))) * size;
+   }
+ 
+   @Override
+@@ -82,8 +82,8 @@ public class FixedLongRangeFieldPartitioner extends FieldPartitioner<Long, Long>
+     return null;
+   }
+ 
+-  public long getRange() {
+-    return range;
++  public long getSize() {
++    return size;
+   }
+ 
+   @Override
+@@ -99,7 +99,7 @@ public class FixedLongRangeFieldPartitioner extends FieldPartitioner<Long, Long>
+     }
+     FixedLongRangeFieldPartitioner that = (FixedLongRangeFieldPartitioner) o;
+     return Objects.equal(this.getName(), that.getName()) &&
+-        Objects.equal(this.range, that.range);
++        Objects.equal(this.size, that.size);
+   }
+ 
+   @Override
+@@ -109,12 +109,12 @@ public class FixedLongRangeFieldPartitioner extends FieldPartitioner<Long, Long>
+ 
+   @Override
+   public int hashCode() {
+-    return Objects.hashCode(getName(), range);
++    return Objects.hashCode(getName(), size);
+   }
+ 
+   @Override
+   public String toString() {
+     return Objects.toStringHelper(this).add("name", getName())
+-      .add("range", range).toString();
++      .add("size", size).toString();
+   }
+ }
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/PartitionFunctions.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/PartitionFunctions.java
+index 1fe2d3d..679795e 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/PartitionFunctions.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/PartitionFunctions.java
+@@ -135,7 +135,7 @@ public class PartitionFunctions {
+     } else if (fieldPartitioner instanceof FixedLongRangeFieldPartitioner) {
+       return String.format("fixedRange(\"%s\", \"%s\", %s)",
+           fieldPartitioner.getSourceName(), fieldPartitioner.getName(),
+-          ((FixedLongRangeFieldPartitioner) fieldPartitioner).getRange());
++          ((FixedLongRangeFieldPartitioner) fieldPartitioner).getSize());
+     } else if (fieldPartitioner instanceof DateFormatPartitioner) {
+       return String.format("dateFormat(\"%s\", \"%s\", \"%s\")",
+           fieldPartitioner.getSourceName(),
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestPartitionStrategyParser.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestPartitionStrategyParser.java
+index 705c7be..26ae684 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestPartitionStrategyParser.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/TestPartitionStrategyParser.java
+@@ -91,15 +91,15 @@ public class TestPartitionStrategyParser {
+   @Test
+   public void testFixedRange() {
+     checkParser(new PartitionStrategy.Builder().fixedRange("id", 64).build(),
+-        "[ {\"type\": \"range\", \"source\": \"id\", \"range\": 64} ]");
++        "[ {\"type\": \"range\", \"source\": \"id\", \"size\": 64} ]");
+     checkParser(new PartitionStrategy.Builder().fixedRange("id", "rng", 64).build(),
+         "[ {\"type\": \"range\", " +
+             "\"source\": \"id\", " +
+             "\"name\": \"rng\", " +
+-            "\"range\": 64} ]"
++            "\"size\": 64} ]"
+     );
+ 
+-    TestHelpers.assertThrows("Should reject missing range",
++    TestHelpers.assertThrows("Should reject missing size",
+         ValidationException.class, new Runnable() {
+           @Override
+           public void run() {
+@@ -109,14 +109,14 @@ public class TestPartitionStrategyParser {
+           }
+         }
+     );
+-    TestHelpers.assertThrows("Should reject invalid range",
++    TestHelpers.assertThrows("Should reject invalid size",
+         ValidationException.class, new Runnable() {
+           @Override
+           public void run() {
+             PartitionStrategyParser.parse("[ {\"type\": \"range\", " +
+                 "\"source\": \"id\", " +
+                 "\"name\": \"rng\", " +
+-                "\"buckets\": \"green\"} ]");
++                "\"size\": \"green\"} ]");
+           }
+         }
+     );
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestFixedLongRangeFieldPartitioner.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestFixedLongRangeFieldPartitioner.java
+index fa8b4a5..8ae2a76 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestFixedLongRangeFieldPartitioner.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestFixedLongRangeFieldPartitioner.java
+@@ -32,12 +32,12 @@ public class TestFixedLongRangeFieldPartitioner {
+ 
+     Assert.assertEquals(0, partitioner.apply(0L).longValue());
+     Assert.assertEquals(0, partitioner.apply(9L).longValue());
+-    Assert.assertEquals(1, partitioner.apply(10L).longValue());
+-    Assert.assertEquals(1, partitioner.apply(11L).longValue());
+-    Assert.assertEquals(-1, partitioner.apply(-1L).longValue());
+-    Assert.assertEquals(-1, partitioner.apply(-9L).longValue());
+-    Assert.assertEquals(-1, partitioner.apply(-10L).longValue());
+-    Assert.assertEquals(-2, partitioner.apply(-11L).longValue());
++    Assert.assertEquals(10, partitioner.apply(10L).longValue());
++    Assert.assertEquals(10, partitioner.apply(11L).longValue());
++    Assert.assertEquals(-10, partitioner.apply(-1L).longValue());
++    Assert.assertEquals(-10, partitioner.apply(-9L).longValue());
++    Assert.assertEquals(-10, partitioner.apply(-10L).longValue());
++    Assert.assertEquals(-20, partitioner.apply(-11L).longValue());
+   }
+ 
+ }
+-- 
+1.7.0.4
+

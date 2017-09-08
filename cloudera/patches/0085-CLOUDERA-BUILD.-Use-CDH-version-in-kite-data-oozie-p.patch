@@ -1,0 +1,26 @@
+From c177cca5581081d80d31481c32dce6fb383780c0 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Wed, 26 Aug 2015 11:47:36 -0700
+Subject: [PATCH 085/115] CLOUDERA-BUILD. Use CDH version in kite-data-oozie pom.
+
+This module was added and needs to use the CDH version.
+---
+ kite-data/kite-data-oozie/pom.xml |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/kite-data/kite-data-oozie/pom.xml b/kite-data/kite-data-oozie/pom.xml
+index 6691ac2..de94ded 100644
+--- a/kite-data/kite-data-oozie/pom.xml
++++ b/kite-data/kite-data-oozie/pom.xml
+@@ -22,7 +22,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-data</artifactId>
+-    <version>1.0.1-SNAPSHOT</version>
++    <version>1.0.0-cdh5.5.0-SNAPSHOT</version>
+   </parent>
+ 
+   <name>Kite Data Oozie Module</name>
+-- 
+1.7.0.4
+

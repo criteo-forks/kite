@@ -1,0 +1,24 @@
+From 602fecc69e96c0ce7f5b685fcbb81d0f6870a841 Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Mon, 18 May 2015 17:03:57 +0300
+Subject: [PATCH 022/115] CDK-1002: Disable the chaos monkey in Solr morphline unit tests
+
+---
+ .../solr/AbstractSolrMorphlineZkTest.java          |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/kitesdk/morphline/solr/AbstractSolrMorphlineZkTest.java b/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/kitesdk/morphline/solr/AbstractSolrMorphlineZkTest.java
+index 7f09b0f..4b7ce51 100644
+--- a/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/kitesdk/morphline/solr/AbstractSolrMorphlineZkTest.java
++++ b/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/kitesdk/morphline/solr/AbstractSolrMorphlineZkTest.java
+@@ -79,6 +79,7 @@ public abstract class AbstractSolrMorphlineZkTest extends AbstractFullDistribZkT
+     System.setProperty("numShards", Integer.toString(sliceCount));
+     uploadConfFiles();
+     collector = new Collector();
++    System.setProperty("solr.tests.cloud.cm.enabled", "false"); // disable Solr ChaosMonkey
+   }
+   
+   @Override
+-- 
+1.7.0.4
+

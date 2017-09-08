@@ -1,0 +1,1051 @@
+commit 20936ce24bc0bbfceec141ad96b18c5aa26df2bb
+Author: Jenkins <dev-kitchen@cloudera.com>
+Date:   Mon Oct 12 15:49:59 2015 -0700
+
+    Branch for CDH5.5.0
+
+commit dc81528b83d00c2fb93b3e6628fa123eec53b9c9
+Author: Ryan Blue <blue@apache.org>
+Date:   Thu Sep 24 15:32:47 2015 -0700
+
+    KITE-991: Fix Parquet file size estimate.
+    
+    This fixes size-based rolling for Parquet files and enables the test.
+    Size-based rolling was previously not working because it wasn't possible
+    to get the buffered size of a Parquet file. PARQUET-308 exposes an
+    accessor, which is now available after the update to 1.8.1.
+
+commit ca760fc5a210d70c8e8b1a51cb923d0dbeebd705
+Author: Ryan Blue <blue@apache.org>
+Date:   Mon Sep 28 12:57:25 2015 -0400
+
+    KITE-1083: Add warnings to POM files about Hive changes.
+    
+    This warns that the jars needed to connect to the metastore are pulled
+    in individually and kite-tools should be checked when Hive dependencies
+    change to avoid regressions.
+
+commit d2e13ed88e3189b77b415bdcb366f09fcfa9afc2
+Author: Ryan Blue <blue@apache.org>
+Date:   Fri Sep 25 13:17:56 2015 -0700
+
+    KITE-1083: Add single jars to DistCache for Hive.
+    
+    This changes the way jobs submitted by the CLI are configured.
+    Previously, the entire lib directory for Hive was added to the
+    distributed cache. This caused long job and task startup times and
+    exposed some conflicting jar problems. This commit updates the setup so
+    that individual jars are added for classes needed for interacting with
+    the Hive MetaStore. In cases where the job is local or the job isn't
+    interacting with Hive, this doesn't add Hive dependencies to the
+    distributed cache at all.
+
+commit 134ed3283ddffb12b4f52c31249c2bff9b81bc60
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Sep 23 16:28:14 2015 -0700
+
+    KITE-1079: Improve URI debugging with error messages.
+    
+    This adds a map to DynConstructor.Builder that keeps all of the reasons
+    why classes weren't loaded. In the case where one is present but can't
+    be loaded because a dependency is missing, it is obvious what needs to
+    be added to the classpath.
+
+commit 7e993f520e8399f643eda9346cf0f21d6786817e
+Author: Ryan Blue <blue@apache.org>
+Date:   Thu Sep 17 15:06:30 2015 -0700
+
+    KITE-1076: Fix flaky Crunch-Hive test.
+    
+    The test fails in job setup using the local job runner when the HBase
+    test has been run first. It appears to be a bug in the test runner code
+    that can be avoided by not reusing test VMs for the Crunch module.
+
+commit 020000718869dd79562a7c6481fe3475d1d03f94
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Sep 16 13:47:17 2015 -0700
+
+    KITE-1073: Remove work-around setting default FS in CLI.
+    
+    This removes the work-around added for KITE-898, where job submission
+    was failing when importing local-to-HDFS unless the default FS was
+    local. This is no longer needed and is causing a different failure.
+
+commit c1511c12488a0037f7f18646e3382b166bb87f52
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Sep 16 12:03:52 2015 -0700
+
+    KITE-1057: Fix signal path for single data file.
+    
+    The CLI will create a dataset around a single data file, but the
+    FileSystemDataset code assumed that the path it uses is a directory.
+    This caused errors because the signal manager attempted to use the
+    incoming data file path as a directory that potentially contained the
+    signals folder. This updates the FileSystemDataset to use the data
+    file's parent for the signal path.
+
+commit 956333d8a0495818c3d56f214d7c5003aabe282e
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Wed Sep 16 16:11:41 2015 -0700
+
+    KITE-1074: Partial updates aka Atomic updates with loadSolr aren't recognized with SolrCloud
+
+commit bdf49317a48e5270b451a741347da3ecdd731a9c
+Author: Ryan Blue <blue@apache.org>
+Date:   Mon Sep 14 17:36:31 2015 -0700
+
+    KITE-1071: Use exit 1 when Hadoop isn't found by CLI.
+
+commit b52d7bcf75bf5f7ec7b4b8c71b14e9309f88c113
+Author: Ryan Blue <blue@apache.org>
+Date:   Tue Sep 15 10:33:05 2015 -0700
+
+    KITE-1072: Fix SchemaTool flaky test.
+    
+    This makes all of the tests use a randomly-generated table name, except
+    for the directory migration test that uses a table name set in the test
+    schema, "simple".
+
+commit 799b164e8d749306d3297655bb5df8e81b802f9a
+Author: Ryan Blue <blue@apache.org>
+Date:   Fri Sep 11 13:20:15 2015 -0700
+
+    CLOUDERA-BUILD. Use commons-io version of other components.
+
+commit 26474a8e48ad1d4de704b8625db890d49759340c
+Author: Gregory Chanan <gchanan@cloudera.com>
+Date:   Wed Sep 9 18:13:12 2015 -0700
+
+    KITE-1068: SolrCellMorphlineTests fails on Locales with non-Arabic digits
+
+commit 8e047dd33321d01c36dc601909d066a7e730b150
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Fri Sep 11 10:26:32 2015 -0700
+
+    KITE-1069: Make zkClientSessionTimeout and zkClientConnectTimeout configurable in SolrLocator
+
+commit 3c5112a18b86b6d0e9eb61d0f23943285b28c41d
+Author: Ryan Blue <blue@apache.org>
+Date:   Tue Aug 25 19:42:43 2015 -0700
+
+    KITE-1023: Avoid using new Path(URI), add warnings.
+    
+    This adds warnings for methods that may return URIs that are FS paths to
+    prevent users from calling new Path(URI). It also removes incorrect use
+    of new Path(URI) from Kite's FS implementation.
+
+commit f38e4bc36748f7d29bdd1cc980cc874b9e4728ae
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Jun 24 14:16:32 2015 -0700
+
+    KITE-1023: Fix PartitionView URI escaping.
+    
+    This adds test for URIs with escaped characters and fixes handling in
+    the FS PartitionView implementation. The implementation was accidentally
+    unescaping URIs by using URI.create, which expects escaped characters,
+    along with URI#getPath, which will remove escapes.
+    
+    This also fixes the URI returned by getLocation. This previously used
+    Path#getUri, but that method returns the Path's internal URI that
+    is double-escaped. Returning a URI created from Path#toString is the
+    correct behavior because it matches the Path passed in. Similarly,
+    the merge and replace methods in the FS dataset implementation that rely
+    on Paths created from those locations have been updated to correctly
+    construct a Path from a URI by converting the URI to a String rather
+    than setting the internal URI directly.
+
+commit e19333b57fbb2f55c898bbf3c8235638264cbbf2
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Aug 26 14:03:39 2015 -0700
+
+    KITE-1066: Fix findbugs issues.
+
+commit deb1fad07c5ef8ccee97010d5fcc23673bf1ca2c
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Aug 26 12:51:49 2015 -0700
+
+    KITE-1065: Add support for Oozie delegation tokens.
+    
+    Oozie passes delegation tokens via HADOOP_TOKEN_FILE_LOCATION. This adds
+    support to pick up those tokens and add them to the DefaultConfiguration.
+
+commit 7bbf0837ee6024ea6fbd950041f8b093d2dcb215
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Aug 26 12:16:01 2015 -0700
+
+    KITE-1040: Cache Hive MetaStore connections.
+    
+    This adds a MetaStoreUtil.get method that keeps track of util objects
+    (and the internal MetaStore connection) by connection URIs. These are
+    safe to share because they are thread-safe.
+
+commit 59f9f3e76f7dc88ecc5ef2a8f691cdf7a0dc7a5d
+Author: Jenkins <dev-kitchen@cloudera.com>
+Date:   Fri Sep 4 13:53:47 2015 -0700
+
+    Branch for CDH5.5.x
+
+commit 5f619b2611e03ed2a4f3f21e8f9b10f345213685
+Author: Mladen Kovacevic <mladkov@gmail.com>
+Date:   Tue Jul 14 15:56:44 2015 -0400
+
+    KITE-1042: Add support for Oozie conf in CLI.
+    
+    OOZIE_ACTION_CONF_XML added to kite-dataset along with 'config' option
+    that can be specified to be passed to the hadoop jar command for kite.
+
+commit 412f4fd5e3b8733bc361110cc6528fb0f5ea84f0
+Author: Gabriel Reid <gabrielr@ngdata.com>
+Date:   Mon Jun 29 15:58:49 2015 +0200
+
+    KITE-1025 Use CombineFileInputFormat
+    
+    Wrap Avro and Parquet inputs with CombineFileInputFormat so that
+    multiple small files don't result in multiple input splits and
+    MapReduce tasks.
+
+commit dd77ea7b0b860b1caaedefc5b9d9ea82bf78a701
+Author: Ryan Blue <blue@apache.org>
+Date:   Sat Jun 27 15:34:48 2015 -0700
+
+    KITE-991: Add SPI calls to set roll configuration.
+    
+    This adds RollingWriter to the SPI, which adds setRollIntervalMillis and
+    setTargetFileSize methods. The partitioned writer and file writer now
+    implement this to allow callers to check whether the writer is a rolling
+    writer and configure rolling without setting descriptor properties.
+    
+    The descriptor properties are used to initialize the roll interval and
+    target file size, but are overridden by the setter methods.
+
+commit 5502d5d80f9cc1cc2a48707d0d4e25ede97edcc5
+Author: Ryan Blue <blue@apache.org>
+Date:   Mon Jun 15 16:41:52 2015 -0700
+
+    KITE-991: Add size-based and time-based file rolling.
+    
+    File size-based rolling works and is passing a new test for Avro, but is
+    disabled for Parquet because the appender has no reliable size estimate
+    for Parquet.
+    
+    Time-based rolling uses a new SPI interface, ClockReady, which exposes a
+    method for passing time signals to implementing classes. This removes
+    the need for Kite to provide a thread-based check.
+
+commit 0a701034cf9899ea5874c22513f107df089657b7
+Author: Ryan Blue <blue@apache.org>
+Date:   Tue Aug 25 17:15:18 2015 -0700
+
+    CLOUDERA-BUILD. Use CDH Crunch version in tools tarball.
+
+commit a8cffef31905a4af7d774350b55abb394ff4cd6a
+Author: Ryan Blue <blue@apache.org>
+Date:   Thu Jun 25 15:20:26 2015 -0700
+
+    KITE-1024: Fix kite-tools tarball dependencies.
+    
+    The CDH5 HBase dependency bundle was transitively pulling in the MR1
+    version of hadoop-core. That was conflicting with Yarn MR classes and
+    causing a runtime VerifyError.
+    
+    This also updates to use the right CDH5 crunch version.
+    
+    Conflicts:
+    	kite-hbase-dependencies/cdh5-test/pom.xml
+    Resolution:
+        Use CDH version property.
+
+commit 7ca8d83c4e51d5125f4a27e471ec921f0e1d13a7
+Author: Ryan Blue <blue@apache.org>
+Date:   Fri Jun 26 17:32:29 2015 -0700
+
+    KITE-873: Add missing options to copy-based commands.
+
+commit c3dd0755a93af4bc660c1370a00f7806b74dc85e
+Author: Mladen Kovacevic <mladkov@gmail.com>
+Date:   Wed Jul 15 11:22:45 2015 -0400
+
+    KITE-1046: Add --num-records option to json-schema.
+
+commit 79aefc0fcebad2b8df3a43ee7de563dc64ec878d
+Author: Tom White <tom@cloudera.com>
+Date:   Tue Jun 30 13:23:16 2015 +0100
+
+    KITE-1028. Creating a dataset with existing partitions fails for Hive external tables.
+
+commit 133a4044eb11f635609f40a411affce263b96dad
+Author: Ryan Blue <blue@apache.org>
+Date:   Mon Jun 15 17:53:41 2015 -0700
+
+    KITE-1021: Javadoc updates, add missing sinces.
+
+commit c177cca5581081d80d31481c32dce6fb383780c0
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Aug 26 11:47:36 2015 -0700
+
+    CLOUDERA-BUILD. Use CDH version in kite-data-oozie pom.
+    
+    This module was added and needs to use the CDH version.
+
+commit 1f3dca785fea6c30505e5c4fb00faf6efb2fbb12
+Author: Ben Brown <benjamin.l.brown@gmail.com>
+Date:   Thu Jun 11 17:45:15 2015 -0400
+
+    CDK-476 oozie UriHandler for Kite URIs
+
+commit ea4dcb7fd2d93a00bd64e9d6c4b8fe246e287933
+Author: Ryan Blue <blue@apache.org>
+Date:   Thu Jun 11 14:02:44 2015 -0700
+
+    CDK-1019: Move Hive token setup into TransformTask.
+    
+    This takes the delegation token code from the CopyCommand and moves it
+    into TransformTask so that all of the transform-based commands will work
+    with Hive.
+
+commit f036f3d6c4ff4afa0d3403115af3f869ead9216e
+Author: Ryan Blue <blue@apache.org>
+Date:   Thu Jun 11 13:24:51 2015 -0700
+
+    CDK-1018: Avoid unnecessary copy in MR output format.
+    
+    It appears that this was working around PARQUET-62, which fixed
+    dictionary support when incoming records are reused. Updating to 1.6.0
+    brings in the Parquet fix.
+    
+    This also adds a property, kite.copyOutputRecords, that allows users to
+    control whether records should be copied. This defaults to false, but is
+    a good safety valve in case of other bugs like PARQUET-62.
+    
+    Conflicts:
+    	pom.xml
+    Resolution:
+        Use CDH version of Parquet, not update from upstream.
+
+commit fa254ab36aaaa553d1138457bc447f8399f860a1
+Author: Ryan Blue <blue@apache.org>
+Date:   Thu Jun 11 10:45:00 2015 -0700
+
+    CDK-1011: Extend tests and minor fixes.
+    
+    Conflicts:
+    	kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java
+    Resolution:
+        Removed methods updated for a conflict with the Crunch hash fix.
+
+commit 036f936f7fb059eecd23d8172063541b51664448
+Author: Micah Whitacre <micah.whitacre@cerner.com>
+Date:   Thu Jun 4 09:16:08 2015 -0500
+
+    CDK-1011: Support a configurable number of writers per partition when writing to a dataset, along with copying and compaction.
+    
+    CDK-1011: Adjusted the command option for files per partition and adjusted the logic on when num writers and writers per partition are specified.
+    
+    CDK-1011: Added tests for CompactCommand
+    
+    Conflicts:
+    	kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java
+    Resolution:
+        Fixed tests to use numRecords added for Crunch hash change.
+
+commit e5c433dff69a1888d3f89957a2537ebfccee5a7d
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Jun 10 21:00:18 2015 -0700
+
+    CDK-1017: Remove all target partitions in replace.
+    
+    This removes any partitions in the view being replaced, even if the
+    replacement doesn't have the partition.
+
+commit 2a9fdd4ca690883922203646cd8ae2a36ddeeb80
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Jun 10 20:24:09 2015 -0700
+
+    CDK-1016: Fix OutputFormat writing directly to datasets.
+    
+    This happens only when a dataset instance is passed to the configuration
+    methods. The fix is to verify that the target dataset is not the root by
+    inspecting whether the partition key has any values.
+
+commit 11a0b3b674876f34ff3649524f937262a0d02d4b
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Jun 10 16:01:49 2015 -0700
+
+    CDK-973: Fix tests after rebase.
+    
+    The copy command tests were writing to 5 partitions but expecting 6
+    files. This was caused by the writer cache getting rid of one of the
+    writers before finishing. The solution is to set the writer cache size
+    when creating the dataset to avoid inconsistent behavior.
+
+commit ce44758d63126491efa5814ae8ae62ea44d273d2
+Author: Ryan Blue <blue@apache.org>
+Date:   Mon May 25 18:03:37 2015 -0700
+
+    CDK-973: Fix MR configuration, CSV, and JSON.
+
+commit 46051bd242b21a7d1c095d554731c2afdc5a5e26
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed May 20 17:44:54 2015 -0700
+
+    CDK-973: Add View#asType for projection.
+    
+    This updates Joey's addition of View#asSchema for record/column
+    projection and adds View#asType. The asSchema changes needed the ability
+    to create a new backing Dataset instance with a different type.
+    
+    This also fixes the review items I posted on #346.
+
+commit a040439768f2100db46f155d8896dc85c35a140f
+Author: Joey Echeverria <joey42@gmail.com>
+Date:   Tue Mar 31 20:38:43 2015 -0700
+
+    CDK-973: Added View#asSchema() and fixed CLI copy.
+    
+    * Added View#asSchema() method
+    * Added View#getSchema() method
+    * Updated DatasetKeyInputFormat to use View#getSchema() for
+      GenericRecords
+    
+    Conflicts:
+    	kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java
+    Resolution:
+        Conflicts with changes to fix Crunch hash problem. Simple merge.
+
+commit 142db0063f4cc507aafd5a03490d50b7be70d7bd
+Author: Joey Echeverria <joey42@gmail.com>
+Date:   Thu Apr 23 17:37:03 2015 -0700
+
+    CDK-1014: Fix support for Hive datasets on Kerberos enabled clusters.
+    
+    * Add Kerberos support to CopyCommand.
+    * Add fixes for CDH4 profile
+
+commit 20f824638cdc2672b130b07febb421a79b7dac31
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed May 27 17:24:57 2015 -0700
+
+    CDK-1004: Update compaction for unpartitioned datasets.
+
+commit 0d92c7f989aa45b0997ada6a26ca596ef54ae3f7
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Mar 25 21:35:12 2015 -0700
+
+    CDK-971: Add FileSystemUtil.datasets to identify datasets.
+    
+    This utility method identifies folders of data that appear to form a
+    dataset and have the same format and schema. Unknown files will prevent
+    a directory from being considered a dataset.
+
+commit 18572bdae903bd3cccb1fb48a013ba9fe63f272d
+Author: Ryan Blue <blue@apache.org>
+Date:   Thu May 28 10:34:52 2015 -0700
+
+    CDK-1005: Remove hadoop-1 test profile.
+    
+    Conflicts:
+    	pom.xml
+    Resolution:
+        Already removed, but avoids conflicts in Travis config.
+
+commit 22848ca06ac5d43f14da64215e8a6620e7c0a113
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed May 27 18:51:44 2015 -0700
+
+    CDK-976: Fix test failures caused by default conf changes.
+    
+    The default conf needs to be set in MR tasks, but always setting the
+    configuration in InputFormat and OutputFormat messages isn't correct
+    because the methods aren't necessarily called in a new process. Using
+    those methods within a test process, for example, broke several CLI
+    tests because the DefaultConfiguration is shared.
+    
+    This fixes the problem by adding an init method to DefaultConfiguration
+    that will set the default conf if it has not already been set. The set
+    method will always set the conf and prevents init from setting it later.
+
+commit 9247c90721242bcef6cc96ec1316152a9791959d
+Author: Cole Skoviak <cole.skoviak@cerner.com>
+Date:   Thu May 21 11:34:27 2015 -0500
+
+    CDK-976: DatasetKeyInputFormat/DatasetKeyOutputFormat setting job configuration before loading dataset
+
+commit 5f263156077408c9bb48071138e2938b147dc39b
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed May 27 19:11:04 2015 -0700
+
+    CDK-983: Fix in predicate ordering.
+    
+    Tracked down more hash sets in use and replaced with linked hash sets.
+
+commit 37e0b220c6a0a0ee68e633a50baf37dbec613527
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed May 27 17:54:18 2015 -0700
+
+    CDK-992: Fix delete command, only load repo if needed.
+
+commit 2fb24914f3cd9ee7fc96980e29ca63353fd4d9ff
+Author: Prasanna Rajaperumal <prasanna@cloudera.com>
+Date:   Thu Apr 30 14:30:08 2015 -0700
+
+    CDK-996: Fixing an issue where the SchemaTool async table creation was not waiting for the table to be created before adding new column families
+
+commit 35ac102bf15b8eb997b54abe4cdc0dae52644578
+Author: Tom White <tom@cloudera.com>
+Date:   Tue May 26 16:46:58 2015 +0100
+
+    CDK-988. Address Ryan's feedback.
+
+commit 7e3fdb8d6d4b97cec36830ccecd6ded2f8c46996
+Author: Tom White <tom@cloudera.com>
+Date:   Fri May 22 10:55:08 2015 +0100
+
+    CDK-988. Implement and test project and projectStrict.
+
+commit d6ef4fd674b09a40dab9c1a234d3ec394162c8ea
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed May 20 10:14:26 2015 -0700
+
+    CDK-1003: Add error message to URIBuilder precondition.
+
+commit 0fb8052b3d31cb4e0046253b8aecb5208bf1084a
+Author: Tom White <tom@cloudera.com>
+Date:   Tue May 19 15:40:37 2015 +0100
+
+    CDK-988. Address Ryan's feedback.
+
+commit bd644a0b1d85405dd87980423e59bc0f0c850e91
+Author: Tom White <tom@cloudera.com>
+Date:   Thu Apr 16 15:03:37 2015 +0100
+
+    CDK-988. Add a long range partitioner with fixed size bounds.
+
+commit 7434104685392b5bc0ca65fa0620a2eb895ac3d3
+Author: Ryan Blue <blue@apache.org>
+Date:   Sat Apr 25 16:29:57 2015 -0700
+
+    CDK-843: Add replace tests.
+
+commit 6e8c573ae5027d1525e3d3a156ba5e7b4be558f7
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Apr 22 18:11:02 2015 -0700
+
+    CDK-843: Add compaction task.
+
+commit 6baf75cbb6415af47fa33748289258a078761a70
+Author: Ryan Blue <blue@apache.org>
+Date:   Mon Apr 20 18:12:06 2015 -0700
+
+    CDK-843: Add Replaceable SPI interface.
+    
+    This is like the Mergeable interface, but tests whether the dataset
+    supports replacement. It also includes a method to test whether a view
+    can be replaced.
+
+commit 850e7a39c6030e56802ba9fff2ff0185b63b898c
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Apr 15 16:49:41 2015 -0700
+
+    CDK-843: Add replace, update merge based on PartitionView.
+
+commit ff862140787ed2027a3ef2e348977d09ee9e68f9
+Author: Micah Whitacre <micah.whitacre@cerner.com>
+Date:   Wed Mar 11 11:55:43 2015 -0500
+
+    CDK-462: Added static block to add Oozie Action Config to Configuration if present.
+
+commit 6ee4e044de07fc0d3372cb341990adbf420710aa
+Author: Ryan Blue <blue@apache.org>
+Date:   Tue Apr 14 21:50:54 2015 -0700
+
+    CDK-972: Add PartitionView and FS implementation.
+
+commit 56cc0a705de7f0537ec2eac86213d9a8bb64ba33
+Author: Ben Brown <benjamin.l.brown@gmail.com>
+Date:   Tue May 12 10:24:23 2015 -0400
+
+    CDK-451, signal ready views concept
+    
+        implementation for hdfs and hive based views, hbase is currently
+        unimplemented.
+    
+        includes an additional interface for views "Signalable" for the basic signalReady/isReady concept
+    
+        signals are currently stored in the dataset data directory in a .signals directory
+        signal files match a normalized form of the query portion of a URI
+    
+        Constraints and Predicates have a few updates made to be able to request normalized
+        forms
+    
+        MapReduce updated to create these signals when possible when a write to a dataset
+        is successful. Crunch updated to support using these signals for WriteMode.CHECKPOINT
+        (with a 'ready' view essentially indicating a previous success)
+
+commit bf7faf2e93def91be1576f9005b02deafb4512cc
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Apr 22 14:53:38 2015 -0700
+
+    CDK-898: Fix file not found bug in distributed cache.
+    
+    Setup in the distributed cache is failing when using the local job
+    runner when HDFS is the default file system. This is very likely related
+    to HDFS-7031. The work-around is to set the local FS as the default when
+    using LocalJobRunner. This is safe because HDFS has already been loaded,
+    so lookups without the authority with still resolve to the full URI.
+
+commit 00c2d2de05f8bf4ce9c146e6be0d36afcf450a5b
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Apr 22 10:39:28 2015 -0700
+
+    CDK-898: Set MR framework to local, update logging.
+    
+    If either the source or target is local, then this explicitly sets the
+    MR framework to local to ensure that the job won't run on the cluster
+    where data is not available. This also updates the logging configuration
+    to show errors in the MR tasks to the caller.
+
+commit 6d42e20055e6e40711ff964fa16d703abcbd578c
+Author: Tom White <tom@cloudera.com>
+Date:   Thu Feb 5 09:14:11 2015 +0000
+
+    CDK-898. Importing a large local CSV file causes out of memory error.
+    
+    Always use MRPipeline.
+
+commit db949ea3772fefaaf9ebe3cf03f248a1baa8355d
+Author: Prasanna Rajaperumal <prasanna@cloudera.com>
+Date:   Mon Apr 13 15:58:39 2015 -0700
+
+    Speed up schema migration when loading all schemas from a directory
+    
+    The following changes are made
+    1. kicking off HbaseAdmin.createTableAsync for a bunch of tables and waiting for HBaseAdmin.isTableAvailable for all the tables is much quicker. The SchemaTool waits for a maximum of 10 minutes for all the tables to become available which seems like a very legible buffer.
+    2. HBaseAdmin.disableTable and HBaseAdmin.enableTable are very costly (~25% time spent over the schema migration). Instead of creating tables as and when we know about a entity schema, construct the HTableDescriptor for all the entity schemas for a specific table, this was we dont have to add column families at a later point of time which requires the disable and enable
+
+commit 7b2ace5780d9510014f9f1a22e5004774407eb35
+Author: Tom White <tom@cloudera.com>
+Date:   Thu Apr 16 15:45:35 2015 +0100
+
+    Explicitly add transitive dependencies for jackson-databind.
+
+commit fd038d67caf6fefdefd1b38ba53dd7ec3b732284
+Author: Tom White <tom@cloudera.com>
+Date:   Thu Apr 16 18:27:26 2015 +0100
+
+    CDK-938. Support path in s3, and change to use standard AWS env variables.
+    
+    For testing, set AWS_SECRET_ACCESS_KEY and AWS_SECRET_ACCESS_KEY to specify
+    your AWS credentials, and S3_BUCKET to the name of an existing empty bucket
+    to use.
+    
+    Conflicts:
+    	pom.xml
+    Resolution:
+        Conflict with hadoop-1 profile removed for CDH.
+
+commit b167c5d173e203d79b7cf0636d8dad47158c8e26
+Author: Ryan Blue <blue@apache.org>
+Date:   Tue Aug 25 15:19:59 2015 -0700
+
+    CLOUDERA-BUILD. Update S3 dependency versions for CDH.
+
+commit e55019055b5e80cc1481655aaabeadf15547163f
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Apr 1 17:03:16 2015 -0700
+
+    CDK-938: Fix morphlines dependency bug from S3.
+    
+    The S3 dependencies conflict with morphlines dependencies. This
+    limits the S3 dependency versions to just kite-data.
+
+commit 05163480b0be1eea5a1efdfbafe196a95165a188
+Author: Ryan Blue <blue@apache.org>
+Date:   Tue Aug 25 16:02:49 2015 -0700
+
+    CLOUDERA-BUILD. Update S3 module version for CDH.
+
+commit 7646a007b6362699ff69dd550f63b389dc68dbca
+Author: Ryan Blue <blue@apache.org>
+Date:   Sun Mar 22 16:18:59 2015 -0700
+
+    CDK-938: Add kite-data-s3
+    
+    This adds both s3n and s3a dataset URIs and a test for each.  Both URI
+    patterns assume the bucket is the dataset repository.
+    
+    Until a mock S3 service can be added, this expects real S3 credentials
+    and a bucket name passed as S3_ID, S3_KEY, and S3_BUCKET environment
+    variables. If those are not present, then the test will not run. To
+    disable tests for the hadoop1 and cdh4 profiles, the credentials are
+    explicitly set to empty.
+    
+    Validated that the CLI works with S3 URIs.
+    
+    Conflicts:
+    	pom.xml
+    Resolution:
+        Conflict with CDH pom changes.
+        Need to follow up with a CLOUDERA-BUILD commit to set versions.
+
+commit 6c0f5d44e5bbc68590db241ce0d9d626babbbbca
+Author: Tom White <tom@cloudera.com>
+Date:   Wed Apr 15 16:16:05 2015 +0100
+
+    CDK-986. Allow partitioning on optional fields
+
+commit b60b64e27dc422514f6ba8e9b046c9c81ca491f3
+Author: Joey Echeverria <joey42@gmail.com>
+Date:   Wed Apr 15 10:41:16 2015 -0500
+
+    CDK-615: Permissions issue writing to a partitioned Hive external dataset
+    
+    * This patch reverses course from the previous one. Depending on the
+      dataset implementation, you may or may not want Kite creating the
+      directories.
+    * This patch moves the partitionAdded callback to happen before new
+      partition directories are created to give the listener a chance
+      to create them in Kite or externally.
+    * In particular, external Hive datasets will create the directories on
+      the Kite side while managed Hive datasets will let the Hive metastore
+      create them.
+    * This doesn't affect file system datasets as they don't have listeners
+      regisitered unless they're manulaly created with a custom
+      MetadataProvider
+    * Added a test of `load()` methods of `DatasetWriterCacheLoader` and
+      `IncrementalDatasetWriterCacheLoader`.
+    * Fixed a typo
+
+commit f457f674869beb1515214c3c09095dfca5f5a674
+Author: Joey Echeverria <joey42@gmail.com>
+Date:   Tue Apr 14 20:47:42 2015 -0500
+
+    CDK-985: MergeOutputCommiter#setupJob() should be idempotent
+    
+    * CDK-985: Fix for hadoop-1 compat
+    * CDK-985: More hadoop-1 compat
+
+commit 54fc2ba9ee21e691d6a544850825881c5f9ea846
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Apr 1 18:12:38 2015 -0700
+
+    CDK-974: Update Hive DDL when updating a table.
+    
+    Kite sets the table DDL when it creates a table and should update the
+    DDL if the schema changes.
+    
+    Contributed by Andrew Stevenson.
+
+commit 0d297677f02deb7e2945b692f178bc0ae927ad2a
+Author: Ryan Blue <blue@apache.org>
+Date:   Thu Apr 2 10:42:46 2015 -0700
+
+    CDK-902: Add more testing for create with existing data.
+
+commit 44005026ca76db1d6b88fc2a052c89305baaa62e
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Apr 1 19:21:51 2015 -0700
+
+    CDK-902: Fix Hadoop-1 incompatibility.
+
+commit dd9a4123a3d6849c1ca125841031ae3a0e5d1a75
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Mar 25 12:59:42 2015 -0700
+
+    CDK-902: Add create tests with existing data.
+
+commit b7ef72f4f9a759c8cff32eb468d179dcfb8f49fe
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Mar 25 10:26:29 2015 -0700
+
+    CDK-902: Merge wrap command into create.
+    
+    Wrap is almost identical to create, but fills in missing values when
+    there is existing data. Rather than have two commands, this adds the
+    inference for schemas, partition strategies, and formats to create.
+    
+    This also ensures that any datasets created with the CLI are valid for
+    any existing data.
+
+commit d463611a0b36d27a7377e457bd91097d0dae6e9a
+Author: Ryan Blue <blue@apache.org>
+Date:   Sat Feb 21 17:00:09 2015 -0800
+
+    CDK-902: Add CLI wrap command to create a dataset from existing data.
+
+commit 91c483a98ea4eb97ceb0576fab36fbd3d802cd8c
+Author: Ryan Blue <blue@apache.org>
+Date:   Mon Mar 16 13:18:47 2015 -0700
+
+    CDK-964: Allow replacing provided partitioners.
+    
+    This updates the update validation so that provided partitioners can be
+    replaced with more specific partitioners. For example, if a version
+    partition is initially provided but later added to the record data, the
+    provided partitioner can be replaced with an identity partitioner. This
+    is the only allowed migration added by this commit.
+
+commit ed98e54f0e0adca57fae98d3e13dbb5a8bb47cfc
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Mar 25 21:48:10 2015 -0700
+
+    CDK-970: Fix IncompatibleSchemaException.check.
+    
+    Now throws IncompatibleSchemaException instead of ValidationException.
+
+commit e1b530a3c8d0acbad9a8ee7b9ffdd3dbe67b5254
+Author: Prasanna Rajaperumal <prasanna@cloudera.com>
+Date:   Tue Mar 24 13:12:02 2015 -0700
+
+    CDK-968: Add HBaseActionModifiable to SPI.
+    
+    Implement HBaseActionModifiable SPI to allow HBase level hookups into
+    HBase Get/Put/Scan/Delete.
+
+commit 2ff9b4d7926e7f08f762fc93ea598590dfc4b017
+Author: Micah Whitacre <micah.whitacre@cerner.com>
+Date:   Fri Mar 13 12:12:23 2015 -0500
+
+    Corrected incorrect assertion message.
+
+commit a3c2e4d4d61421865cf9565520e379fd41819c6e
+Author: Ryan Blue <blue@apache.org>
+Date:   Fri Aug 7 11:18:12 2015 -0700
+
+    CLOUDERA-BUILD. Add more records to copy and transform tests.
+    
+    Upstream Crunch changed its partitioning function to be more random,
+    which resulted in not covering all expected partitions with a small
+    number of records (before this was guarnanteed). The fix is to increase
+    the number of records in the test.
+
+commit 73bde7cb74e781acfff7ce487d8cb4ecc438819f
+Author: Ryan Blue <blue@apache.org>
+Date:   Mon Jul 27 14:32:21 2015 -0700
+
+    KITE-1053: Fix int overflow bug in FS writer.
+    
+    Keeping the number of records written in an int caused a bug where
+    writing more than Integer.MAX_VALUE records (~2B) would overflow the
+    counter and the check to see whether any records had been written would
+    fail because count is less than 0. The fix is to use a long.
+
+commit 888675e38213f4ad0359483aff7561b2410ba630
+Author: Ryan Blue <blue@apache.org>
+Date:   Mon Jul 27 14:43:58 2015 -0700
+
+    CLOUDERA-BUILD. Fix CDH5 parent POM version.
+    
+    This was 1.0.0 but should be the CDH version, 1.0.0-cdh5.x.y.
+
+commit bcdf24b9eec2e8014b0fb371720d7087f715a57f
+Author: Newton Truong <newton@deep6analytics.com>
+Date:   Wed Jun 3 10:22:56 2015 -0700
+
+    Properly use the SequenceFile.reader.stream to pass in record stream
+
+commit 32d5716950be9ef52c3689cbcae55dceed5ecb88
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Thu Jul 2 13:52:31 2015 -0700
+
+    KITE-1030: readCSV WARN log msg on overly long lines where quoteChar is non-empty should print the whole record seen so far (addded small optimization)
+
+commit 36b8f5fab8f4994cb069cc0e0f379d5384a39d19
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Thu Jul 2 13:37:32 2015 -0700
+
+    KITE-1030: readCSV WARN log msg on overly long lines where quoteChar is non-empty should print the whole record seen so far
+
+commit bd3fe16fcacca058bf9d1726322c97e1d6bc2ee9
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Mon Jun 8 12:02:56 2015 +0300
+
+    CDK-1015: Add "replaceValues" morphline command that replaces all matching record field values with a given replacement string
+
+commit 602fecc69e96c0ce7f5b685fcbb81d0f6870a841
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Mon May 18 17:03:57 2015 +0300
+
+    CDK-1002: Disable the chaos monkey in Solr morphline unit tests
+
+commit bb31f88a569fae90bb23570d482241aba04ae14a
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Mon May 18 15:09:45 2015 +0300
+
+    CDK-1001: dropRecord morphline command should forward notifications - part 2
+
+commit 87c40c8e5fc9afc348b26c095c9d753a8721cd4e
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Mon May 18 08:56:42 2015 +0300
+
+    CDK-1001: dropRecord morphline command should forward notifications
+
+commit 01e15b5233ef49cd5780a0aa3ce99f32c7fd2e89
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Sun May 10 12:26:36 2015 +0300
+
+    CDK-998: Nomore require "java" morphline command code blocks to explicitly catch exceptions
+
+commit ff9bf4d2191f69fdb0df8048b3bda07dcf986f56
+Author: Prasanna Rajaperumal <prasanna@cloudera.com>
+Date:   Fri May 8 11:31:09 2015 -0700
+
+    CDH-27606 Fix Morphlines.ReadRCFile to read null values in RCFile
+
+commit a57154c67d5e6ecf2fb4cb526d65b108cf770ba3
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Tue Apr 28 11:23:01 2015 +0300
+
+    CDK-994: The morphline grok command should also support multiple groups that have the same name
+
+commit f9f812510628fcc8c657c8a23dacd3ce5cd9148f
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Mar 11 17:32:13 2015 -0700
+
+    CDK-945: Improve error messages for URI problems.
+    
+    * Add a suggestion to make sure default HDFS URI is configured
+    * Add known patterns for the matching URI scheme
+
+commit 599f83d89d5fe4940585c88e35410e07d330450f
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Mar 11 16:47:27 2015 -0700
+
+    CDK-945: Ignore trailing slash in URIs.
+    
+    This updates the URIPattern code to ignore trailing slashes in URIs.
+    URIs can still match a trailing / explicitly, and URI pattern globbing
+    still works as before.
+
+commit 873c0b971e31fe10c531f503d437c23cf05e25d2
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Mar 11 18:37:56 2015 -0700
+
+    CDK-955: Fix duplicate URIs from Datasets.list.
+    
+    The problem was that the FileSystem implementation was returning
+    multiple "default" namespaces. The implementation now uses a Set to
+    accumulate both namespaces and dataset names.
+    
+    The bug only happened when a repository namespace path was used instead
+    of a repository. In that case, the single namespace appears to be a
+    valid repository with tables in the default namespace. Each table in the
+    default namespace would result in another "default" in the list of
+    namespaces. When Datasets.list listed the tables in each namespace, all
+    of the tables were present in each copy of default, which resulted in
+    n^2 results.
+
+commit dce2e265bd7f494ecdf00ea3a8eba52d0ff3fab4
+Author: Ryan Blue <blue@apache.org>
+Date:   Wed Mar 11 18:43:17 2015 -0700
+
+    CDK-952: Add CLI list command.
+
+commit 9735c2d5acada1f43c0c5922823ddf535e20e058
+Author: Tom White <tom@cloudera.com>
+Date:   Fri Mar 6 10:30:26 2015 +0000
+
+    CDK-949. Dataset partition-config command should allow nested field names.
+
+commit 1fd1694907e8639b32e6d65bd138d944f893626e
+Author: Jenkins slave <kitchen-build@cloudera.com>
+Date:   Mon Mar 9 07:45:45 2015 -0700
+
+    Preparing for CDH5.5.0 development
+
+commit 73052357396650401df613c6476153f6afe2ea9e
+Author: Joey Echeverria <joey42@gmail.com>
+Date:   Fri Feb 27 14:12:21 2015 -0800
+
+    CDK-944: Reading parquet datasets fails after schema evolution
+    
+    * Added a test to demonstrate this bug
+    * Added setting of the parquet reader schema.
+    
+    Closes #330
+
+commit 5f9ce6877edbb6712d3181f53120309840342b10
+Author: Joey Echeverria <joey@cloudera.com>
+Date:   Wed Oct 29 10:55:03 2014 -0700
+
+    CLOUDERA-BUILD. Make ${HADOOP_PREFIX}/hadoop-mapreduce the default for CDH5.
+
+commit a1f3d4d219bf3b52caae35bc9e2c883256265a3b
+Author: Joey Echeverria <joey@cloudera.com>
+Date:   Fri Oct 24 09:45:57 2014 -0700
+
+    CLOUDERA-BUILD. Add Cloudera release and snapshot repos to the pom
+
+commit 097da96829eb3f97fa7feddbf0d869e80500ea27
+Author: Joey Echeverria <joey@cloudera.com>
+Date:   Wed Oct 8 17:13:25 2014 -0700
+
+    CLOUDERA-BUILD. Removing nexus-staging-maven-plugin for CDH build.
+
+commit 42920aeccd54be6077d31c7a58a90157acf6bc3b
+Author: Ryan Blue <rblue@cloudera.com>
+Date:   Wed Sep 24 18:38:51 2014 -0700
+
+    CLOUDERA-BUILD. Remove new unnecessary HTTP dependencies.
+    
+    This removes new tomcat and jetty dependencies that are being pulled in
+    by hadoop-common. The problem was introduced in e40ccf0c, which added
+    hadoop-common to the dependencies of hadoop-client.
+
+commit 29d3f89cbdbf7ea2b4dd4df9e22db290bbddcfbb
+Author: Ryan Blue <blue@apache.org>
+Date:   Tue Feb 24 16:38:59 2015 -0800
+
+    CLOUDERA-BUILD. Update CDH5 parent POM for CDH.
+
+commit 3f0077b92abe5d12a6248e08192078ab82c35ec4
+Author: Ryan Blue <blue@apache.org>
+Date:   Tue Feb 24 16:32:47 2015 -0800
+
+    CLOUDERA-BUILD. Remove CDH4 parent POM.
+
+commit 11a9fff99b88791c0b8c5739bb92a40904bc26ad
+Author: Joey Echeverria <joey@cloudera.com>
+Date:   Thu Jul 24 10:28:46 2014 -0400
+
+    CLOUDERA-BUILD. CDH-20496: Fixed kite-tools tests to work with slf4j 1.7.5
+    
+    This doesn't belong upstream as Kite still builds with an older slf4j upstream.
+
+commit 252ce7a07f85d48b675ece6f0f0e5714cb5388fc
+Author: Ryan Blue <blue@apache.org>
+Date:   Tue Feb 24 16:14:52 2015 -0800
+
+    CLOUDERA-BUILD. Remove kite-data-flume.
+    
+    This is not needed in CDH.
+
+commit 24528ea240c457085308ef95af0d3f28f06d40c3
+Author: Ryan Blue <blue@apache.org>
+Date:   Tue Feb 24 16:05:25 2015 -0800
+
+    CLOUDERA-BUILD. Update POM files for CDH.
+    
+    Most updates are setting the version to 1.0.0-cdh5.4.0-SNAPSHOT.
+    
+    The project compiles.
+    
+    Root pom updates:
+    * Use CDH root pom for 5.4.0-SNAPSHOT
+    * Remove all non-standard properties
+    * Add -base properties for javadoc links
+    * Use -cdh5 dependency aggregator artifacts
+    * Remove unused dependency profiles, but not cdh5
+      (cdh5 may be used by build processes)
+    * Update cdh5 profile to match default deps
+    * Remove cloudera releases repo
+    * Remove Sonatype distributionManagement
+    
+    Minicluster updates:
+    * Use different factory method for Hive metastore server
+    * Add test aggregator deps with compile scope (MiniHBaseCluster
+      is missing otherwise)
+    
+    Other updates:
+    * Remove the parquet-hive bundle dep, this is part of Hive in CDH
+    * Remove non-CDH5 dependency aggregators for HDFS and HBase
+    * Remove all alternate (e.g., *-cdh5) version properties

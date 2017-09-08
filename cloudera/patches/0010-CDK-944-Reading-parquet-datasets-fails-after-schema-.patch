@@ -1,0 +1,455 @@
+From 73052357396650401df613c6476153f6afe2ea9e Mon Sep 17 00:00:00 2001
+From: Joey Echeverria <joey42@gmail.com>
+Date: Fri, 27 Feb 2015 14:12:21 -0800
+Subject: [PATCH 010/115] CDK-944: Reading parquet datasets fails after schema evolution
+
+* Added a test to demonstrate this bug
+* Added setting of the parquet reader schema.
+
+Closes #330
+---
+ .../filesystem/ParquetFileSystemDatasetReader.java |   10 ++-
+ kite-data/kite-data-core/src/test/avro/value.avsc  |   19 ++++
+ .../data/spi/filesystem/DatasetTestUtilities.java  |    2 +-
+ .../TestReadParquetAfterSchemaEvolution.java       |   92 ++++++++++++++++++++
+ .../filesystem/TestWriteReflectReadGeneric.java    |    3 +
+ .../filesystem/TestWriteSpecificReadGeneric.java   |   90 +++++++++++++++++++
+ .../TestWriteSpecificReadGenericParquet.java       |   92 ++++++++++++++++++++
+ .../src/test/resources/schema/old_value.avsc       |   13 +++
+ 8 files changed, 319 insertions(+), 2 deletions(-)
+ create mode 100644 kite-data/kite-data-core/src/test/avro/value.avsc
+ create mode 100644 kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestReadParquetAfterSchemaEvolution.java
+ create mode 100644 kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestWriteSpecificReadGeneric.java
+ create mode 100644 kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestWriteSpecificReadGenericParquet.java
+ create mode 100644 kite-data/kite-data-core/src/test/resources/schema/old_value.avsc
+
+diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/ParquetFileSystemDatasetReader.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/ParquetFileSystemDatasetReader.java
+index 96e9c6b..6d3fd7c 100644
+--- a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/ParquetFileSystemDatasetReader.java
++++ b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/ParquetFileSystemDatasetReader.java
+@@ -16,7 +16,10 @@
+ package org.kitesdk.data.spi.filesystem;
+ 
+ import java.util.NoSuchElementException;
++
++import org.apache.hadoop.conf.Configuration;
+ import org.kitesdk.data.DatasetIOException;
++import org.kitesdk.data.spi.DataModelUtil;
+ import org.kitesdk.data.spi.ReaderWriterState;
+ import org.kitesdk.data.spi.AbstractDatasetReader;
+ import com.google.common.base.Objects;
+@@ -31,12 +34,14 @@ import org.apache.hadoop.fs.Path;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ import parquet.avro.AvroParquetReader;
++import parquet.avro.AvroReadSupport;
+ 
+ class ParquetFileSystemDatasetReader<E extends IndexedRecord> extends AbstractDatasetReader<E> {
+ 
+   private FileSystem fileSystem;
+   private Path path;
+   private Schema schema;
++  private Schema readerSchema;
+   private Class<E> type;
+ 
+   private ReaderWriterState state;
+@@ -60,6 +65,7 @@ class ParquetFileSystemDatasetReader<E extends IndexedRecord> extends AbstractDa
+     this.path = path;
+     this.schema = schema;
+     this.type = type;
++    this.readerSchema = DataModelUtil.getReaderSchema(type, schema);
+ 
+     this.state = ReaderWriterState.NEW;
+   }
+@@ -72,8 +78,10 @@ class ParquetFileSystemDatasetReader<E extends IndexedRecord> extends AbstractDa
+     LOG.debug("Opening reader on path:{}", path);
+ 
+     try {
++      final Configuration conf = fileSystem.getConf();
++      AvroReadSupport.setAvroReadSchema(conf, readerSchema);
+       reader = new AvroParquetReader<E>(
+-          fileSystem.getConf(), fileSystem.makeQualified(path));
++          conf, fileSystem.makeQualified(path));
+     } catch (IOException e) {
+       throw new DatasetIOException("Unable to create reader path:" + path, e);
+     }
+diff --git a/kite-data/kite-data-core/src/test/avro/value.avsc b/kite-data/kite-data-core/src/test/avro/value.avsc
+new file mode 100644
+index 0000000..3517304
+--- /dev/null
++++ b/kite-data/kite-data-core/src/test/avro/value.avsc
+@@ -0,0 +1,19 @@
++{
++  "name": "Value",
++  "namespace": "org.kitesdk.data.event",
++  "type": "record",
++  "doc": "A small, single valued event",
++  "fields": [
++    {
++      "name": "id",
++      "type": ["null", "string"],
++      "default" : null,
++      "doc": "Id of the event"
++    },
++    {
++      "name": "value",
++      "type": "long",
++      "doc": "A value"
++    }
++  ]
++}
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/DatasetTestUtilities.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/DatasetTestUtilities.java
+index 0dc15e3..54fd51a 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/DatasetTestUtilities.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/DatasetTestUtilities.java
+@@ -32,7 +32,6 @@ import java.util.Set;
+ import org.apache.avro.Schema;
+ import org.apache.avro.generic.GenericData;
+ import org.apache.avro.generic.GenericRecordBuilder;
+-import org.apache.avro.util.Utf8;
+ import org.junit.Assert;
+ import org.kitesdk.data.View;
+ import org.kitesdk.data.spi.InitializeAccessor;
+@@ -42,6 +41,7 @@ public class DatasetTestUtilities {
+ 
+   public final static Schema STRING_SCHEMA = loadSchema("schema/string.avsc");
+   public final static Schema USER_SCHEMA = loadSchema("schema/user.avsc");
++  public final static Schema OLD_VALUE_SCHEMA = loadSchema("schema/old_value.avsc");
+   public final static URI USER_SCHEMA_URL = findSchemaURI("schema/user.avsc");
+ 
+   private static Schema loadSchema(String resource) {
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestReadParquetAfterSchemaEvolution.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestReadParquetAfterSchemaEvolution.java
+new file mode 100644
+index 0000000..75a3264
+--- /dev/null
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestReadParquetAfterSchemaEvolution.java
+@@ -0,0 +1,92 @@
++/*
++ * Copyright 2014 Cloudera, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.kitesdk.data.spi.filesystem;
++
++import com.google.common.io.Files;
++import org.apache.avro.generic.GenericData;
++import org.apache.avro.generic.GenericRecord;
++import org.apache.hadoop.fs.FileSystem;
++import org.apache.hadoop.fs.Path;
++import org.junit.AfterClass;
++import org.junit.Assert;
++import org.junit.BeforeClass;
++import org.kitesdk.data.*;
++import org.kitesdk.data.event.Value;
++import org.kitesdk.data.spi.filesystem.DatasetTestUtilities.RecordValidator;
++
++import java.io.IOException;
++
++public class TestReadParquetAfterSchemaEvolution extends TestDatasetReaders<GenericRecord> {
++
++  private static final int totalRecords = 100;
++  protected static FileSystem fs = null;
++  protected static Path testDirectory = null;
++  protected static Dataset<GenericRecord> readerDataset;
++
++  @BeforeClass
++  public static void setup() throws IOException {
++    fs = LocalFileSystem.getInstance();
++    testDirectory = new Path(Files.createTempDir().getAbsolutePath());
++    FileSystemDatasetRepository repo = new FileSystemDatasetRepository(fs.getConf(),
++        testDirectory);
++    Dataset<GenericRecord> writerDataset = repo.create("ns", "test", new DatasetDescriptor.Builder()
++                                   .schema(DatasetTestUtilities.OLD_VALUE_SCHEMA)
++                                   .format(Formats.PARQUET)
++                                   .build(), GenericRecord.class);
++    
++    DatasetWriter<GenericRecord> writer = writerDataset.newWriter();
++    
++    GenericRecord record = new GenericData.Record(DatasetTestUtilities.OLD_VALUE_SCHEMA);
++    for (long i = 0; i < totalRecords; i++) {
++      record.put("value", Long.valueOf(i));
++      writer.write(record);
++    }
++    writer.close();
++    
++    repo.update("ns", "test", new DatasetDescriptor.Builder(writerDataset.getDescriptor())
++      .schema(Value.class).build());
++
++    readerDataset = repo.load("ns", "test", GenericRecord.class);
++  }
++
++  @AfterClass
++  public static void tearDown() throws IOException {
++    fs.delete(testDirectory, true);
++  }
++
++  @Override
++  public DatasetReader<GenericRecord> newReader() throws IOException {
++    return readerDataset.newReader();
++  }
++
++  @Override
++  public int getTotalRecords() {
++    return totalRecords;
++  }
++
++  @Override
++  public RecordValidator<GenericRecord> getValidator() {
++    return new RecordValidator<GenericRecord>() {
++
++      @Override
++      public void validate(GenericRecord record, int recordNum) {
++        Assert.assertEquals(null, record.get("id"));
++        Assert.assertEquals(Long.valueOf(recordNum), record.get("value"));
++      }
++    };
++  }
++}
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestWriteReflectReadGeneric.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestWriteReflectReadGeneric.java
+index 30ec33a..c7d5fc7 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestWriteReflectReadGeneric.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestWriteReflectReadGeneric.java
+@@ -18,6 +18,8 @@ package org.kitesdk.data.spi.filesystem;
+ 
+ import com.google.common.io.Files;
+ import java.io.IOException;
++
++import org.apache.avro.generic.GenericData;
+ import org.apache.avro.generic.GenericRecord;
+ import org.apache.hadoop.fs.FileSystem;
+ import org.apache.hadoop.fs.Path;
+@@ -78,6 +80,7 @@ public class TestWriteReflectReadGeneric extends TestDatasetReaders<GenericRecor
+ 
+       @Override
+       public void validate(GenericRecord record, int recordNum) {
++        Assert.assertEquals(GenericData.Record.class, record.getClass());
+         Assert.assertEquals(String.valueOf(recordNum), record.get("text").toString());
+         Assert.assertEquals(recordNum, record.get("value"));
+       }
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestWriteSpecificReadGeneric.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestWriteSpecificReadGeneric.java
+new file mode 100644
+index 0000000..a90bcb4
+--- /dev/null
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestWriteSpecificReadGeneric.java
+@@ -0,0 +1,90 @@
++/*
++ * Copyright 2014 Cloudera, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.kitesdk.data.spi.filesystem;
++
++import com.google.common.io.Files;
++import org.apache.avro.generic.GenericData;
++import org.apache.avro.generic.GenericRecord;
++import org.apache.hadoop.fs.FileSystem;
++import org.apache.hadoop.fs.Path;
++import org.junit.AfterClass;
++import org.junit.Assert;
++import org.junit.BeforeClass;
++import org.kitesdk.data.*;
++import org.kitesdk.data.event.StandardEvent;
++import org.kitesdk.data.spi.filesystem.DatasetTestUtilities.RecordValidator;
++
++import java.io.IOException;
++
++public class TestWriteSpecificReadGeneric extends TestDatasetReaders<GenericData.Record> {
++
++  private static final int totalRecords = 100;
++  protected static FileSystem fs = null;
++  protected static Path testDirectory = null;
++  protected static Dataset<GenericData.Record> readerDataset;
++
++  @BeforeClass
++  public static void setup() throws IOException {
++    fs = LocalFileSystem.getInstance();
++    testDirectory = new Path(Files.createTempDir().getAbsolutePath());
++    FileSystemDatasetRepository repo = new FileSystemDatasetRepository(fs.getConf(),
++        testDirectory);
++    Dataset<StandardEvent> writerDataset = repo.create("ns", "test", new DatasetDescriptor.Builder()
++                                   .schema(StandardEvent.class)
++                                   .build(), StandardEvent.class);
++    DatasetWriter<StandardEvent> writer = writerDataset.newWriter();
++    for (long i = 0; i < totalRecords; i++) {
++      String text = String.valueOf(i);
++      writer.write(new StandardEvent(text, text, i, text, text, i));
++    }
++    writer.close();
++
++    readerDataset = repo.load("ns", "test", GenericData.Record.class);
++  }
++
++  @AfterClass
++  public static void tearDown() throws IOException {
++    fs.delete(testDirectory, true);
++  }
++
++  @Override
++  public DatasetReader<GenericData.Record> newReader() throws IOException {
++    return readerDataset.newReader();
++  }
++
++  @Override
++  public int getTotalRecords() {
++    return totalRecords;
++  }
++
++  @Override
++  public RecordValidator<GenericData.Record> getValidator() {
++    return new RecordValidator<GenericData.Record>() {
++
++      @Override
++      public void validate(GenericData.Record record, int recordNum) {
++        Assert.assertEquals(GenericData.Record.class, record.getClass());
++        Assert.assertEquals(String.valueOf(recordNum), record.get("event_initiator").toString());
++        Assert.assertEquals(String.valueOf(recordNum), record.get("event_name").toString());
++        Assert.assertEquals(Long.valueOf(recordNum), record.get("user_id"));
++        Assert.assertEquals(String.valueOf(recordNum), record.get("session_id").toString());
++        Assert.assertEquals(String.valueOf(recordNum), record.get("ip").toString());
++        Assert.assertEquals(Long.valueOf(recordNum), record.get("timestamp"));
++      }
++    };
++  }
++}
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestWriteSpecificReadGenericParquet.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestWriteSpecificReadGenericParquet.java
+new file mode 100644
+index 0000000..e541a7e
+--- /dev/null
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestWriteSpecificReadGenericParquet.java
+@@ -0,0 +1,92 @@
++/*
++ * Copyright 2014 Cloudera, Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ *      http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++
++package org.kitesdk.data.spi.filesystem;
++
++import com.google.common.io.Files;
++import org.apache.avro.generic.GenericData;
++import org.apache.avro.generic.GenericRecord;
++import org.apache.hadoop.fs.FileSystem;
++import org.apache.hadoop.fs.Path;
++import org.junit.AfterClass;
++import org.junit.Assert;
++import org.junit.BeforeClass;
++import org.kitesdk.data.*;
++import org.kitesdk.data.event.StandardEvent;
++import org.kitesdk.data.spi.filesystem.DatasetTestUtilities.RecordValidator;
++
++import java.io.IOException;
++
++public class TestWriteSpecificReadGenericParquet extends TestDatasetReaders<GenericRecord> {
++
++  private static final int totalRecords = 100;
++  protected static FileSystem fs = null;
++  protected static Path testDirectory = null;
++  protected static Dataset<GenericRecord> readerDataset;
++
++  @BeforeClass
++  public static void setup() throws IOException {
++    fs = LocalFileSystem.getInstance();
++    testDirectory = new Path(Files.createTempDir().getAbsolutePath());
++    FileSystemDatasetRepository repo = new FileSystemDatasetRepository(fs.getConf(),
++        testDirectory);
++    Dataset<StandardEvent> writerDataset = repo.create("ns", "test", new DatasetDescriptor.Builder()
++                                   .schema(StandardEvent.class)
++                                   .format(Formats.PARQUET)
++                                   .build(), StandardEvent.class);
++    DatasetWriter<StandardEvent> writer = writerDataset.newWriter();
++    for (long i = 0; i < totalRecords; i++) {
++      String text = String.valueOf(i);
++      writer.write(new StandardEvent(text, text, i, text, text, i));
++    }
++    writer.close();
++
++    readerDataset = repo.load("ns", "test", GenericRecord.class);
++  }
++
++  @AfterClass
++  public static void tearDown() throws IOException {
++    fs.delete(testDirectory, true);
++  }
++
++  @Override
++  public DatasetReader<GenericRecord> newReader() throws IOException {
++    return readerDataset.newReader();
++  }
++
++  @Override
++  public int getTotalRecords() {
++    return totalRecords;
++  }
++
++  @Override
++  public RecordValidator<GenericRecord> getValidator() {
++    return new RecordValidator<GenericRecord>() {
++
++      @Override
++      public void validate(GenericRecord record, int recordNum) {
++        // This doesn't work. Parquet will still instantiate the class
++        // Assert.assertEquals(GenericData.Record.class, record.getClass());
++        Assert.assertEquals(String.valueOf(recordNum), record.get("event_initiator").toString());
++        Assert.assertEquals(String.valueOf(recordNum), record.get("event_name").toString());
++        Assert.assertEquals(Long.valueOf(recordNum), record.get("user_id"));
++        Assert.assertEquals(String.valueOf(recordNum), record.get("session_id").toString());
++        Assert.assertEquals(String.valueOf(recordNum), record.get("ip").toString());
++        Assert.assertEquals(Long.valueOf(recordNum), record.get("timestamp"));
++      }
++    };
++  }
++}
+diff --git a/kite-data/kite-data-core/src/test/resources/schema/old_value.avsc b/kite-data/kite-data-core/src/test/resources/schema/old_value.avsc
+new file mode 100644
+index 0000000..c771860
+--- /dev/null
++++ b/kite-data/kite-data-core/src/test/resources/schema/old_value.avsc
+@@ -0,0 +1,13 @@
++{
++  "name": "Value",
++  "namespace": "org.kitesdk.data.event",
++  "type": "record",
++  "doc": "A small, single valued event",
++  "fields": [
++    {
++      "name": "value",
++      "type": "long",
++      "doc": "A value"
++    }
++  ]
++}
+-- 
+1.7.0.4
+

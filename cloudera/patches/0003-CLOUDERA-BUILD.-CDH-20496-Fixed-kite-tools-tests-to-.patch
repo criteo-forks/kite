@@ -1,0 +1,54 @@
+From 11a9fff99b88791c0b8c5739bb92a40904bc26ad Mon Sep 17 00:00:00 2001
+From: Joey Echeverria <joey@cloudera.com>
+Date: Thu, 24 Jul 2014 10:28:46 -0400
+Subject: [PATCH 003/115] CLOUDERA-BUILD. CDH-20496: Fixed kite-tools tests to work with slf4j 1.7.5
+
+This doesn't belong upstream as Kite still builds with an older slf4j upstream.
+---
+ .../src/test/java/org/kitesdk/cli/TestMain.java    |    9 +++++----
+ 1 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/TestMain.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/TestMain.java
+index 99374ec..e86c602 100644
+--- a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/TestMain.java
++++ b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/TestMain.java
+@@ -109,7 +109,8 @@ public class TestMain {
+         contains("Usage: {} [options] [command] [command options]"),
+         eq(Main.DEFAULT_PROGRAM_NAME));
+     verify(console).info(contains("Options"));
+-    verify(console, times(2)).info(anyString(), any(Object[].class)); // -v, --version
++    verify(console, times(2)).info(anyString(), anyString(), anyString(), anyString(),
++        anyString()); // -v, --version
+     verify(console).info(contains("Commands"));
+     verify(console).info(anyString(), eq("create"), anyString());
+     verify(console).info(anyString(), eq("delete"), anyString());
+@@ -137,7 +138,7 @@ public class TestMain {
+     verify(console).info(contains("Examples"));
+     verify(console).info(anyString(), contains("# this is a comment"));
+     verify(console).info(anyString(),
+-        eq(new Object[] {Main.DEFAULT_PROGRAM_NAME, "test", "test dataset-name"}));
++        eq(Main.DEFAULT_PROGRAM_NAME), eq("test"), eq("test dataset-name"));
+     assertEquals(0, rc);
+   }
+ 
+@@ -153,7 +154,7 @@ public class TestMain {
+     verify(console).info(contains("Examples"));
+     verify(console).info(anyString(), contains("this is a comment"));
+     verify(console).info(anyString(),
+-        eq(new Object[] {Main.DEFAULT_PROGRAM_NAME, "test", "test dataset-name"}));
++        eq(Main.DEFAULT_PROGRAM_NAME), eq("test"), eq("test dataset-name"));
+     assertEquals(0, rc);
+   }
+ 
+@@ -169,7 +170,7 @@ public class TestMain {
+     verify(console).info(contains("Examples"));
+     verify(console).info(anyString(), contains("this is a comment"));
+     verify(console).info(anyString(),
+-        eq(new Object[] {"datasets", "test", "test dataset-name"}));
++        eq("datasets"), eq("test"), eq("test dataset-name"));
+     assertEquals(0, rc);
+   }
+ 
+-- 
+1.7.0.4
+

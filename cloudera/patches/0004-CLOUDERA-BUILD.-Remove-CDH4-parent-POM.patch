@@ -1,0 +1,26 @@
+From 3f0077b92abe5d12a6248e08192078ab82c35ec4 Mon Sep 17 00:00:00 2001
+From: Ryan Blue <blue@apache.org>
+Date: Tue, 24 Feb 2015 16:32:47 -0800
+Subject: [PATCH 004/115] CLOUDERA-BUILD. Remove CDH4 parent POM.
+
+---
+ kite-app-parent/pom.xml |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/kite-app-parent/pom.xml b/kite-app-parent/pom.xml
+index baeedcd..b2c720b 100644
+--- a/kite-app-parent/pom.xml
++++ b/kite-app-parent/pom.xml
+@@ -34,7 +34,9 @@
+   </description>
+ 
+   <modules>
++    <!--
+     <module>cdh4</module>
++    -->
+     <module>cdh5</module>
+   </modules>
+ 
+-- 
+1.7.0.4
+

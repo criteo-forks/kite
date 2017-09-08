@@ -1,0 +1,25 @@
+From 2ff9b4d7926e7f08f762fc93ea598590dfc4b017 Mon Sep 17 00:00:00 2001
+From: Micah Whitacre <micah.whitacre@cerner.com>
+Date: Fri, 13 Mar 2015 12:12:23 -0500
+Subject: [PATCH 030/115] Corrected incorrect assertion message.
+
+---
+ .../data/spi/filesystem/TestFileSystemView.java    |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemView.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemView.java
+index 77001e2..18106a2 100644
+--- a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemView.java
++++ b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemView.java
+@@ -266,7 +266,7 @@ public class TestFileSystemView extends TestRefinableViews {
+     final Path nov11 = new Path("target/data/ns/test/year=2013/month=11/day=11");
+     assertDirectoriesExist(fs, root, y2013, sep, sep12, oct, oct12, nov, nov11);
+ 
+-    Assert.assertTrue("Delete should return false to indicate no changes",
++    Assert.assertTrue("Delete should return true to indicate data was deleted.",
+         unbounded.deleteAll());
+     assertDirectoriesDoNotExist(fs, y2013, sep12, sep, oct12, oct, nov11, nov);
+     assertDirectoriesExist(fs, root);
+-- 
+1.7.0.4
+
