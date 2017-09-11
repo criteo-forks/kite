@@ -1,7 +1,8 @@
-From 956333d8a0495818c3d56f214d7c5003aabe282e Mon Sep 17 00:00:00 2001
+From d5d74a44719f92334e74832d9755a35bd4dc40f8 Mon Sep 17 00:00:00 2001
 From: Wolfgang Hoschek <whoschek@cloudera.com>
 Date: Wed, 16 Sep 2015 16:11:41 -0700
-Subject: [PATCH 107/115] KITE-1074: Partial updates aka Atomic updates with loadSolr aren't recognized with SolrCloud
+Subject: [PATCH 107/140] KITE-1074: Partial updates aka Atomic updates with
+ loadSolr aren't recognized with SolrCloud
 
 ---
  .../kitesdk/morphline/solr/LoadSolrBuilder.java    |    7 ++++++-
@@ -72,5 +73,5 @@ index 1fd5a73..29158b7 100644
      commit();
      
 -- 
-1.7.0.4
+1.7.9.5
 

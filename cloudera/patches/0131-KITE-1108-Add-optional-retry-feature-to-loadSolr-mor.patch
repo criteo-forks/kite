@@ -1,0 +1,80 @@
+From f10208f7f3dc2fb85d73ce06bb254957ec47fae3 Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Tue, 1 Mar 2016 10:41:13 -0800
+Subject: [PATCH 131/140] KITE-1108: Add optional retry feature to loadSolr
+ morphline command (add NullMetricsFacade)
+
+---
+ .../client/solrj/retry/RetryingSolrServer.java     |   21 +++++++++++++++++++-
+ .../client/solrj/retry/RetryingSolrServerTest.java |   18 +++++++++++++++++
+ 2 files changed, 38 insertions(+), 1 deletion(-)
+
+diff --git a/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/RetryingSolrServer.java b/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/RetryingSolrServer.java
+index 4268d7d..15b14ab 100644
+--- a/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/RetryingSolrServer.java
++++ b/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/RetryingSolrServer.java
+@@ -121,7 +121,7 @@ public class RetryingSolrServer extends SolrServer {
+     }
+     this.retryPolicyFactory = retryPolicyFactory;
+     if (metrics == null) {
+-      throw new IllegalArgumentException("metrics param must not be null");
++      metrics = new NullMetricsFacade(); 
+     }
+     this.metrics = metrics;
+   }
+@@ -366,4 +366,23 @@ public class RetryingSolrServer extends SolrServer {
+     solrServer.shutdown();
+   }
+   
++  
++  ///////////////////////////////////////////////////////////////////////////////
++  // Nested classes:
++  ///////////////////////////////////////////////////////////////////////////////
++  /**
++   * A {@link MetricsFacade implementation that ignores all metrics events - does nothing.
++   */
++  private static final class NullMetricsFacade implements MetricsFacade {
++
++      @Override
++      public void markMeter(String name, long increment) {}
++
++      @Override
++      public void updateHistogram(String name, long value) {}
++
++      @Override
++      public void updateTimer(String name, long duration, TimeUnit unit) {}        
++  };
++    
+ }
+diff --git a/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/apache/solr/client/solrj/retry/RetryingSolrServerTest.java b/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/apache/solr/client/solrj/retry/RetryingSolrServerTest.java
+index e59bc4b..7712f01 100644
+--- a/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/apache/solr/client/solrj/retry/RetryingSolrServerTest.java
++++ b/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/apache/solr/client/solrj/retry/RetryingSolrServerTest.java
+@@ -63,6 +63,24 @@ public class RetryingSolrServerTest extends SolrTestCaseJ4 {
+   }
+   
+   @Test
++  public void testGoodRequestNeedsNoRetriesWithNonNullMetricsFacade() throws Exception {
++    testGoodRequestNeedsNoRetries(getMetricsFacade());
++  }
++  
++  @Test
++  public void testGoodRequestNeedsNoRetriesWithNullMetricsFacade() throws Exception {
++    testGoodRequestNeedsNoRetries(null);
++  }
++  
++  private void testGoodRequestNeedsNoRetries(MetricsFacade metricsFacade) throws Exception {
++    CountingSolrServer countingSolrServer = new CountingSolrServer(solrServer);
++    SolrServer solr = new RetryingSolrServer(countingSolrServer, getNoRetryPolicyFactory(), metricsFacade);
++    SolrQuery query = getDefaultQuery();
++    solr.query(query);
++    Assert.assertEquals(1, countingSolrServer.getNumRequests());
++  }
++  
++  @Test
+   public void testNoRetries() throws Exception {
+     SolrQuery query = getDefaultQuery();
+     solrServer.query(query);
+-- 
+1.7.9.5
+

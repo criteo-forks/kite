@@ -1,20 +1,20 @@
 From 6baf75cbb6415af47fa33748289258a078761a70 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Mon, 20 Apr 2015 18:12:06 -0700
-Subject: [PATCH 057/115] CDK-843: Add Replaceable SPI interface.
+Subject: [PATCH 057/140] CDK-843: Add Replaceable SPI interface.
 
 This is like the Mergeable interface, but tests whether the dataset
 supports replacement. It also includes a method to test whether a view
 can be replaced.
 ---
  .../java/org/kitesdk/data/spi/Replaceable.java     |   41 ++++++++++++++++++++
- .../data/spi/filesystem/FileSystemDataset.java     |   37 ++++++++++++-----
+ .../data/spi/filesystem/FileSystemDataset.java     |   37 ++++++++++++------
  .../spi/filesystem/FileSystemPartitionView.java    |    2 +-
- .../org/kitesdk/data/crunch/DatasetTarget.java     |   22 +++++++++-
+ .../org/kitesdk/data/crunch/DatasetTarget.java     |   22 +++++++++--
  .../data/mapreduce/DatasetKeyOutputFormat.java     |   31 ++++++++++++---
  .../org/kitesdk/data/mapreduce/TestMapReduce.java  |    2 +-
  .../java/org/kitesdk/cli/commands/CopyCommand.java |   10 +++++
- .../main/java/org/kitesdk/tools/TransformTask.java |   11 ++++-
+ .../main/java/org/kitesdk/tools/TransformTask.java |   11 +++++-
  8 files changed, 132 insertions(+), 24 deletions(-)
  create mode 100644 kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Replaceable.java
 
@@ -390,5 +390,5 @@ index 8b0a5cf..ef66999 100644
      PipelineResult result = pipeline.done();
  
 -- 
-1.7.0.4
+1.7.9.5
 

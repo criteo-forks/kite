@@ -1,14 +1,15 @@
 From 42920aeccd54be6077d31c7a58a90157acf6bc3b Mon Sep 17 00:00:00 2001
 From: Ryan Blue <rblue@cloudera.com>
 Date: Wed, 24 Sep 2014 18:38:51 -0700
-Subject: [PATCH 006/115] CLOUDERA-BUILD. Remove new unnecessary HTTP dependencies.
+Subject: [PATCH 006/140] CLOUDERA-BUILD. Remove new unnecessary HTTP
+ dependencies.
 
 This removes new tomcat and jetty dependencies that are being pulled in
 by hadoop-common. The problem was introduced in e40ccf0c, which added
 hadoop-common to the dependencies of hadoop-client.
 ---
  kite-hadoop-dependencies/cdh5/pom.xml |   12 ++++++++++++
- 1 files changed, 12 insertions(+), 0 deletions(-)
+ 1 file changed, 12 insertions(+)
 
 diff --git a/kite-hadoop-dependencies/cdh5/pom.xml b/kite-hadoop-dependencies/cdh5/pom.xml
 index 3d328d1..aa0a770 100644
@@ -36,5 +37,5 @@ index 3d328d1..aa0a770 100644
      </dependency>
      <!-- Missing from hadoop-client and needed for webhdfs client -->
 -- 
-1.7.0.4
+1.7.9.5
 

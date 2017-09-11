@@ -1,11 +1,13 @@
 From 2fb24914f3cd9ee7fc96980e29ca63353fd4d9ff Mon Sep 17 00:00:00 2001
 From: Prasanna Rajaperumal <prasanna@cloudera.com>
 Date: Thu, 30 Apr 2015 14:30:08 -0700
-Subject: [PATCH 065/115] CDK-996: Fixing an issue where the SchemaTool async table creation was not waiting for the table to be created before adding new column families
+Subject: [PATCH 065/140] CDK-996: Fixing an issue where the SchemaTool async
+ table creation was not waiting for the table to be
+ created before adding new column families
 
 ---
- .../org/kitesdk/data/hbase/tool/SchemaTool.java    |   32 ++++++++++++++-----
- 1 files changed, 23 insertions(+), 9 deletions(-)
+ .../org/kitesdk/data/hbase/tool/SchemaTool.java    |   32 ++++++++++++++------
+ 1 file changed, 23 insertions(+), 9 deletions(-)
 
 diff --git a/kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/tool/SchemaTool.java b/kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/tool/SchemaTool.java
 index 90c2d0a..24355f3 100644
@@ -78,5 +80,5 @@ index 90c2d0a..24355f3 100644
          }
          // Sleep for a second before checking again
 -- 
-1.7.0.4
+1.7.9.5
 

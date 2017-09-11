@@ -1,7 +1,7 @@
 From 1f3dca785fea6c30505e5c4fb00faf6efb2fbb12 Mon Sep 17 00:00:00 2001
 From: Ben Brown <benjamin.l.brown@gmail.com>
 Date: Thu, 11 Jun 2015 17:45:15 -0400
-Subject: [PATCH 084/115] CDK-476 oozie UriHandler for Kite URIs
+Subject: [PATCH 084/140] CDK-476 oozie UriHandler for Kite URIs
 
 ---
  kite-data/kite-data-oozie/pom.xml                  |  194 ++++++++++
@@ -9,7 +9,7 @@ Subject: [PATCH 084/115] CDK-476 oozie UriHandler for Kite URIs
  .../org/kitesdk/data/oozie/KiteURIHandler.java     |  157 ++++++++
  .../org/kitesdk/data/oozie/TestKiteURIHandler.java |  392 ++++++++++++++++++++
  kite-data/pom.xml                                  |    2 +-
- 5 files changed, 790 insertions(+), 1 deletions(-)
+ 5 files changed, 790 insertions(+), 1 deletion(-)
  create mode 100644 kite-data/kite-data-oozie/pom.xml
  create mode 100644 kite-data/kite-data-oozie/src/main/java/org/kitesdk/data/oozie/KiteLauncherURIHandler.java
  create mode 100644 kite-data/kite-data-oozie/src/main/java/org/kitesdk/data/oozie/KiteURIHandler.java
@@ -847,5 +847,5 @@ index 3360dcd..06f3f1a 100644
 -
  </project>
 -- 
-1.7.0.4
+1.7.9.5
 

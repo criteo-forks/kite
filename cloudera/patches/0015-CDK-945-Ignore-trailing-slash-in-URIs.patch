@@ -1,16 +1,16 @@
 From 599f83d89d5fe4940585c88e35410e07d330450f Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 11 Mar 2015 16:47:27 -0700
-Subject: [PATCH 015/115] CDK-945: Ignore trailing slash in URIs.
+Subject: [PATCH 015/140] CDK-945: Ignore trailing slash in URIs.
 
 This updates the URIPattern code to ignore trailing slashes in URIs.
 URIs can still match a trailing / explicitly, and URI pattern globbing
 still works as before.
 ---
  .../main/java/org/kitesdk/data/spi/URIPattern.java |   14 +++++++++++
- .../java/org/kitesdk/data/spi/TestURIPattern.java  |   16 ++++++++++++
+ .../java/org/kitesdk/data/spi/TestURIPattern.java  |   16 +++++++++++++
  .../data/spi/filesystem/TestHDFSDatasetURIs.java   |   25 ++++++++++++++++++++
- 3 files changed, 55 insertions(+), 0 deletions(-)
+ 3 files changed, 55 insertions(+)
 
 diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/URIPattern.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/URIPattern.java
 index e4617c9..076b15d 100644
@@ -101,5 +101,5 @@ index e20b3c7..7fe14d6 100644
      DatasetRepository repo = DatasetRepositories
          .repositoryFor("repo:hdfs://" + hdfsAuth + "/");
 -- 
-1.7.0.4
+1.7.9.5
 

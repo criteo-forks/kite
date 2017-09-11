@@ -1,7 +1,7 @@
 From 11a0b3b674876f34ff3649524f937262a0d02d4b Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 10 Jun 2015 16:01:49 -0700
-Subject: [PATCH 077/115] CDK-973: Fix tests after rebase.
+Subject: [PATCH 077/140] CDK-973: Fix tests after rebase.
 
 The copy command tests were writing to 5 partitions but expecting 6
 files. This was caused by the writer cache getting rid of one of the
@@ -55,5 +55,5 @@ index e6310b1..cda965c 100644
  
    @Override
 -- 
-1.7.0.4
+1.7.9.5
 

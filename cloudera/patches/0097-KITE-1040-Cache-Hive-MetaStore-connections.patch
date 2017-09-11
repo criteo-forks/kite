@@ -1,7 +1,7 @@
-From 7bbf0837ee6024ea6fbd950041f8b093d2dcb215 Mon Sep 17 00:00:00 2001
+From 99f29813a8835368ed9db4ed34e2542aee16aebd Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 26 Aug 2015 12:16:01 -0700
-Subject: [PATCH 097/115] KITE-1040: Cache Hive MetaStore connections.
+Subject: [PATCH 097/140] KITE-1040: Cache Hive MetaStore connections.
 
 This adds a MetaStoreUtil.get method that keeps track of util objects
 (and the internal MetaStore connection) by connection URIs. These are
@@ -9,7 +9,7 @@ safe to share because they are thread-safe.
 ---
  .../data/crunch/TestCrunchDatasetsHive.java        |    2 +-
  .../spi/hive/HiveAbstractMetadataProvider.java     |    2 +-
- .../org/kitesdk/data/spi/hive/MetaStoreUtil.java   |   56 +++++++++++++++++--
+ .../org/kitesdk/data/spi/hive/MetaStoreUtil.java   |   56 +++++++++++++++++---
  .../hive/TestExternalBackwardCompatibility.java    |    4 +-
  .../kitesdk/data/spi/hive/TestHiveDatasetURIs.java |    2 +-
  .../spi/hive/TestHiveDatasetURIsCompatibility.java |    2 +-
@@ -314,5 +314,5 @@ index 2992eeb..d03dfd5 100644
      metastore.dropTable("bad", "bad_serde");
      metastore.dropTable("bad", "bad_schema");
 -- 
-1.7.0.4
+1.7.9.5
 

@@ -1,7 +1,7 @@
 From fa254ab36aaaa553d1138457bc447f8399f860a1 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Thu, 11 Jun 2015 10:45:00 -0700
-Subject: [PATCH 081/115] CDK-1011: Extend tests and minor fixes.
+Subject: [PATCH 081/140] CDK-1011: Extend tests and minor fixes.
 
 Conflicts:
 	kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java
@@ -639,5 +639,5 @@ index f56ff2c..d36b8a4 100644
  
    public abstract List<String> getExtraCreateArgs() throws Exception;
 -- 
-1.7.0.4
+1.7.9.5
 

@@ -1,7 +1,8 @@
 From 22848ca06ac5d43f14da64215e8a6620e7c0a113 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 27 May 2015 18:51:44 -0700
-Subject: [PATCH 069/115] CDK-976: Fix test failures caused by default conf changes.
+Subject: [PATCH 069/140] CDK-976: Fix test failures caused by default conf
+ changes.
 
 The default conf needs to be set in MR tasks, but always setting the
 configuration in InputFormat and OutputFormat messages isn't correct
@@ -121,5 +122,5 @@ index 35db6f0..09195a1 100644
      this.format = format;
    }
 -- 
-1.7.0.4
+1.7.9.5
 

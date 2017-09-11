@@ -1,11 +1,11 @@
 From 6e8c573ae5027d1525e3d3a156ba5e7b4be558f7 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 22 Apr 2015 18:11:02 -0700
-Subject: [PATCH 058/115] CDK-843: Add compaction task.
+Subject: [PATCH 058/140] CDK-843: Add compaction task.
 
 ---
  .../src/main/java/org/kitesdk/cli/Main.java        |    2 +
- .../kitesdk/cli/commands/BaseDatasetCommand.java   |   27 ++++++
+ .../kitesdk/cli/commands/BaseDatasetCommand.java   |   27 +++++++
  .../org/kitesdk/cli/commands/CompactCommand.java   |   85 ++++++++++++++++++++
  .../org/kitesdk/cli/commands/DeleteCommand.java    |   28 -------
  .../java/org/kitesdk/tools/CompactionTask.java     |   75 +++++++++++++++++
@@ -281,5 +281,5 @@ index 0000000..ed646be
 +  }
 +}
 -- 
-1.7.0.4
+1.7.9.5
 

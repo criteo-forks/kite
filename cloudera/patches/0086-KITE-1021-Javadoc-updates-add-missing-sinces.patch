@@ -1,15 +1,15 @@
 From 133a4044eb11f635609f40a411affce263b96dad Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Mon, 15 Jun 2015 17:53:41 -0700
-Subject: [PATCH 086/115] KITE-1021: Javadoc updates, add missing sinces.
+Subject: [PATCH 086/140] KITE-1021: Javadoc updates, add missing sinces.
 
 ---
- .../java/org/kitesdk/data/PartitionStrategy.java   |    2 +
- .../src/main/java/org/kitesdk/data/Signalable.java |    2 +
- .../src/main/java/org/kitesdk/data/View.java       |    4 ++
- .../data/mapreduce/DatasetKeyInputFormat.java      |   15 ++++++++
+ .../java/org/kitesdk/data/PartitionStrategy.java   |    2 ++
+ .../src/main/java/org/kitesdk/data/Signalable.java |    2 ++
+ .../src/main/java/org/kitesdk/data/View.java       |    4 +++
+ .../data/mapreduce/DatasetKeyInputFormat.java      |   15 +++++++++
  .../data/mapreduce/DatasetKeyOutputFormat.java     |    1 -
- .../main/java/org/kitesdk/tools/TransformTask.java |   35 +++++++++++++++++--
+ .../main/java/org/kitesdk/tools/TransformTask.java |   35 +++++++++++++++++---
  6 files changed, 54 insertions(+), 5 deletions(-)
 
 diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionStrategy.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionStrategy.java
@@ -176,5 +176,5 @@ index ed78801..8da5326 100644
      Preconditions.checkArgument(mode != Target.WriteMode.CHECKPOINT,
          "Checkpoint is not an allowed write mode");
 -- 
-1.7.0.4
+1.7.9.5
 

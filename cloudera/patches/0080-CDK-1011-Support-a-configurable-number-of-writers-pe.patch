@@ -1,7 +1,9 @@
 From 036f936f7fb059eecd23d8172063541b51664448 Mon Sep 17 00:00:00 2001
 From: Micah Whitacre <micah.whitacre@cerner.com>
 Date: Thu, 4 Jun 2015 09:16:08 -0500
-Subject: [PATCH 080/115] CDK-1011: Support a configurable number of writers per partition when writing to a dataset, along with copying and compaction.
+Subject: [PATCH 080/140] CDK-1011: Support a configurable number of writers
+ per partition when writing to a dataset, along with
+ copying and compaction.
 
 CDK-1011: Adjusted the command option for files per partition and adjusted the logic on when num writers and writers per partition are specified.
 
@@ -18,7 +20,7 @@ Resolution:
  .../java/org/kitesdk/tools/CompactionTask.java     |    4 +
  .../main/java/org/kitesdk/tools/TransformTask.java |   12 +-
  .../cli/commands/TestCompactCommandCluster.java    |  257 ++++++++++++++++++++
- .../cli/commands/TestCopyCommandCluster.java       |   73 ++++++-
+ .../cli/commands/TestCopyCommandCluster.java       |   73 +++++-
  7 files changed, 401 insertions(+), 16 deletions(-)
  create mode 100644 kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCompactCommandCluster.java
 
@@ -619,5 +621,5 @@ index 1771c5c..2c2622d 100644
    }
  
 -- 
-1.7.0.4
+1.7.9.5
 

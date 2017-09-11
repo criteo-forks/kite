@@ -1,11 +1,11 @@
 From 2ff9b4d7926e7f08f762fc93ea598590dfc4b017 Mon Sep 17 00:00:00 2001
 From: Micah Whitacre <micah.whitacre@cerner.com>
 Date: Fri, 13 Mar 2015 12:12:23 -0500
-Subject: [PATCH 030/115] Corrected incorrect assertion message.
+Subject: [PATCH 030/140] Corrected incorrect assertion message.
 
 ---
  .../data/spi/filesystem/TestFileSystemView.java    |    2 +-
- 1 files changed, 1 insertions(+), 1 deletions(-)
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemView.java b/kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/filesystem/TestFileSystemView.java
 index 77001e2..18106a2 100644
@@ -21,5 +21,5 @@ index 77001e2..18106a2 100644
      assertDirectoriesDoNotExist(fs, y2013, sep12, sep, oct12, oct, nov11, nov);
      assertDirectoriesExist(fs, root);
 -- 
-1.7.0.4
+1.7.9.5
 

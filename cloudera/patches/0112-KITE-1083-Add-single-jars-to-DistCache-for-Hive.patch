@@ -1,7 +1,7 @@
-From d2e13ed88e3189b77b415bdcb366f09fcfa9afc2 Mon Sep 17 00:00:00 2001
+From acb1198ecdacdb81510ab16dc48ac5b418201b96 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Fri, 25 Sep 2015 13:17:56 -0700
-Subject: [PATCH 112/115] KITE-1083: Add single jars to DistCache for Hive.
+Subject: [PATCH 112/140] KITE-1083: Add single jars to DistCache for Hive.
 
 This changes the way jobs submitted by the CLI are configured.
 Previously, the entire lib directory for Hive was added to the
@@ -13,7 +13,7 @@ interacting with Hive, this doesn't add Hive dependencies to the
 distributed cache at all.
 ---
  .../main/java/org/kitesdk/tools/TransformTask.java |   53 ++++++++++++++++++--
- 1 files changed, 49 insertions(+), 4 deletions(-)
+ 1 file changed, 49 insertions(+), 4 deletions(-)
 
 diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
 index bc88fdc..3d65580 100644
@@ -117,5 +117,5 @@ index bc88fdc..3d65580 100644
  
      PCollection<T> collection = pipeline.read(CrunchDatasets.asSource(from))
 -- 
-1.7.0.4
+1.7.9.5
 

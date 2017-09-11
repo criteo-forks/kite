@@ -1,15 +1,15 @@
 From e1b530a3c8d0acbad9a8ee7b9ffdd3dbe67b5254 Mon Sep 17 00:00:00 2001
 From: Prasanna Rajaperumal <prasanna@cloudera.com>
 Date: Tue, 24 Mar 2015 13:12:02 -0700
-Subject: [PATCH 031/115] CDK-968: Add HBaseActionModifiable to SPI.
+Subject: [PATCH 031/140] CDK-968: Add HBaseActionModifiable to SPI.
 
 Implement HBaseActionModifiable SPI to allow HBase level hookups into
 HBase Get/Put/Scan/Delete.
 ---
- .../java/org/kitesdk/data/hbase/DaoDataset.java    |   96 ++++++++-
+ .../java/org/kitesdk/data/hbase/DaoDataset.java    |   96 +++++++-
  .../kitesdk/data/hbase/impl/CompositeBaseDao.java  |    3 +
- .../data/hbase/impl/HBaseClientTemplate.java       |  125 ++++++++----
- .../data/hbase/spi/HBaseActionModifiable.java      |  134 +++++++++++
+ .../data/hbase/impl/HBaseClientTemplate.java       |  125 +++++++----
+ .../data/hbase/spi/HBaseActionModifiable.java      |  134 ++++++++++++
  .../data/hbase/spi/TestHBaseActionModifiable.java  |  231 ++++++++++++++++++++
  5 files changed, 549 insertions(+), 40 deletions(-)
  create mode 100644 kite-data/kite-data-hbase/src/main/java/org/kitesdk/data/hbase/spi/HBaseActionModifiable.java
@@ -702,5 +702,5 @@ index 0000000..0319e7a
 +
 +}
 -- 
-1.7.0.4
+1.7.9.5
 

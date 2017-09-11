@@ -1,11 +1,12 @@
 From 79aefc0fcebad2b8df3a43ee7de563dc64ec878d Mon Sep 17 00:00:00 2001
 From: Tom White <tom@cloudera.com>
 Date: Tue, 30 Jun 2015 13:23:16 +0100
-Subject: [PATCH 087/115] KITE-1028. Creating a dataset with existing partitions fails for Hive external tables.
+Subject: [PATCH 087/140] KITE-1028. Creating a dataset with existing
+ partitions fails for Hive external tables.
 
 ---
- .../data/spi/filesystem/FileSystemDataset.java     |    4 ++-
- .../commands/TestCreateDatasetCommandCluster.java  |   21 +++++++++++++------
+ .../data/spi/filesystem/FileSystemDataset.java     |    4 +++-
+ .../commands/TestCreateDatasetCommandCluster.java  |   21 +++++++++++++-------
  2 files changed, 17 insertions(+), 8 deletions(-)
 
 diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
@@ -88,5 +89,5 @@ index 3eac052..de9ef00 100644
      }
    }
 -- 
-1.7.0.4
+1.7.9.5
 

@@ -1,7 +1,8 @@
 From b60b64e27dc422514f6ba8e9b046c9c81ca491f3 Mon Sep 17 00:00:00 2001
 From: Joey Echeverria <joey42@gmail.com>
 Date: Wed, 15 Apr 2015 10:41:16 -0500
-Subject: [PATCH 041/115] CDK-615: Permissions issue writing to a partitioned Hive external dataset
+Subject: [PATCH 041/140] CDK-615: Permissions issue writing to a partitioned
+ Hive external dataset
 
 * This patch reverses course from the previous one. Depending on the
   dataset implementation, you may or may not want Kite creating the
@@ -276,5 +277,5 @@ index 3102361..07180ac 100644
 +
  }
 -- 
-1.7.0.4
+1.7.9.5
 

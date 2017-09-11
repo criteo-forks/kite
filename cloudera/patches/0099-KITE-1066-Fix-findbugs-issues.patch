@@ -1,11 +1,11 @@
-From e19333b57fbb2f55c898bbf3c8235638264cbbf2 Mon Sep 17 00:00:00 2001
+From 7e6affe1c920af22bfb5a8d19a4225af8f094e8e Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 26 Aug 2015 14:03:39 -0700
-Subject: [PATCH 099/115] KITE-1066: Fix findbugs issues.
+Subject: [PATCH 099/140] KITE-1066: Fix findbugs issues.
 
 ---
- .../AbstractCombineFileRecordReader.java           |   17 ++++++++++----
- .../AbstractKiteCombineFileInputFormat.java        |   22 ++++++++++++++++---
+ .../AbstractCombineFileRecordReader.java           |   17 ++++++++++-----
+ .../AbstractKiteCombineFileInputFormat.java        |   22 ++++++++++++++++----
  .../data/spi/filesystem/CSVInputFormat.java        |   10 ++++++++-
  .../data/spi/filesystem/JSONInputFormat.java       |   10 ++++++++-
  4 files changed, 48 insertions(+), 11 deletions(-)
@@ -147,5 +147,5 @@ index a72ea1b..82d3075 100644
          path.getFileSystem(conf), path, accessor);
      reader.initialize();
 -- 
-1.7.0.4
+1.7.9.5
 

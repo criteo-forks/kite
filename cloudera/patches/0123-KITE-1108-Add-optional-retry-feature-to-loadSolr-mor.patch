@@ -1,0 +1,43 @@
+From cedef59c1ce223878c01c9205cd6c4f0f358342a Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Tue, 2 Feb 2016 10:21:48 -0800
+Subject: [PATCH 123/140] KITE-1108: Add optional retry feature to loadSolr
+ morphline command (doc3)
+
+---
+ .../resources/test-morphlines/loadSolrBasic.conf   |   12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/loadSolrBasic.conf b/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/loadSolrBasic.conf
+index 13f64ae..ec96fbe 100644
+--- a/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/loadSolrBasic.conf
++++ b/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/loadSolrBasic.conf
+@@ -40,6 +40,10 @@ SOLR_LOCATOR : {
+ SOLR_LOCATOR : ${?ENV_SOLR_LOCATOR}
+ 
+ maxRecordsPerSecond : 100000000
++
++# retry solrj requests until a total of 100 times or 3 minutes, whichever comes first
++# first sleep between retries lasts for random(127..253) milliseconds, 
++# subsequently the duration between retries grows exponentionally, capped at 10 second sleeps between retries           
+ retryPolicy_baseSleepTime : "127 milliseconds"
+ retryPolicy_maxSleepTime : "10 seconds"
+ retryPolicy_maxRetries : 100
+@@ -64,8 +68,12 @@ morphlines : [
+             id : 1.0
+           }
+           maxRecordsPerSecond: ${maxRecordsPerSecond} # if absent then defaults to unlimited
+-          
+-          # if retryPolicy is absent then default to same as perfkit unless system property loadSolr.disableRetryPolicy=true (which in turn is absent by default)
++
++          # If the "retryPolicy" parameter is absent then the loadSolr command defaults to reasonable 
++          # BoundedExponentialBackoffRetry policy values unless the Java System Property 
++          # org.kitesdk.morphline.solr.LoadSolrBuilder.disableRetryPolicyByDefault=true is present 
++          # (this Java System Property in turn is absent by default). 
++          # Set the maxRetries parameter to 0 to disable the retry feature.
+           retryPolicy : {
+             BoundedExponentialBackoffRetry {
+               baseSleepTime : ${retryPolicy_baseSleepTime}
+-- 
+1.7.9.5
+

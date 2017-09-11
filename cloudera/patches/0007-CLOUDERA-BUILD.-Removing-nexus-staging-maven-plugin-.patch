@@ -1,11 +1,12 @@
 From 097da96829eb3f97fa7feddbf0d869e80500ea27 Mon Sep 17 00:00:00 2001
 From: Joey Echeverria <joey@cloudera.com>
 Date: Wed, 8 Oct 2014 17:13:25 -0700
-Subject: [PATCH 007/115] CLOUDERA-BUILD. Removing nexus-staging-maven-plugin for CDH build.
+Subject: [PATCH 007/140] CLOUDERA-BUILD. Removing nexus-staging-maven-plugin
+ for CDH build.
 
 ---
  pom.xml |   11 -----------
- 1 files changed, 0 insertions(+), 11 deletions(-)
+ 1 file changed, 11 deletions(-)
 
 diff --git a/pom.xml b/pom.xml
 index e1972a6..e2d6e05 100644
@@ -30,5 +31,5 @@ index e1972a6..e2d6e05 100644
          <artifactId>site-maven-plugin</artifactId>
          <version>${vers.github-site-maven-plugin}</version>
 -- 
-1.7.0.4
+1.7.9.5
 

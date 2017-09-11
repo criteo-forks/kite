@@ -1,7 +1,7 @@
 From 46051bd242b21a7d1c095d554731c2afdc5a5e26 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 20 May 2015 17:44:54 -0700
-Subject: [PATCH 075/115] CDK-973: Add View#asType for projection.
+Subject: [PATCH 075/140] CDK-973: Add View#asType for projection.
 
 This updates Joey's addition of View#asSchema for record/column
 projection and adds View#asType. The asSchema changes needed the ability
@@ -10,14 +10,14 @@ to create a new backing Dataset instance with a different type.
 This also fixes the review items I posted on #346.
 ---
  .../src/main/java/org/kitesdk/data/View.java       |   21 ++-
- .../java/org/kitesdk/data/spi/AbstractDataset.java |   24 +++-
+ .../java/org/kitesdk/data/spi/AbstractDataset.java |   24 ++-
  .../kitesdk/data/spi/AbstractRefinableView.java    |   76 +++++++++-
  .../java/org/kitesdk/data/spi/DataModelUtil.java   |   68 +++++----
- .../java/org/kitesdk/data/spi/EntityAccessor.java  |   14 ++-
+ .../java/org/kitesdk/data/spi/EntityAccessor.java  |   14 +-
  .../kitesdk/data/spi/filesystem/CSVFileReader.java |    2 +-
- .../data/spi/filesystem/FileSystemDataset.java     |   33 ++++-
+ .../data/spi/filesystem/FileSystemDataset.java     |   33 +++-
  .../data/spi/filesystem/FileSystemView.java        |   13 +-
- .../filesystem/FileSystemViewKeyInputFormat.java   |   56 +++-----
+ .../filesystem/FileSystemViewKeyInputFormat.java   |   56 +++----
  .../data/spi/filesystem/JSONFileReader.java        |    2 +-
  .../spi/filesystem/MultiFileDatasetReader.java     |    4 +-
  .../TestFileSystemDatasetRepository.java           |    7 +-
@@ -25,7 +25,7 @@ This also fixes the review items I posted on #346.
  .../main/java/org/kitesdk/data/hbase/DaoView.java  |   12 +-
  .../data/hbase/avro/AvroEntityComposer.java        |    4 +-
  .../data/mapreduce/DatasetKeyInputFormat.java      |   34 ++++-
- .../kitesdk/cli/commands/BaseDatasetCommand.java   |    9 +
+ .../kitesdk/cli/commands/BaseDatasetCommand.java   |    9 ++
  .../java/org/kitesdk/cli/commands/CopyCommand.java |   11 +-
  .../kitesdk/cli/commands/UpdateDatasetCommand.java |    3 +-
  19 files changed, 423 insertions(+), 128 deletions(-)
@@ -1160,5 +1160,5 @@ index 46ecf13..7fe967f 100644
      DatasetDescriptor.Builder descriptorBuilder = new DatasetDescriptor
          .Builder(currentDataset.getDescriptor());
 -- 
-1.7.0.4
+1.7.9.5
 

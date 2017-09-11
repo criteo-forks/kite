@@ -1,7 +1,8 @@
 From fd038d67caf6fefdefd1b38ba53dd7ec3b732284 Mon Sep 17 00:00:00 2001
 From: Tom White <tom@cloudera.com>
 Date: Thu, 16 Apr 2015 18:27:26 +0100
-Subject: [PATCH 047/115] CDK-938. Support path in s3, and change to use standard AWS env variables.
+Subject: [PATCH 047/140] CDK-938. Support path in s3, and change to use
+ standard AWS env variables.
 
 For testing, set AWS_SECRET_ACCESS_KEY and AWS_SECRET_ACCESS_KEY to specify
 your AWS credentials, and S3_BUCKET to the name of an existing empty bucket
@@ -14,8 +15,8 @@ Resolution:
 ---
  kite-data/kite-data-s3/pom.xml                     |   55 ++------------------
  .../main/java/org/kitesdk/data/spi/s3/Loader.java  |    4 +-
- .../org/kitesdk/data/spi/s3/TestS3Dataset.java     |    6 +-
- pom.xml                                            |    7 ++-
+ .../org/kitesdk/data/spi/s3/TestS3Dataset.java     |    6 +--
+ pom.xml                                            |    7 +--
  4 files changed, 13 insertions(+), 59 deletions(-)
 
 diff --git a/kite-data/kite-data-s3/pom.xml b/kite-data/kite-data-s3/pom.xml
@@ -152,5 +153,5 @@ index 0766e61..b88215c 100644
  
        <!-- HBase dependencies -->
 -- 
-1.7.0.4
+1.7.9.5
 

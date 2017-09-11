@@ -1,10 +1,170 @@
-commit 20936ce24bc0bbfceec141ad96b18c5aa26df2bb
+commit 252b28ca9d0adc5e4200f0ad74ab2117213f4017
 Author: Jenkins <dev-kitchen@cloudera.com>
-Date:   Mon Oct 12 15:49:59 2015 -0700
+Date:   Mon Feb 27 15:19:34 2017 -0800
 
-    Branch for CDH5.5.0
+    Branch for CDH5.11.0
 
-commit dc81528b83d00c2fb93b3e6628fa123eec53b9c9
+commit d1eb42038bb0e7b18efa2c4be9e31f65506080bd
+Author: Jenkins <dev-kitchen@cloudera.com>
+Date:   Mon Feb 27 14:49:03 2017 -0800
+
+    Branch for CDH5.11.x
+
+commit 81c0f8dc1f487f9bd378ce9ed50fc0522d360c81
+Author: Jenkins <dev-kitchen@cloudera.com>
+Date:   Mon Nov 28 16:24:19 2016 -0800
+
+    Updating Maven version to 5.11.0-SNAPSHOT
+
+commit 14c0bcdc0b79e8e4d049a97ef2d04e963782a97a
+Author: Jenkins <dev-kitchen@cloudera.com>
+Date:   Thu Aug 18 13:44:03 2016 -0700
+
+    Updating Maven version to 5.10.0-SNAPSHOT
+
+commit 30f09275a378749705d271449d6365b1238022e9
+Author: Jenkins <dev-kitchen@cloudera.com>
+Date:   Mon May 16 14:00:12 2016 -0700
+
+    Update to 5.9.0-SNAPSHOT on Mon May 16 14:00:09 PDT 2016
+    
+    JOB_NAME : 'Cut-Release-Branches'
+    BUILD_NUMBER : '333'
+    CODE_BRANCH : ''
+    OLD_CDH_BRANCH : 'cdh5'
+    
+    Pushed to remote origin	git@github.sf.cloudera.com:CDH/kite.git (push)
+
+commit 5b815b5dba5ee28797904221bea4362936a5ecba
+Author: Tristan Stevens <tristan@cloudera.com>
+Date:   Fri Apr 15 15:37:50 2016 +0100
+
+    Provide hashDigest morphlines function
+
+commit 02da6be15018a35ea1ebddac4f3d264c019fc0f8
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Mon Apr 18 12:01:48 2016 -0700
+
+    KITE-435: fix for extractAvroPaths traversal of arrays within union
+    
+    fixes issue #435 - extractAvroPaths does not traverses arrays
+    with the '[]' notation when array is part of a union
+
+commit f19f998bf91320b5d0bd916be65881d2c9a8ed14
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Tue Mar 1 15:51:49 2016 -0800
+
+    KITE-1108: Add optional retry feature to loadSolr morphline command (There's no point retrying solr updates for docs with undefined field names)
+
+commit 76f02801aee88c16188373494968e21783b89afe
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Tue Mar 1 10:46:45 2016 -0800
+
+    KITE-1108: Add optional retry feature to loadSolr morphline command (fix javadoc)
+
+commit f10208f7f3dc2fb85d73ce06bb254957ec47fae3
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Tue Mar 1 10:41:13 2016 -0800
+
+    KITE-1108: Add optional retry feature to loadSolr morphline command (add NullMetricsFacade)
+
+commit 0364a64b25fe7d8f6e632fd548b57b508aed6416
+Author: Adrian Kalaszi <akalaszi@cloudera.com>
+Date:   Mon Feb 22 02:23:56 2016 +0100
+
+    KITE-1114: fix test
+
+commit 5e9164c26e106fc391035f4d99231a7d50d5eee3
+Author: Adrian Kalaszi <akalaszi@cloudera.com>
+Date:   Mon Feb 22 00:04:26 2016 +0100
+
+    KITE-1114: Fix missing license header
+
+commit 6ce2ab6390eda229c41918dc0d9b800f22fc3272
+Author: Adrian Kalaszi <akalaszi@cloudera.com>
+Date:   Sun Feb 21 23:11:49 2016 +0100
+
+    KITE-1114: Kite CLI json-import HDFS temp file path not multiuser safe
+
+commit a8d3e54c7907c5ba2794a3cf08dc897ac2201f33
+Author: Jenkins <dev-kitchen@cloudera.com>
+Date:   Fri Feb 12 20:27:29 2016 -0800
+
+    Updating Maven version to 5.8.0-SNAPSHOT
+
+commit 8d68375bcacf3f9004b35d8af7a5a035369b1b41
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Thu Feb 11 09:36:47 2016 -0800
+
+    KITE-1108: syncup
+
+commit 44b2dc7ae4832a7c19f5b44e03bd891c2fa106f2
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Tue Feb 2 12:22:36 2016 -0800
+
+    CLOUDERA-BUILD. Use downstream parent pom
+
+commit 796f9ceb5863cf32511d0cfbe4745e7c63ad58d3
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Tue Feb 2 10:57:36 2016 -0800
+
+    KITE-1108: Add optional retry feature to loadSolr morphline command (fix typo in comment)
+
+commit cedef59c1ce223878c01c9205cd6c4f0f358342a
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Tue Feb 2 10:21:48 2016 -0800
+
+    KITE-1108: Add optional retry feature to loadSolr morphline command (doc3)
+
+commit 3a869a56d5dc3178b7eb731a51ebd0af163a1d57
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Tue Feb 2 09:34:54 2016 -0800
+
+    KITE-1108: set default baseSleepTime to 125 milliseconds
+
+commit bdc38eb98b7a10d25b7e19f716de65aaeefca128
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Mon Feb 1 16:19:31 2016 -0800
+
+    cleanup import
+
+commit c4df15727dd333da5e366ac6c20bfa9864c4bd0a
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Mon Feb 1 16:16:23 2016 -0800
+
+    KITE-1108: Add optional retry feature to loadSolr morphline command (scalable stats)
+
+commit db9d0090213099484608d78a09c2d3da73fd7121
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Mon Feb 1 12:58:07 2016 -0800
+
+    KITE-1108: Add optional retry feature to loadSolr morphline command (javadoc)
+
+commit 4e3990e2b5b5216b9e62b56977cb31661ffd2c1c
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Mon Feb 1 10:46:13 2016 -0800
+
+    KITE-1108: Add optional retry feature to loadSolr morphline command
+
+commit 9615d66e0e190457207212354266164f93ce225f
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Thu Dec 17 15:20:04 2015 -0800
+
+    KITE-1097: Add method to read the name of a morphline command
+
+commit dc41f5825c00b267da357e34918268403077d2dd
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Sat Dec 5 01:03:34 2015 -0800
+
+    CDH-35218: Add getMilliseconds convenience methods to morphline Configs
+
+commit 8fbbbb795e336bc026d39f83060f8486c57af80a
+Author: Wolfgang Hoschek <whoschek@cloudera.com>
+Date:   Mon Nov 2 21:08:45 2015 -0800
+
+    KITE-1089: readAvroContainer morphline command should work even if the Avro writer schema of each input file is different (yet compatible)
+
+commit 5421a1da557a710da87551d314f46270fe4887f3
 Author: Ryan Blue <blue@apache.org>
 Date:   Thu Sep 24 15:32:47 2015 -0700
 
@@ -15,7 +175,7 @@ Date:   Thu Sep 24 15:32:47 2015 -0700
     to get the buffered size of a Parquet file. PARQUET-308 exposes an
     accessor, which is now available after the update to 1.8.1.
 
-commit ca760fc5a210d70c8e8b1a51cb923d0dbeebd705
+commit 020a52d6c783959f31024649877d40f0a1ed24d1
 Author: Ryan Blue <blue@apache.org>
 Date:   Mon Sep 28 12:57:25 2015 -0400
 
@@ -25,7 +185,7 @@ Date:   Mon Sep 28 12:57:25 2015 -0400
     in individually and kite-tools should be checked when Hive dependencies
     change to avoid regressions.
 
-commit d2e13ed88e3189b77b415bdcb366f09fcfa9afc2
+commit acb1198ecdacdb81510ab16dc48ac5b418201b96
 Author: Ryan Blue <blue@apache.org>
 Date:   Fri Sep 25 13:17:56 2015 -0700
 
@@ -40,7 +200,7 @@ Date:   Fri Sep 25 13:17:56 2015 -0700
     interacting with Hive, this doesn't add Hive dependencies to the
     distributed cache at all.
 
-commit 134ed3283ddffb12b4f52c31249c2bff9b81bc60
+commit da1ae20d55bd464e2fb7cec5504790bb336f5268
 Author: Ryan Blue <blue@apache.org>
 Date:   Wed Sep 23 16:28:14 2015 -0700
 
@@ -51,7 +211,7 @@ Date:   Wed Sep 23 16:28:14 2015 -0700
     be loaded because a dependency is missing, it is obvious what needs to
     be added to the classpath.
 
-commit 7e993f520e8399f643eda9346cf0f21d6786817e
+commit 8934f4b19ff5320a0cc8931f5d150838473431af
 Author: Ryan Blue <blue@apache.org>
 Date:   Thu Sep 17 15:06:30 2015 -0700
 
@@ -61,7 +221,7 @@ Date:   Thu Sep 17 15:06:30 2015 -0700
     test has been run first. It appears to be a bug in the test runner code
     that can be avoided by not reusing test VMs for the Crunch module.
 
-commit 020000718869dd79562a7c6481fe3475d1d03f94
+commit 3c21c3efafdaf8af8ff4cc2b223955cddc59507a
 Author: Ryan Blue <blue@apache.org>
 Date:   Wed Sep 16 13:47:17 2015 -0700
 
@@ -71,7 +231,7 @@ Date:   Wed Sep 16 13:47:17 2015 -0700
     was failing when importing local-to-HDFS unless the default FS was
     local. This is no longer needed and is causing a different failure.
 
-commit c1511c12488a0037f7f18646e3382b166bb87f52
+commit ebef4ce8f9dbdc5d99c507507b2a304ac39554a5
 Author: Ryan Blue <blue@apache.org>
 Date:   Wed Sep 16 12:03:52 2015 -0700
 
@@ -84,19 +244,19 @@ Date:   Wed Sep 16 12:03:52 2015 -0700
     signals folder. This updates the FileSystemDataset to use the data
     file's parent for the signal path.
 
-commit 956333d8a0495818c3d56f214d7c5003aabe282e
+commit d5d74a44719f92334e74832d9755a35bd4dc40f8
 Author: Wolfgang Hoschek <whoschek@cloudera.com>
 Date:   Wed Sep 16 16:11:41 2015 -0700
 
     KITE-1074: Partial updates aka Atomic updates with loadSolr aren't recognized with SolrCloud
 
-commit bdf49317a48e5270b451a741347da3ecdd731a9c
+commit 595335f256a2e1d9aa176f99f63c0187ac362088
 Author: Ryan Blue <blue@apache.org>
 Date:   Mon Sep 14 17:36:31 2015 -0700
 
     KITE-1071: Use exit 1 when Hadoop isn't found by CLI.
 
-commit b52d7bcf75bf5f7ec7b4b8c71b14e9309f88c113
+commit bca8987afccb73978f63d0a1d85eefc9949e1982
 Author: Ryan Blue <blue@apache.org>
 Date:   Tue Sep 15 10:33:05 2015 -0700
 
@@ -106,25 +266,25 @@ Date:   Tue Sep 15 10:33:05 2015 -0700
     for the directory migration test that uses a table name set in the test
     schema, "simple".
 
-commit 799b164e8d749306d3297655bb5df8e81b802f9a
-Author: Ryan Blue <blue@apache.org>
-Date:   Fri Sep 11 13:20:15 2015 -0700
-
-    CLOUDERA-BUILD. Use commons-io version of other components.
-
-commit 26474a8e48ad1d4de704b8625db890d49759340c
-Author: Gregory Chanan <gchanan@cloudera.com>
-Date:   Wed Sep 9 18:13:12 2015 -0700
-
-    KITE-1068: SolrCellMorphlineTests fails on Locales with non-Arabic digits
-
-commit 8e047dd33321d01c36dc601909d066a7e730b150
+commit 29add2ff5a9e0179cfca68b555736c65497790bb
 Author: Wolfgang Hoschek <whoschek@cloudera.com>
 Date:   Fri Sep 11 10:26:32 2015 -0700
 
     KITE-1069: Make zkClientSessionTimeout and zkClientConnectTimeout configurable in SolrLocator
 
-commit 3c5112a18b86b6d0e9eb61d0f23943285b28c41d
+commit 2de0451c62d518db27d16f3daa69b610b42b66fa
+Author: Ryan Blue <blue@apache.org>
+Date:   Fri Sep 11 13:20:15 2015 -0700
+
+    CLOUDERA-BUILD. Use commons-io version of other components.
+
+commit 53cb51c558552faca9dca224cde00078c98522a5
+Author: Gregory Chanan <gchanan@cloudera.com>
+Date:   Wed Sep 9 18:13:12 2015 -0700
+
+    KITE-1068: SolrCellMorphlineTests fails on Locales with non-Arabic digits
+
+commit 3b6a7d3334977edce9c93937d1577037436c8b0e
 Author: Ryan Blue <blue@apache.org>
 Date:   Tue Aug 25 19:42:43 2015 -0700
 
@@ -134,7 +294,7 @@ Date:   Tue Aug 25 19:42:43 2015 -0700
     prevent users from calling new Path(URI). It also removes incorrect use
     of new Path(URI) from Kite's FS implementation.
 
-commit f38e4bc36748f7d29bdd1cc980cc874b9e4728ae
+commit 5dc298f6ed1c1f42416b0f23518f5f4f303d90f4
 Author: Ryan Blue <blue@apache.org>
 Date:   Wed Jun 24 14:16:32 2015 -0700
 
@@ -154,13 +314,13 @@ Date:   Wed Jun 24 14:16:32 2015 -0700
     construct a Path from a URI by converting the URI to a String rather
     than setting the internal URI directly.
 
-commit e19333b57fbb2f55c898bbf3c8235638264cbbf2
+commit 7e6affe1c920af22bfb5a8d19a4225af8f094e8e
 Author: Ryan Blue <blue@apache.org>
 Date:   Wed Aug 26 14:03:39 2015 -0700
 
     KITE-1066: Fix findbugs issues.
 
-commit deb1fad07c5ef8ccee97010d5fcc23673bf1ca2c
+commit ff26d8d2af74ef07941dcfc9c016f17b7548fe05
 Author: Ryan Blue <blue@apache.org>
 Date:   Wed Aug 26 12:51:49 2015 -0700
 
@@ -169,7 +329,7 @@ Date:   Wed Aug 26 12:51:49 2015 -0700
     Oozie passes delegation tokens via HADOOP_TOKEN_FILE_LOCATION. This adds
     support to pick up those tokens and add them to the DefaultConfiguration.
 
-commit 7bbf0837ee6024ea6fbd950041f8b093d2dcb215
+commit 99f29813a8835368ed9db4ed34e2542aee16aebd
 Author: Ryan Blue <blue@apache.org>
 Date:   Wed Aug 26 12:16:01 2015 -0700
 
@@ -179,11 +339,11 @@ Date:   Wed Aug 26 12:16:01 2015 -0700
     (and the internal MetaStore connection) by connection URIs. These are
     safe to share because they are thread-safe.
 
-commit 59f9f3e76f7dc88ecc5ef2a8f691cdf7a0dc7a5d
+commit 9f87fb5f3d9b30b77a9eb10ec4ccb7289f2d7d06
 Author: Jenkins <dev-kitchen@cloudera.com>
-Date:   Fri Sep 4 13:53:47 2015 -0700
+Date:   Fri Sep 4 15:15:46 2015 -0700
 
-    Branch for CDH5.5.x
+    Updating Maven version to 5.7.0-SNAPSHOT
 
 commit 5f619b2611e03ed2a4f3f21e8f9b10f345213685
 Author: Mladen Kovacevic <mladkov@gmail.com>

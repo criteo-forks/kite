@@ -1,13 +1,13 @@
-From deb1fad07c5ef8ccee97010d5fcc23673bf1ca2c Mon Sep 17 00:00:00 2001
+From ff26d8d2af74ef07941dcfc9c016f17b7548fe05 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 26 Aug 2015 12:51:49 -0700
-Subject: [PATCH 098/115] KITE-1065: Add support for Oozie delegation tokens.
+Subject: [PATCH 098/140] KITE-1065: Add support for Oozie delegation tokens.
 
 Oozie passes delegation tokens via HADOOP_TOKEN_FILE_LOCATION. This adds
 support to pick up those tokens and add them to the DefaultConfiguration.
 ---
  .../org/kitesdk/data/spi/DefaultConfiguration.java |   14 ++++++++++----
- 1 files changed, 10 insertions(+), 4 deletions(-)
+ 1 file changed, 10 insertions(+), 4 deletions(-)
 
 diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DefaultConfiguration.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DefaultConfiguration.java
 index e43a6b0..e3dd361 100644
@@ -41,5 +41,5 @@ index e43a6b0..e3dd361 100644
    /**
     * Get a copy of the default Hadoop {@link Configuration}.
 -- 
-1.7.0.4
+1.7.9.5
 

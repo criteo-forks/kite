@@ -1,7 +1,7 @@
 From 56cc0a705de7f0537ec2eac86213d9a8bb64ba33 Mon Sep 17 00:00:00 2001
 From: Ben Brown <benjamin.l.brown@gmail.com>
 Date: Tue, 12 May 2015 10:24:23 -0400
-Subject: [PATCH 053/115] CDK-451, signal ready views concept
+Subject: [PATCH 053/140] CDK-451, signal ready views concept
 
     implementation for hdfs and hive based views, hbase is currently
     unimplemented.
@@ -20,23 +20,23 @@ Subject: [PATCH 053/115] CDK-451, signal ready views concept
 ---
  .gitignore                                         |    3 +-
  .../src/main/java/org/kitesdk/data/Signalable.java |   52 +++++
- .../java/org/kitesdk/data/spi/Constraints.java     |   22 ++-
- .../data/spi/filesystem/FileSystemDataset.java     |   35 ++--
- .../data/spi/filesystem/FileSystemView.java        |   34 +++-
+ .../java/org/kitesdk/data/spi/Constraints.java     |   22 +-
+ .../data/spi/filesystem/FileSystemDataset.java     |   35 +--
+ .../data/spi/filesystem/FileSystemView.java        |   34 ++-
  .../kitesdk/data/spi/filesystem/SignalManager.java |  159 ++++++++++++++
  .../java/org/kitesdk/data/spi/predicates/In.java   |   11 +
  .../kitesdk/data/spi/predicates/Predicates.java    |   20 ++
  .../data/spi/predicates/RegisteredPredicate.java   |   16 ++
  .../org/kitesdk/data/spi/TestRefinableViews.java   |  130 +++++++++++
  .../filesystem/TestDatasetWriterCacheLoader.java   |    2 +-
- .../data/spi/filesystem/TestFileSystemDataset.java |   54 +++++-
+ .../data/spi/filesystem/TestFileSystemDataset.java |   54 ++++-
  .../data/spi/filesystem/TestFileSystemView.java    |   31 +++
  .../filesystem/TestPartitionedDatasetWriter.java   |    2 +-
  .../data/spi/filesystem/TestSignalManager.java     |  228 ++++++++++++++++++++
  .../data/spi/predicates/TestInToFromString.java    |   20 ++
  .../TestRegisteredPredicateToFromString.java       |   70 ++++++
  .../org/kitesdk/data/crunch/DatasetTarget.java     |   12 +-
- .../kitesdk/data/crunch/TestCrunchDatasets.java    |   89 ++++++++-
+ .../kitesdk/data/crunch/TestCrunchDatasets.java    |   89 +++++++-
  .../data/mapreduce/DatasetKeyOutputFormat.java     |   25 ++-
  .../org/kitesdk/data/mapreduce/TestMapReduce.java  |   66 ++++++
  21 files changed, 1047 insertions(+), 34 deletions(-)
@@ -1602,5 +1602,5 @@ index 62ae048..5d85823 100644
      DatasetWriter<GenericData.Record> writer = inputDataset.newWriter();
      writer.write(newStringRecord("apple"));
 -- 
-1.7.0.4
+1.7.9.5
 

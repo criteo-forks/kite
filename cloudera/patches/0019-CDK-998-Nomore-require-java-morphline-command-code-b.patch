@@ -1,12 +1,13 @@
 From 01e15b5233ef49cd5780a0aa3ce99f32c7fd2e89 Mon Sep 17 00:00:00 2001
 From: Wolfgang Hoschek <whoschek@cloudera.com>
 Date: Sun, 10 May 2015 12:26:36 +0300
-Subject: [PATCH 019/115] CDK-998: Nomore require "java" morphline command code blocks to explicitly catch exceptions
+Subject: [PATCH 019/140] CDK-998: Nomore require "java" morphline command
+ code blocks to explicitly catch exceptions
 
 ---
  .../scriptengine/java/ScriptEvaluator.java         |   21 +++++++++++++++++++-
  .../org/kitesdk/morphline/stdlib/JavaBuilder.java  |    1 +
- .../kitesdk/morphline/api/ScriptEvaluatorTest.java |    4 ++-
+ .../kitesdk/morphline/api/ScriptEvaluatorTest.java |    4 +++-
  3 files changed, 24 insertions(+), 2 deletions(-)
 
 diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/scriptengine/java/ScriptEvaluator.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/scriptengine/java/ScriptEvaluator.java
@@ -83,5 +84,5 @@ index 764af20..a83d4d1 100644
  		assertEquals(result, new Integer(2));
  	}
 -- 
-1.7.0.4
+1.7.9.5
 

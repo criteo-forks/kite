@@ -1,11 +1,12 @@
 From bb31f88a569fae90bb23570d482241aba04ae14a Mon Sep 17 00:00:00 2001
 From: Wolfgang Hoschek <whoschek@cloudera.com>
 Date: Mon, 18 May 2015 15:09:45 +0300
-Subject: [PATCH 021/115] CDK-1001: dropRecord morphline command should forward notifications - part 2
+Subject: [PATCH 021/140] CDK-1001: dropRecord morphline command should
+ forward notifications - part 2
 
 ---
  .../morphline/stdlib/DropRecordBuilder.java        |    3 +--
- 1 files changed, 1 insertions(+), 2 deletions(-)
+ 1 file changed, 1 insertion(+), 2 deletions(-)
 
 diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/DropRecordBuilder.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/DropRecordBuilder.java
 index 559aecc..b746f06 100644
@@ -29,5 +30,5 @@ index 559aecc..b746f06 100644
  
      @Override
 -- 
-1.7.0.4
+1.7.9.5
 

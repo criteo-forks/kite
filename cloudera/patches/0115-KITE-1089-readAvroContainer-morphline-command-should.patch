@@ -1,0 +1,119 @@
+From 8fbbbb795e336bc026d39f83060f8486c57af80a Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Mon, 2 Nov 2015 21:08:45 -0800
+Subject: [PATCH 115/140] KITE-1089: readAvroContainer morphline command
+ should work even if the Avro writer schema of each
+ input file is different (yet compatible)
+
+---
+ .../morphline/avro/ReadAvroContainerBuilder.java   |    6 +++-
+ .../kitesdk/morphline/avro/AvroMorphlineTest.java  |   31 ++++++++++++++++++++
+ .../avroContainerWithWriterschema0.avro            |  Bin 0 -> 415 bytes
+ .../avroContainerWithWriterschema1.avro            |  Bin 0 -> 462 bytes
+ 4 files changed, 36 insertions(+), 1 deletion(-)
+ create mode 100644 kite-morphlines/kite-morphlines-core/src/test/resources/test-documents/avroContainerWithWriterschema0.avro
+ create mode 100644 kite-morphlines/kite-morphlines-core/src/test/resources/test-documents/avroContainerWithWriterschema1.avro
+
+diff --git a/kite-morphlines/kite-morphlines-avro/src/main/java/org/kitesdk/morphline/avro/ReadAvroContainerBuilder.java b/kite-morphlines/kite-morphlines-avro/src/main/java/org/kitesdk/morphline/avro/ReadAvroContainerBuilder.java
+index c638c2a..ffaa9f9 100644
+--- a/kite-morphlines/kite-morphlines-avro/src/main/java/org/kitesdk/morphline/avro/ReadAvroContainerBuilder.java
++++ b/kite-morphlines/kite-morphlines-avro/src/main/java/org/kitesdk/morphline/avro/ReadAvroContainerBuilder.java
+@@ -31,6 +31,7 @@ import org.apache.avro.file.DataFileConstants;
+ import org.apache.avro.file.DataFileReader;
+ import org.apache.avro.file.SeekableInput;
+ import org.apache.avro.generic.GenericContainer;
++import org.apache.avro.generic.GenericDatumReader;
+ import org.apache.avro.io.DecoderFactory;
+ import org.apache.avro.io.ResolvingDecoder;
+ import org.kitesdk.morphline.api.Command;
+@@ -112,6 +113,9 @@ public final class ReadAvroContainerBuilder implements CommandBuilder {
+     protected boolean doProcess(Record inputRecord, InputStream in) throws IOException {
+       if (datumReader == null) { // reuse for performance
+         datumReader = new FastGenericDatumReader(null, readerSchema);
++      } else {
++        datumReader.setSchema(null);
++        datumReader.setExpected(readerSchema);
+       }
+       DataFileReader<GenericContainer> reader = null;
+       try {
+@@ -127,8 +131,8 @@ public final class ReadAvroContainerBuilder implements CommandBuilder {
+         if (resolver == null) { 
+           resolver = createResolver(datumReader.getSchema(), datumReader.getExpected());
+           resolverCache.put(writerSchemaKey, resolver);
+-          datumReader.setResolver(resolver);
+         }
++        datumReader.setResolver(resolver);
+         Record template = inputRecord.copy();
+         removeAttachments(template);
+         template.put(Fields.ATTACHMENT_MIME_TYPE, ReadAvroBuilder.AVRO_MEMORY_MIME_TYPE);
+diff --git a/kite-morphlines/kite-morphlines-avro/src/test/java/org/kitesdk/morphline/avro/AvroMorphlineTest.java b/kite-morphlines/kite-morphlines-avro/src/test/java/org/kitesdk/morphline/avro/AvroMorphlineTest.java
+index 66ca745..b792826 100644
+--- a/kite-morphlines/kite-morphlines-avro/src/test/java/org/kitesdk/morphline/avro/AvroMorphlineTest.java
++++ b/kite-morphlines/kite-morphlines-avro/src/test/java/org/kitesdk/morphline/avro/AvroMorphlineTest.java
+@@ -679,6 +679,37 @@ public class AvroMorphlineTest extends AbstractMorphlineTest {
+     }
+   }
+ 
++  @Test
++  /**
++   * Test that schema caching in readAvroContainer works even if the Avro writer schema of each input
++   * file is different (yet compatible). Test writer schema A before B and B before A.
++   */
++  public void testReadAvroContainerWithMultipleSchemas() throws IOException {
++    for (int reverse = 0; reverse < 2; reverse++) {
++      morphline = createMorphline("test-morphlines/readAvroContainer");
++      for (int run = 0; run < 10; run++) {
++        collector.reset();
++        int version = run % 2;
++        version = (version + reverse) % 2; // reverse direction with reverse == 1: 0 -> 1  as well as 1 -> 0
++        byte[] fileContents = Files.toByteArray(
++            new File(RESOURCES_DIR + "/test-documents/avroContainerWithWriterschema" + version + ".avro"));
++        Record inputRecord = new Record();
++        inputRecord.put(Fields.ATTACHMENT_BODY, fileContents);
++        assertTrue(morphline.process(inputRecord));
++  
++        int numRecords = 5;
++        assertEquals(numRecords, collector.getRecords().size());
++        
++        String[] expectedUids = new String[] {"sdfsdf", "fhgfgh", "werwer", "345trgt", "dfgdg"};
++        for (int i = 0; i < numRecords; i++) {
++          Record record = collector.getRecords().get(i);
++          GenericData.Record avroRecord = (GenericData.Record)record.getFirstValue(Fields.ATTACHMENT_BODY);
++          assertEquals(expectedUids[i], avroRecord.get("sc_uid").toString());
++        }
++      }
++    }
++  }
++  
+   private void processAndVerifySuccess(Record input, Record expected, boolean isSame) {
+     collector.reset();
+     startSession();
+diff --git a/kite-morphlines/kite-morphlines-core/src/test/resources/test-documents/avroContainerWithWriterschema0.avro b/kite-morphlines/kite-morphlines-core/src/test/resources/test-documents/avroContainerWithWriterschema0.avro
+new file mode 100644
+index 0000000000000000000000000000000000000000..4e6b04689a4242714002a0ed359bf28a1458cd5c
+GIT binary patch
+literal 415
+zcmeZI%3@>^ODrqO*DFrWNX<<=$5O3SQdy9yWTjM;nw(#hqNJmgmzWFUC+Fvw0(ohf
+zsW~adN><U;Fp1*i_|i;}LWss_rM%Ld93Z#2q$o2lT`9I!2d=adXowThDxHZ|=|Z$h
+zSE5zA;ZYe|%W&0*`+#`q_v}aO^^(^VoSekf#K^=`oRS7a3?RV7la`U5mYxCSl&2N}
+b5ro5MY+_nclwJbiaiyfCr=)|~=w<={Djb9A
+
+literal 0
+HcmV?d00001
+
+diff --git a/kite-morphlines/kite-morphlines-core/src/test/resources/test-documents/avroContainerWithWriterschema1.avro b/kite-morphlines/kite-morphlines-core/src/test/resources/test-documents/avroContainerWithWriterschema1.avro
+new file mode 100644
+index 0000000000000000000000000000000000000000..630bfde25efb4de77c1442de5c15c8bb5b78e840
+GIT binary patch
+literal 462
+zcmeZI%3@>^ODrqO*DFrWNX<=L#9FOXQdy9yWTjM;nw(#hqNJmgmzWFUC+Fvw0eNYe
+zsW~adN><U;Fp1*i_|i;}LWss_rM%Ld93Z#2q$o2lT`9I!2d=aNXowThDxHZ|=|Z$h
+zSE5zA5v|f4kIL9uhToo3S$jE(SVTDWu2@7b`@z-2$i!2ek_JQ!V8FzamXV&8o&n>P
+erxpPbl*eamVp>v^UIOKErKF{&q(eC91_J=*IgK*_
+
+literal 0
+HcmV?d00001
+
+-- 
+1.7.9.5
+

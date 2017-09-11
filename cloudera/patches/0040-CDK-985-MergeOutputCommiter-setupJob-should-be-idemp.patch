@@ -1,14 +1,15 @@
 From f457f674869beb1515214c3c09095dfca5f5a674 Mon Sep 17 00:00:00 2001
 From: Joey Echeverria <joey42@gmail.com>
 Date: Tue, 14 Apr 2015 20:47:42 -0500
-Subject: [PATCH 040/115] CDK-985: MergeOutputCommiter#setupJob() should be idempotent
+Subject: [PATCH 040/140] CDK-985: MergeOutputCommiter#setupJob() should be
+ idempotent
 
 * CDK-985: Fix for hadoop-1 compat
 * CDK-985: More hadoop-1 compat
 ---
  .../data/mapreduce/DatasetKeyOutputFormat.java     |   22 +++++-
  .../data/mapreduce/TestMergeOutputCommitter.java   |   75 ++++++++++++++++++++
- .../src/main/java/org/kitesdk/compat/Hadoop.java   |   18 +++++-
+ .../src/main/java/org/kitesdk/compat/Hadoop.java   |   18 ++++-
  3 files changed, 111 insertions(+), 4 deletions(-)
  create mode 100644 kite-data/kite-data-mapreduce/src/test/java/org/kitesdk/data/mapreduce/TestMergeOutputCommitter.java
 
@@ -192,5 +193,5 @@ index 5be0b09..47db391 100644
  
    public static class TaskAttemptContext {
 -- 
-1.7.0.4
+1.7.9.5
 

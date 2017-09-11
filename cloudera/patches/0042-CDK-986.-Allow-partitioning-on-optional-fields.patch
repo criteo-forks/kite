@@ -1,7 +1,7 @@
 From 6c0f5d44e5bbc68590db241ce0d9d626babbbbca Mon Sep 17 00:00:00 2001
 From: Tom White <tom@cloudera.com>
 Date: Wed, 15 Apr 2015 16:16:05 +0100
-Subject: [PATCH 042/115] CDK-986. Allow partitioning on optional fields
+Subject: [PATCH 042/140] CDK-986. Allow partitioning on optional fields
 
 ---
  .../main/java/org/kitesdk/data/spi/SchemaUtil.java |   23 +++++++---
@@ -197,5 +197,5 @@ index 0000000..755a032
 +  ]
 +}
 -- 
-1.7.0.4
+1.7.9.5
 

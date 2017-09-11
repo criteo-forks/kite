@@ -1,13 +1,13 @@
 From ea4dcb7fd2d93a00bd64e9d6c4b8fe246e287933 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Thu, 11 Jun 2015 14:02:44 -0700
-Subject: [PATCH 083/115] CDK-1019: Move Hive token setup into TransformTask.
+Subject: [PATCH 083/140] CDK-1019: Move Hive token setup into TransformTask.
 
 This takes the delegation token code from the CopyCommand and moves it
 into TransformTask so that all of the transform-based commands will work
 with Hive.
 ---
- .../java/org/kitesdk/cli/commands/CopyCommand.java |   30 +--------------
+ .../java/org/kitesdk/cli/commands/CopyCommand.java |   30 +-------------
  .../main/java/org/kitesdk/tools/TransformTask.java |   41 ++++++++++++++++++++
  2 files changed, 42 insertions(+), 29 deletions(-)
 
@@ -129,5 +129,5 @@ index 6f257a4..ed78801 100644
 +  }
  }
 -- 
-1.7.0.4
+1.7.9.5
 

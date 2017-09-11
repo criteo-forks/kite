@@ -1,11 +1,12 @@
 From 0a701034cf9899ea5874c22513f107df089657b7 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Tue, 25 Aug 2015 17:15:18 -0700
-Subject: [PATCH 091/115] CLOUDERA-BUILD. Use CDH Crunch version in tools tarball.
+Subject: [PATCH 091/140] CLOUDERA-BUILD. Use CDH Crunch version in tools
+ tarball.
 
 ---
  kite-tools-parent/kite-tools-cdh5/pom.xml |    2 +-
- 1 files changed, 1 insertions(+), 1 deletions(-)
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/kite-tools-parent/kite-tools-cdh5/pom.xml b/kite-tools-parent/kite-tools-cdh5/pom.xml
 index 2f84185..5969931 100644
@@ -21,5 +22,5 @@ index 2f84185..5969931 100644
          <exclusion>
            <!-- Avro is provided
 -- 
-1.7.0.4
+1.7.9.5
 

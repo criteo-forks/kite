@@ -1,7 +1,8 @@
 From 20f824638cdc2672b130b07febb421a79b7dac31 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 27 May 2015 17:24:57 -0700
-Subject: [PATCH 072/115] CDK-1004: Update compaction for unpartitioned datasets.
+Subject: [PATCH 072/140] CDK-1004: Update compaction for unpartitioned
+ datasets.
 
 ---
  .../data/spi/filesystem/FileSystemDataset.java     |   86 +++++++++++---------
@@ -214,5 +215,5 @@ index c1367d1..a741c66 100644
      TestHelpers.assertThrows(
          "Should not allow replacement with a different partition strategy",
 -- 
-1.7.0.4
+1.7.9.5
 

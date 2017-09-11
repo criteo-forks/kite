@@ -1,7 +1,7 @@
 From a8cffef31905a4af7d774350b55abb394ff4cd6a Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Thu, 25 Jun 2015 15:20:26 -0700
-Subject: [PATCH 090/115] KITE-1024: Fix kite-tools tarball dependencies.
+Subject: [PATCH 090/140] KITE-1024: Fix kite-tools tarball dependencies.
 
 The CDH5 HBase dependency bundle was transitively pulling in the MR1
 version of hadoop-core. That was conflicting with Yarn MR classes and
@@ -17,7 +17,7 @@ Resolution:
  kite-hbase-dependencies/cdh5-test/pom.xml |    8 ++++++++
  kite-hbase-dependencies/cdh5/pom.xml      |   12 ++++++++++++
  kite-tools-parent/kite-tools-cdh5/pom.xml |   28 ++++++++++++++++++++++++++++
- 3 files changed, 48 insertions(+), 0 deletions(-)
+ 3 files changed, 48 insertions(+)
 
 diff --git a/kite-hbase-dependencies/cdh5-test/pom.xml b/kite-hbase-dependencies/cdh5-test/pom.xml
 index e834a4a..3ee3b0b 100644
@@ -108,5 +108,5 @@ index 6586d5e..2f84185 100644
        <artifactId>commons-configuration</artifactId>
        <version>1.6</version>
 -- 
-1.7.0.4
+1.7.9.5
 

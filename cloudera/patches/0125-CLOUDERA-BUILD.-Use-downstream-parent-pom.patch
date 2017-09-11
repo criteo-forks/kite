@@ -1,0 +1,25 @@
+From 44b2dc7ae4832a7c19f5b44e03bd891c2fa106f2 Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Tue, 2 Feb 2016 12:22:36 -0800
+Subject: [PATCH 125/140] CLOUDERA-BUILD. Use downstream parent pom
+
+---
+ .../kite-morphlines-metrics-scalable/pom.xml       |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kite-morphlines/kite-morphlines-metrics-scalable/pom.xml b/kite-morphlines/kite-morphlines-metrics-scalable/pom.xml
+index 31a2c45..20a7b15 100644
+--- a/kite-morphlines/kite-morphlines-metrics-scalable/pom.xml
++++ b/kite-morphlines/kite-morphlines-metrics-scalable/pom.xml
+@@ -18,7 +18,7 @@
+   <parent>
+     <groupId>org.kitesdk</groupId>
+     <artifactId>kite-morphlines</artifactId>
+-    <version>1.1.1-SNAPSHOT</version>
++    <version>1.0.0-cdh5.7.0-SNAPSHOT</version>
+   </parent>
+ 
+   <artifactId>kite-morphlines-metrics-scalable</artifactId>
+-- 
+1.7.9.5
+

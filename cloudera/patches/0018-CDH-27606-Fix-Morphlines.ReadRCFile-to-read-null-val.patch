@@ -1,7 +1,8 @@
 From ff9bf4d2191f69fdb0df8048b3bda07dcf986f56 Mon Sep 17 00:00:00 2001
 From: Prasanna Rajaperumal <prasanna@cloudera.com>
 Date: Fri, 8 May 2015 11:31:09 -0700
-Subject: [PATCH 018/115] CDH-27606 Fix Morphlines.ReadRCFile to read null values in RCFile
+Subject: [PATCH 018/140] CDH-27606 Fix Morphlines.ReadRCFile to read null
+ values in RCFile
 
 ---
  .../morphline/hadoop/rcfile/ReadRCFileBuilder.java |    5 ++
@@ -144,5 +145,5 @@ index 04ccf69..4d0cf1e 100644
          }
          record.put("field" + (column + 1), outputs);
 -- 
-1.7.0.4
+1.7.9.5
 

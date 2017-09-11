@@ -1,0 +1,44 @@
+From 76f02801aee88c16188373494968e21783b89afe Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Tue, 1 Mar 2016 10:46:45 -0800
+Subject: [PATCH 132/140] KITE-1108: Add optional retry feature to loadSolr
+ morphline command (fix javadoc)
+
+---
+ .../client/solrj/retry/RetryingSolrServer.java     |   15 ++++++++-------
+ 1 file changed, 8 insertions(+), 7 deletions(-)
+
+diff --git a/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/RetryingSolrServer.java b/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/RetryingSolrServer.java
+index 15b14ab..598deb8 100644
+--- a/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/RetryingSolrServer.java
++++ b/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/RetryingSolrServer.java
+@@ -371,18 +371,19 @@ public class RetryingSolrServer extends SolrServer {
+   // Nested classes:
+   ///////////////////////////////////////////////////////////////////////////////
+   /**
+-   * A {@link MetricsFacade implementation that ignores all metrics events - does nothing.
++   * A {@link MetricsFacade} implementation that ignores all metrics events - does nothing.
+    */
+   private static final class NullMetricsFacade implements MetricsFacade {
+ 
+-      @Override
+-      public void markMeter(String name, long increment) {}
++    @Override
++    public void markMeter(String name, long increment) {}
++
++    @Override
++    public void updateHistogram(String name, long value) {}
+ 
+-      @Override
+-      public void updateHistogram(String name, long value) {}
++    @Override
++    public void updateTimer(String name, long duration, TimeUnit unit) {}        
+ 
+-      @Override
+-      public void updateTimer(String name, long duration, TimeUnit unit) {}        
+   };
+     
+ }
+-- 
+1.7.9.5
+

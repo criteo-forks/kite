@@ -1,7 +1,7 @@
 From 54fc2ba9ee21e691d6a544850825881c5f9ea846 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 1 Apr 2015 18:12:38 -0700
-Subject: [PATCH 039/115] CDK-974: Update Hive DDL when updating a table.
+Subject: [PATCH 039/140] CDK-974: Update Hive DDL when updating a table.
 
 Kite sets the table DDL when it creates a table and should update the
 DDL if the schema changes.
@@ -10,7 +10,7 @@ Contributed by Andrew Stevenson.
 ---
  .../java/org/kitesdk/data/spi/hive/HiveUtils.java  |    4 +++
  .../org/kitesdk/data/spi/hive/TestHiveUtils.java   |   28 ++++++++++++++++++++
- 2 files changed, 32 insertions(+), 0 deletions(-)
+ 2 files changed, 32 insertions(+)
 
 diff --git a/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveUtils.java b/kite-data/kite-data-hive/src/main/java/org/kitesdk/data/spi/hive/HiveUtils.java
 index 22a8dad..be2f7e5 100644
@@ -77,5 +77,5 @@ index 31f375d..8db4810 100644
      String namespace = "test_ns";
      String name = "test_table";
 -- 
-1.7.0.4
+1.7.9.5
 

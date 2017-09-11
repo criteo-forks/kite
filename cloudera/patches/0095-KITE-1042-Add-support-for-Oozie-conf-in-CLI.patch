@@ -1,13 +1,13 @@
 From 5f619b2611e03ed2a4f3f21e8f9b10f345213685 Mon Sep 17 00:00:00 2001
 From: Mladen Kovacevic <mladkov@gmail.com>
 Date: Tue, 14 Jul 2015 15:56:44 -0400
-Subject: [PATCH 095/115] KITE-1042: Add support for Oozie conf in CLI.
+Subject: [PATCH 095/140] KITE-1042: Add support for Oozie conf in CLI.
 
 OOZIE_ACTION_CONF_XML added to kite-dataset along with 'config' option
 that can be specified to be passed to the hadoop jar command for kite.
 ---
  .../kite-tools/src/main/sh/dataset.sh              |   13 ++++++++++++-
- 1 files changed, 12 insertions(+), 1 deletions(-)
+ 1 file changed, 12 insertions(+), 1 deletion(-)
 
 diff --git a/kite-tools-parent/kite-tools/src/main/sh/dataset.sh b/kite-tools-parent/kite-tools/src/main/sh/dataset.sh
 index 88a4fe1..671789f 100644
@@ -41,5 +41,5 @@ index 88a4fe1..671789f 100644
    echo "ERROR: Cannot find Hadoop installation!"
    echo "You can fix this warning by setting HADOOP_HOME"
 -- 
-1.7.0.4
+1.7.9.5
 

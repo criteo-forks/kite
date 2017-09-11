@@ -1,13 +1,13 @@
 From ed98e54f0e0adca57fae98d3e13dbb5a8bb47cfc Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 25 Mar 2015 21:48:10 -0700
-Subject: [PATCH 032/115] CDK-970: Fix IncompatibleSchemaException.check.
+Subject: [PATCH 032/140] CDK-970: Fix IncompatibleSchemaException.check.
 
 Now throws IncompatibleSchemaException instead of ValidationException.
 ---
  .../kitesdk/data/IncompatibleSchemaException.java  |   20 ++++++++++++++++++++
  .../cli/commands/TestSchemaCommandMerge.java       |    5 ++++-
- 2 files changed, 24 insertions(+), 1 deletions(-)
+ 2 files changed, 24 insertions(+), 1 deletion(-)
 
 diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/IncompatibleSchemaException.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/IncompatibleSchemaException.java
 index b875648..360e592 100644
@@ -62,5 +62,5 @@ index 94f8a4c..60a0588 100644
        public Integer call() throws IOException {
          return command.run();
 -- 
-1.7.0.4
+1.7.9.5
 

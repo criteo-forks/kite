@@ -1,7 +1,7 @@
-From 3c5112a18b86b6d0e9eb61d0f23943285b28c41d Mon Sep 17 00:00:00 2001
+From 3b6a7d3334977edce9c93937d1577037436c8b0e Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Tue, 25 Aug 2015 19:42:43 -0700
-Subject: [PATCH 101/115] KITE-1023: Avoid using new Path(URI), add warnings.
+Subject: [PATCH 101/140] KITE-1023: Avoid using new Path(URI), add warnings.
 
 This adds warnings for methods that may return URIs that are FS paths to
 prevent users from calling new Path(URI). It also removes incorrect use
@@ -137,5 +137,5 @@ index 07180ac..f52cb20 100644
  
      // Store the schema with the schema manager and use the
 -- 
-1.7.0.4
+1.7.9.5
 

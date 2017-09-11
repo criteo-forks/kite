@@ -1,7 +1,7 @@
 From 5f263156077408c9bb48071138e2938b147dc39b Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 27 May 2015 19:11:04 -0700
-Subject: [PATCH 067/115] CDK-983: Fix in predicate ordering.
+Subject: [PATCH 067/140] CDK-983: Fix in predicate ordering.
 
 Tracked down more hash sets in use and replaced with linked hash sets.
 ---
@@ -113,5 +113,5 @@ index fd39dee..a56d44e 100644
                                        View<GenericRecord> view) {
      View<GenericRecord> loaded = Datasets.load(uri);
 -- 
-1.7.0.4
+1.7.9.5
 

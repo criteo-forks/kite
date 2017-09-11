@@ -1,26 +1,26 @@
 From 6ee4e044de07fc0d3372cb341990adbf420710aa Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Tue, 14 Apr 2015 21:50:54 -0700
-Subject: [PATCH 054/115] CDK-972: Add PartitionView and FS implementation.
+Subject: [PATCH 054/140] CDK-972: Add PartitionView and FS implementation.
 
 ---
  .../main/java/org/kitesdk/data/PartitionView.java  |   75 ++++
  .../src/main/java/org/kitesdk/data/View.java       |   24 ++
  .../java/org/kitesdk/data/spi/AbstractDataset.java |    7 +
- .../kitesdk/data/spi/AbstractRefinableView.java    |   31 +--
+ .../kitesdk/data/spi/AbstractRefinableView.java    |   31 +-
  .../main/java/org/kitesdk/data/spi/StorageKey.java |   48 ++-
- .../data/spi/filesystem/FileSystemDataset.java     |   31 ++-
- .../data/spi/filesystem/FileSystemDatasets.java    |   60 +---
- .../filesystem/FileSystemPartitionIterator.java    |   57 +---
+ .../data/spi/filesystem/FileSystemDataset.java     |   31 +-
+ .../data/spi/filesystem/FileSystemDatasets.java    |   60 +--
+ .../filesystem/FileSystemPartitionIterator.java    |   57 +--
  .../spi/filesystem/FileSystemPartitionView.java    |  260 +++++++++++++
- .../data/spi/filesystem/FileSystemView.java        |   61 +++-
- .../kitesdk/data/spi/filesystem/PathIterator.java  |   60 ++--
+ .../data/spi/filesystem/FileSystemView.java        |   61 ++-
+ .../kitesdk/data/spi/filesystem/PathIterator.java  |   60 +--
  .../org/kitesdk/data/TestFileSystemDatasets.java   |  162 --------
  .../java/org/kitesdk/data/spi/TestConstraints.java |    2 +-
  .../spi/filesystem/TestFileSystemDatasets.java     |  224 +++++++++++
- .../TestFileSystemPartitionIterator.java           |   57 ++--
+ .../TestFileSystemPartitionIterator.java           |   57 ++-
  ...ystemPartitionIteratorProvidedPartitioners.java |   29 +-
- .../TestFileSystemPartitionIteratorTolerance.java  |   56 ++--
+ .../TestFileSystemPartitionIteratorTolerance.java  |   56 ++-
  .../filesystem/TestFileSystemPartitionView.java    |  401 ++++++++++++++++++++
  .../data/spi/filesystem/TestFileSystemView.java    |   27 +-
  .../data/spi/filesystem/TestPathConversion.java    |   18 +-
@@ -2474,5 +2474,5 @@ index 20acc1b..50807d5 100644
        <artifactId>junit</artifactId>
        <scope>test</scope>
 -- 
-1.7.0.4
+1.7.9.5
 

@@ -1,0 +1,33 @@
+From db9d0090213099484608d78a09c2d3da73fd7121 Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Mon, 1 Feb 2016 12:58:07 -0800
+Subject: [PATCH 119/140] KITE-1108: Add optional retry feature to loadSolr
+ morphline command (javadoc)
+
+---
+ .../client/solrj/retry/RetryingSolrServer.java     |    9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/RetryingSolrServer.java b/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/RetryingSolrServer.java
+index 2e719cd..4268d7d 100644
+--- a/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/RetryingSolrServer.java
++++ b/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/RetryingSolrServer.java
+@@ -38,7 +38,14 @@ import com.google.common.annotations.VisibleForTesting;
+ 
+ /**
+  * A wrapper around an underlying solrj {@link SolrServer} object; On exceptions, the wrapper
+- * retries solrj requests according to the given {@link RetryPolicyFactory}.
++ * retries solrj requests according to the given configurable {@link RetryPolicyFactory}.
++ * 
++ * This is useful in case solr servers are temporarily overloaded, or if there are transient network
++ * issues, etc.
++ * 
++ * For example, this class can be configured with a {@link DefaultRetryPolicyFactory} in combination
++ * with the {@link FlexibleBoundedExponentialBackoffRetry}. Metrics events are forwarded to a
++ * {@link MetricsFacade} object.
+  */
+ public class RetryingSolrServer extends SolrServer {
+ 
+-- 
+1.7.9.5
+

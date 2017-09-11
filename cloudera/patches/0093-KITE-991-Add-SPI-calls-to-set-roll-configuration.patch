@@ -1,7 +1,7 @@
 From dd77ea7b0b860b1caaedefc5b9d9ea82bf78a701 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Sat, 27 Jun 2015 15:34:48 -0700
-Subject: [PATCH 093/115] KITE-991: Add SPI calls to set roll configuration.
+Subject: [PATCH 093/140] KITE-991: Add SPI calls to set roll configuration.
 
 This adds RollingWriter to the SPI, which adds setRollIntervalMillis and
 setTargetFileSize methods. The partitioned writer and file writer now
@@ -633,5 +633,5 @@ index 318e4a0..857c396 100644
    }
  }
 -- 
-1.7.0.4
+1.7.9.5
 

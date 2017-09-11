@@ -1,0 +1,79 @@
+From 3a869a56d5dc3178b7eb731a51ebd0af163a1d57 Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Tue, 2 Feb 2016 09:34:54 -0800
+Subject: [PATCH 122/140] KITE-1108: set default baseSleepTime to 125
+ milliseconds
+
+---
+ .../resources/test-morphlines/loadSolrBasic.conf   |    2 +-
+ .../morphline/solr/RetryPolicyFactoryParser.java   |    5 ++---
+ .../client/solrj/retry/RetryingSolrServerTest.java |    3 +--
+ 3 files changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/loadSolrBasic.conf b/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/loadSolrBasic.conf
+index 0e86fdb..13f64ae 100644
+--- a/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/loadSolrBasic.conf
++++ b/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/loadSolrBasic.conf
+@@ -40,7 +40,7 @@ SOLR_LOCATOR : {
+ SOLR_LOCATOR : ${?ENV_SOLR_LOCATOR}
+ 
+ maxRecordsPerSecond : 100000000
+-retryPolicy_baseSleepTime : "1001 milliseconds"
++retryPolicy_baseSleepTime : "127 milliseconds"
+ retryPolicy_maxSleepTime : "10 seconds"
+ retryPolicy_maxRetries : 100
+ retryPolicy_maxElapsedTime : "3 minutes"
+diff --git a/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/kitesdk/morphline/solr/RetryPolicyFactoryParser.java b/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/kitesdk/morphline/solr/RetryPolicyFactoryParser.java
+index fec196e..63b6c37 100644
+--- a/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/kitesdk/morphline/solr/RetryPolicyFactoryParser.java
++++ b/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/kitesdk/morphline/solr/RetryPolicyFactoryParser.java
+@@ -15,7 +15,6 @@
+  */
+ package org.kitesdk.morphline.solr;
+ 
+-import java.util.Arrays;
+ import java.util.concurrent.TimeUnit;
+ 
+ import org.apache.solr.client.solrj.retry.DefaultRetryPolicyFactory;
+@@ -37,7 +36,7 @@ final class RetryPolicyFactoryParser {
+     final Config boundedExponentialBackoffRetryConfig = new Configs().getConfig(retryPolicyConfig, 
+         BOUNDED_EXPONENTIAL_BACKOFF_RETRY_NAME);
+     final long baseSleepTime = new Configs()
+-        .getNanoseconds(boundedExponentialBackoffRetryConfig, "baseSleepTime", TimeUnit.MILLISECONDS.toNanos(1000));
++        .getNanoseconds(boundedExponentialBackoffRetryConfig, "baseSleepTime", TimeUnit.MILLISECONDS.toNanos(125));
+     final long maxSleepTime = new Configs()
+         .getNanoseconds(boundedExponentialBackoffRetryConfig, "maxSleepTime", TimeUnit.SECONDS.toNanos(10));
+     final int maxRetries = new Configs()
+@@ -46,7 +45,7 @@ final class RetryPolicyFactoryParser {
+         .getNanoseconds(boundedExponentialBackoffRetryConfig, "maxElapsedTime", TimeUnit.SECONDS.toNanos(3 * 60));
+     LOG.debug("Parsed retry policy BoundedExponentialBackoffRetry with "
+         + "baseSleepTime:{}, maxSleepTime:{}, maxRetries:{}, maxElapsedTime:{}",
+-        Arrays.asList(baseSleepTime, maxSleepTime, maxRetries, maxElapsedTime));
++        new Object[]{baseSleepTime, maxSleepTime, maxRetries, maxElapsedTime});
+     if (maxRetries <= 0 || maxElapsedTime <= 0) {
+       return null;
+     }
+diff --git a/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/apache/solr/client/solrj/retry/RetryingSolrServerTest.java b/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/apache/solr/client/solrj/retry/RetryingSolrServerTest.java
+index 46502b7..e59bc4b 100644
+--- a/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/apache/solr/client/solrj/retry/RetryingSolrServerTest.java
++++ b/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/apache/solr/client/solrj/retry/RetryingSolrServerTest.java
+@@ -17,7 +17,6 @@ package org.apache.solr.client.solrj.retry;
+ 
+ import java.io.File;
+ import java.io.IOException;
+-import java.util.Arrays;
+ import java.util.concurrent.TimeUnit;
+ 
+ import org.apache.solr.SolrTestCaseJ4;
+@@ -265,7 +264,7 @@ public class RetryingSolrServerTest extends SolrTestCaseJ4 {
+       
+       @Override
+       public void updateTimer(String name, long duration, TimeUnit unit) {
+-        LOG.info("updateTimer name:{}, duration:{}, unit:{}", Arrays.asList(name, duration, unit));
++        LOG.info("updateTimer name:{}, duration:{}, unit:{}", new Object[]{name, duration, unit});
+       }
+       
+       @Override
+-- 
+1.7.9.5
+

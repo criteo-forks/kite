@@ -1,7 +1,8 @@
-From ca760fc5a210d70c8e8b1a51cb923d0dbeebd705 Mon Sep 17 00:00:00 2001
+From 020a52d6c783959f31024649877d40f0a1ed24d1 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Mon, 28 Sep 2015 12:57:25 -0400
-Subject: [PATCH 113/115] KITE-1083: Add warnings to POM files about Hive changes.
+Subject: [PATCH 113/140] KITE-1083: Add warnings to POM files about Hive
+ changes.
 
 This warns that the jars needed to connect to the metastore are pulled
 in individually and kite-tools should be checked when Hive dependencies
@@ -9,10 +10,10 @@ change to avoid regressions.
 ---
  kite-tools-parent/pom.xml |    5 +++++
  pom.xml                   |    6 ++++++
- 2 files changed, 11 insertions(+), 0 deletions(-)
+ 2 files changed, 11 insertions(+)
 
 diff --git a/kite-tools-parent/pom.xml b/kite-tools-parent/pom.xml
-index 40be268..d6e64f0 100644
+index e1b32b8..a49ce5f 100644
 --- a/kite-tools-parent/pom.xml
 +++ b/kite-tools-parent/pom.xml
 @@ -207,6 +207,11 @@
@@ -28,7 +29,7 @@ index 40be268..d6e64f0 100644
        <groupId>org.apache.hive</groupId>
        <artifactId>hive-exec</artifactId>
 diff --git a/pom.xml b/pom.xml
-index 5a9bc70..255b1cc 100644
+index 5865bc8..b24e6d1 100644
 --- a/pom.xml
 +++ b/pom.xml
 @@ -784,6 +784,12 @@
@@ -45,5 +46,5 @@ index 5a9bc70..255b1cc 100644
          <groupId>org.apache.hive</groupId>
          <artifactId>hive-exec</artifactId>
 -- 
-1.7.0.4
+1.7.9.5
 

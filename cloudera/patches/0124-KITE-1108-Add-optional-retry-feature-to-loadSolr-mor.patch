@@ -1,0 +1,26 @@
+From 796f9ceb5863cf32511d0cfbe4745e7c63ad58d3 Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Tue, 2 Feb 2016 10:57:36 -0800
+Subject: [PATCH 124/140] KITE-1108: Add optional retry feature to loadSolr
+ morphline command (fix typo in comment)
+
+---
+ .../resources/test-morphlines/loadSolrBasic.conf   |    2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/loadSolrBasic.conf b/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/loadSolrBasic.conf
+index ec96fbe..1a41baf 100644
+--- a/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/loadSolrBasic.conf
++++ b/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/loadSolrBasic.conf
+@@ -43,7 +43,7 @@ maxRecordsPerSecond : 100000000
+ 
+ # retry solrj requests until a total of 100 times or 3 minutes, whichever comes first
+ # first sleep between retries lasts for random(127..253) milliseconds, 
+-# subsequently the duration between retries grows exponentionally, capped at 10 second sleeps between retries           
++# subsequently the duration between retries grows exponentially, capped at 10 second sleeps between retries           
+ retryPolicy_baseSleepTime : "127 milliseconds"
+ retryPolicy_maxSleepTime : "10 seconds"
+ retryPolicy_maxRetries : 100
+-- 
+1.7.9.5
+

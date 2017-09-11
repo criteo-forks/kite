@@ -1,7 +1,7 @@
 From 873c0b971e31fe10c531f503d437c23cf05e25d2 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 11 Mar 2015 18:37:56 -0700
-Subject: [PATCH 014/115] CDK-955: Fix duplicate URIs from Datasets.list.
+Subject: [PATCH 014/140] CDK-955: Fix duplicate URIs from Datasets.list.
 
 The problem was that the FileSystem implementation was returning
 multiple "default" namespaces. The implementation now uses a Set to
@@ -16,7 +16,7 @@ of the tables were present in each copy of default, which resulted in
 n^2 results.
 ---
  .../spi/filesystem/FileSystemMetadataProvider.java |    8 ++++----
- 1 files changed, 4 insertions(+), 4 deletions(-)
+ 1 file changed, 4 insertions(+), 4 deletions(-)
 
 diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemMetadataProvider.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemMetadataProvider.java
 index e62ec24..e8f6539 100644
@@ -47,5 +47,5 @@ index e62ec24..e8f6539 100644
      try {
        // if using the default namespace, add datasets with no namespace dir
 -- 
-1.7.0.4
+1.7.9.5
 

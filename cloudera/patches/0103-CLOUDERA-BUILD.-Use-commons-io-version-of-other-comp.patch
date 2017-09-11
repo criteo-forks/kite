@@ -1,14 +1,15 @@
-From 799b164e8d749306d3297655bb5df8e81b802f9a Mon Sep 17 00:00:00 2001
+From 2de0451c62d518db27d16f3daa69b610b42b66fa Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Fri, 11 Sep 2015 13:20:15 -0700
-Subject: [PATCH 104/115] CLOUDERA-BUILD. Use commons-io version of other components.
+Subject: [PATCH 103/140] CLOUDERA-BUILD. Use commons-io version of other
+ components.
 
 ---
  pom.xml |    2 +-
- 1 files changed, 1 insertions(+), 1 deletions(-)
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/pom.xml b/pom.xml
-index 642fbad..5a9bc70 100644
+index b2e0100..5865bc8 100644
 --- a/pom.xml
 +++ b/pom.xml
 @@ -137,7 +137,7 @@
@@ -21,5 +22,5 @@ index 642fbad..5a9bc70 100644
      <vers.commons-lang>2.6</vers.commons-lang>
      <vers.crunch-base>0.11.0</vers.crunch-base> <!-- The version CDH is based on -->
 -- 
-1.7.0.4
+1.7.9.5
 

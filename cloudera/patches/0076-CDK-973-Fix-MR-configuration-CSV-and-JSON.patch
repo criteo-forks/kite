@@ -1,10 +1,10 @@
 From ce44758d63126491efa5814ae8ae62ea44d273d2 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Mon, 25 May 2015 18:03:37 -0700
-Subject: [PATCH 076/115] CDK-973: Fix MR configuration, CSV, and JSON.
+Subject: [PATCH 076/140] CDK-973: Fix MR configuration, CSV, and JSON.
 
 ---
- .../data/spi/filesystem/CSVInputFormat.java        |   11 ++---
+ .../data/spi/filesystem/CSVInputFormat.java        |   11 +++--
  .../filesystem/FileSystemViewKeyInputFormat.java   |   42 +++++++++++---------
  .../data/spi/filesystem/JSONInputFormat.java       |   11 ++---
  3 files changed, 32 insertions(+), 32 deletions(-)
@@ -153,5 +153,5 @@ index 3cd09b7..a72ea1b 100644
  
    @Override
 -- 
-1.7.0.4
+1.7.9.5
 

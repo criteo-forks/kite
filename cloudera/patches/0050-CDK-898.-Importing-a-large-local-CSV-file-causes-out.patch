@@ -1,12 +1,13 @@
 From 6d42e20055e6e40711ff964fa16d703abcbd578c Mon Sep 17 00:00:00 2001
 From: Tom White <tom@cloudera.com>
 Date: Thu, 5 Feb 2015 09:14:11 +0000
-Subject: [PATCH 050/115] CDK-898. Importing a large local CSV file causes out of memory error.
+Subject: [PATCH 050/140] CDK-898. Importing a large local CSV file causes out
+ of memory error.
 
 Always use MRPipeline.
 ---
  .../main/java/org/kitesdk/tools/TransformTask.java |   63 +++++---------------
- .../kitesdk/cli/commands/TestCSVImportCommand.java |   13 +---
+ .../kitesdk/cli/commands/TestCSVImportCommand.java |   13 ++--
  2 files changed, 20 insertions(+), 56 deletions(-)
 
 diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
@@ -118,5 +119,5 @@ index 9f46d92..de7d89a 100644
      verifyNoMoreInteractions(console);
    }
 -- 
-1.7.0.4
+1.7.9.5
 

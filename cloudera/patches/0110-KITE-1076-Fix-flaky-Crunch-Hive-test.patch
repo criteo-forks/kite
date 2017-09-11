@@ -1,17 +1,17 @@
-From 7e993f520e8399f643eda9346cf0f21d6786817e Mon Sep 17 00:00:00 2001
+From 8934f4b19ff5320a0cc8931f5d150838473431af Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Thu, 17 Sep 2015 15:06:30 -0700
-Subject: [PATCH 110/115] KITE-1076: Fix flaky Crunch-Hive test.
+Subject: [PATCH 110/140] KITE-1076: Fix flaky Crunch-Hive test.
 
 The test fails in job setup using the local job runner when the HBase
 test has been run first. It appears to be a bug in the test runner code
 that can be avoided by not reusing test VMs for the Crunch module.
 ---
  kite-data/kite-data-crunch/pom.xml |    1 +
- 1 files changed, 1 insertions(+), 0 deletions(-)
+ 1 file changed, 1 insertion(+)
 
 diff --git a/kite-data/kite-data-crunch/pom.xml b/kite-data/kite-data-crunch/pom.xml
-index 232b39b..ad60282 100644
+index 55539df..0297e0a 100644
 --- a/kite-data/kite-data-crunch/pom.xml
 +++ b/kite-data/kite-data-crunch/pom.xml
 @@ -64,6 +64,7 @@
@@ -23,5 +23,5 @@ index 232b39b..ad60282 100644
              <property>
                <!-- Make sure derby.log goes to target/ subdir
 -- 
-1.7.0.4
+1.7.9.5
 

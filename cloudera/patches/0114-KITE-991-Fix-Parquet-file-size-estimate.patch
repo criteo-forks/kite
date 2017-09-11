@@ -1,7 +1,7 @@
-From dc81528b83d00c2fb93b3e6628fa123eec53b9c9 Mon Sep 17 00:00:00 2001
+From 5421a1da557a710da87551d314f46270fe4887f3 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Thu, 24 Sep 2015 15:32:47 -0700
-Subject: [PATCH 114/115] KITE-991: Fix Parquet file size estimate.
+Subject: [PATCH 114/140] KITE-991: Fix Parquet file size estimate.
 
 This fixes size-based rolling for Parquet files and enables the test.
 Size-based rolling was previously not working because it wasn't possible
@@ -112,5 +112,5 @@ index 857c396..8dd8f65 100644
 -  }
  }
 -- 
-1.7.0.4
+1.7.9.5
 

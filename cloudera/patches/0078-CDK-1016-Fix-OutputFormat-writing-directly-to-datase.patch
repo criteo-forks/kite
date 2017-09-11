@@ -1,14 +1,15 @@
 From 2a9fdd4ca690883922203646cd8ae2a36ddeeb80 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 10 Jun 2015 20:24:09 -0700
-Subject: [PATCH 078/115] CDK-1016: Fix OutputFormat writing directly to datasets.
+Subject: [PATCH 078/140] CDK-1016: Fix OutputFormat writing directly to
+ datasets.
 
 This happens only when a dataset instance is passed to the configuration
 methods. The fix is to verify that the target dataset is not the root by
 inspecting whether the partition key has any values.
 ---
  .../data/mapreduce/DatasetKeyOutputFormat.java     |    2 +-
- 1 files changed, 1 insertions(+), 1 deletions(-)
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyOutputFormat.java b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyOutputFormat.java
 index ade5052..637c972 100644
@@ -24,5 +25,5 @@ index ade5052..637c972 100644
        }
        return new DatasetRecordWriter<E>(working);
 -- 
-1.7.0.4
+1.7.9.5
 

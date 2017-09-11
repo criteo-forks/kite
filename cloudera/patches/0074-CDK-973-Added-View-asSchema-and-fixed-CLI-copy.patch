@@ -1,7 +1,7 @@
 From a040439768f2100db46f155d8896dc85c35a140f Mon Sep 17 00:00:00 2001
 From: Joey Echeverria <joey42@gmail.com>
 Date: Tue, 31 Mar 2015 20:38:43 -0700
-Subject: [PATCH 074/115] CDK-973: Added View#asSchema() and fixed CLI copy.
+Subject: [PATCH 074/140] CDK-973: Added View#asSchema() and fixed CLI copy.
 
 * Added View#asSchema() method
 * Added View#getSchema() method
@@ -19,7 +19,7 @@ Resolution:
  .../java/org/kitesdk/data/spi/DataModelUtil.java   |   29 +++++++-
  .../java/org/kitesdk/data/spi/EntityAccessor.java  |    6 +-
  .../data/spi/filesystem/FileSystemView.java        |   15 ++++
- .../filesystem/FileSystemViewKeyInputFormat.java   |   21 +++++--
+ .../filesystem/FileSystemViewKeyInputFormat.java   |   21 ++++--
  .../main/java/org/kitesdk/data/hbase/DaoView.java  |   13 ++++
  .../data/mapreduce/DatasetKeyInputFormat.java      |   28 +++++++-
  .../data/mapreduce/TestDatasetRecordWriter.java    |   72 ++++++++++++++++++++
@@ -875,5 +875,5 @@ index 0000000..f56ff2c
 +  
 +}
 -- 
-1.7.0.4
+1.7.9.5
 

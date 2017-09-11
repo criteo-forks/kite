@@ -1,11 +1,13 @@
 From 5f9ce6877edbb6712d3181f53120309840342b10 Mon Sep 17 00:00:00 2001
 From: Joey Echeverria <joey@cloudera.com>
 Date: Wed, 29 Oct 2014 10:55:03 -0700
-Subject: [PATCH 009/115] CLOUDERA-BUILD. Make ${HADOOP_PREFIX}/hadoop-mapreduce the default for CDH5.
+Subject: [PATCH 009/140] CLOUDERA-BUILD. Make
+ ${HADOOP_PREFIX}/hadoop-mapreduce the default for
+ CDH5.
 
 ---
  .../kite-tools/src/main/sh/dataset.sh              |    7 ++-----
- 1 files changed, 2 insertions(+), 5 deletions(-)
+ 1 file changed, 2 insertions(+), 5 deletions(-)
 
 diff --git a/kite-tools-parent/kite-tools/src/main/sh/dataset.sh b/kite-tools-parent/kite-tools/src/main/sh/dataset.sh
 index 2dfa245..88a4fe1 100644
@@ -27,5 +29,5 @@ index 2dfa245..88a4fe1 100644
  fi
  debug "Using HADOOP_MAPRED_HOME=${HADOOP_MAPRED_HOME}"
 -- 
-1.7.0.4
+1.7.9.5
 

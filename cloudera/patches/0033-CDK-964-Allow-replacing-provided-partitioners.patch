@@ -1,7 +1,7 @@
 From 91c483a98ea4eb97ceb0576fab36fbd3d802cd8c Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Mon, 16 Mar 2015 13:18:47 -0700
-Subject: [PATCH 033/115] CDK-964: Allow replacing provided partitioners.
+Subject: [PATCH 033/140] CDK-964: Allow replacing provided partitioners.
 
 This updates the update validation so that provided partitioners can be
 replaced with more specific partitioners. For example, if a version
@@ -12,7 +12,7 @@ is the only allowed migration added by this commit.
  .../java/org/kitesdk/data/spi/Compatibility.java   |   64 ++++++-
  .../org/kitesdk/data/TestPartitionStrategy.java    |    2 +
  .../kitesdk/data/spi/TestCompatibilityChecks.java  |  200 ++++++++++++++++++++
- .../TestFileSystemDatasetRepository.java           |   32 +++
+ .../TestFileSystemDatasetRepository.java           |   32 ++++
  .../java/org/kitesdk/data/spi/hive/HiveUtils.java  |    9 +
  .../kitesdk/cli/commands/UpdateDatasetCommand.java |    9 +
  6 files changed, 314 insertions(+), 2 deletions(-)
@@ -424,5 +424,5 @@ index 3fec784..46ecf13 100644
        for (String propValue : properties) {
          Iterator<String> parts = PROP_VALUE_SEP.split(propValue).iterator();
 -- 
-1.7.0.4
+1.7.9.5
 

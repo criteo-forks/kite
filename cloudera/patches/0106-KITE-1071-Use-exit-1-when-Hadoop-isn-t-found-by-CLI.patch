@@ -1,11 +1,12 @@
-From bdf49317a48e5270b451a741347da3ecdd731a9c Mon Sep 17 00:00:00 2001
+From 595335f256a2e1d9aa176f99f63c0187ac362088 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Mon, 14 Sep 2015 17:36:31 -0700
-Subject: [PATCH 106/115] KITE-1071: Use exit 1 when Hadoop isn't found by CLI.
+Subject: [PATCH 106/140] KITE-1071: Use exit 1 when Hadoop isn't found by
+ CLI.
 
 ---
  .../kite-tools/src/main/sh/dataset.sh              |    1 +
- 1 files changed, 1 insertions(+), 0 deletions(-)
+ 1 file changed, 1 insertion(+)
 
 diff --git a/kite-tools-parent/kite-tools/src/main/sh/dataset.sh b/kite-tools-parent/kite-tools/src/main/sh/dataset.sh
 index 671789f..96e5278 100644
@@ -20,5 +21,5 @@ index 671789f..96e5278 100644
  
  exit
 -- 
-1.7.0.4
+1.7.9.5
 

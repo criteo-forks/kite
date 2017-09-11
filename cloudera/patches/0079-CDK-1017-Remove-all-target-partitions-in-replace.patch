@@ -1,13 +1,13 @@
 From e5c433dff69a1888d3f89957a2537ebfccee5a7d Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 10 Jun 2015 21:00:18 -0700
-Subject: [PATCH 079/115] CDK-1017: Remove all target partitions in replace.
+Subject: [PATCH 079/140] CDK-1017: Remove all target partitions in replace.
 
 This removes any partitions in the view being replaced, even if the
 replacement doesn't have the partition.
 ---
  .../java/org/kitesdk/data/spi/Replaceable.java     |    4 +-
- .../data/spi/filesystem/FileSystemDataset.java     |   27 +++++++--
+ .../data/spi/filesystem/FileSystemDataset.java     |   27 ++++++---
  .../spi/filesystem/TestPartitionReplacement.java   |   59 +++++++++++++++++---
  .../data/mapreduce/DatasetKeyOutputFormat.java     |    5 +-
  4 files changed, 75 insertions(+), 20 deletions(-)
@@ -274,5 +274,5 @@ index 637c972..3963d13 100644
          ((Mergeable<Dataset<E>>) targetView.getDataset()).merge(jobDataset);
        }
 -- 
-1.7.0.4
+1.7.9.5
 

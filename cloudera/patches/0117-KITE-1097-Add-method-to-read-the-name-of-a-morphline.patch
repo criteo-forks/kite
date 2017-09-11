@@ -1,0 +1,38 @@
+From 9615d66e0e190457207212354266164f93ce225f Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Thu, 17 Dec 2015 15:20:04 -0800
+Subject: [PATCH 117/140] KITE-1097: Add method to read the name of a
+ morphline command
+
+---
+ .../kitesdk/morphline/base/AbstractCommand.java    |    7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/base/AbstractCommand.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/base/AbstractCommand.java
+index 667a52f..1ace7d7 100644
+--- a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/base/AbstractCommand.java
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/base/AbstractCommand.java
+@@ -126,6 +126,11 @@ public abstract class AbstractCommand implements Command {
+     return configs;
+   }
+   
++  /** Returns the name of this command that was assigned by the builder. */ 
++  protected final String getName() {
++    return name;
++  }
++  
+   @Override
+   public final void notify(Record notification) {
+     beforeNotify(notification);
+@@ -207,7 +212,7 @@ public abstract class AbstractCommand implements Command {
+   }
+   
+   private String getMetricName(String... names) {
+-    return MetricRegistry.name(name, names);
++    return MetricRegistry.name(getName(), names);
+   }
+   
+   /** Returns whether or not metrics should be measured. */
+-- 
+1.7.9.5
+

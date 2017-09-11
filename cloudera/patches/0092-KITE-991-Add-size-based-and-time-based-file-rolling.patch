@@ -1,7 +1,8 @@
 From 5502d5d80f9cc1cc2a48707d0d4e25ede97edcc5 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Mon, 15 Jun 2015 16:41:52 -0700
-Subject: [PATCH 092/115] KITE-991: Add size-based and time-based file rolling.
+Subject: [PATCH 092/140] KITE-991: Add size-based and time-based file
+ rolling.
 
 File size-based rolling works and is passing a new test for Avro, but is
 disabled for Parquet because the appender has no reliable size estimate
@@ -11,13 +12,13 @@ Time-based rolling uses a new SPI interface, ClockReady, which exposes a
 method for passing time signals to implementing classes. This removes
 the need for Kite to provide a thread-based check.
 ---
- .../main/java/org/kitesdk/data/spi/ClockReady.java |   32 ++++++
+ .../main/java/org/kitesdk/data/spi/ClockReady.java |   32 +++++++
  .../java/org/kitesdk/data/spi/DescriptorUtil.java  |   45 +++++++++
  .../kitesdk/data/spi/filesystem/AvroAppender.java  |    5 +
  .../kitesdk/data/spi/filesystem/CSVAppender.java   |    5 +
- .../spi/filesystem/DurableParquetAppender.java     |    6 +
+ .../spi/filesystem/DurableParquetAppender.java     |    6 ++
  .../data/spi/filesystem/FileSystemProperties.java  |   12 +++
- .../data/spi/filesystem/FileSystemWriter.java      |   89 ++++++++++++++++-
+ .../data/spi/filesystem/FileSystemWriter.java      |   89 +++++++++++++++--
  .../data/spi/filesystem/ParquetAppender.java       |   12 ++-
  .../spi/filesystem/PartitionedDatasetWriter.java   |   33 ++++---
  .../data/spi/filesystem/TestAvroWriter.java        |    5 +
@@ -623,5 +624,5 @@ index 83feef7..318e4a0 100644
 +  }
  }
 -- 
-1.7.0.4
+1.7.9.5
 

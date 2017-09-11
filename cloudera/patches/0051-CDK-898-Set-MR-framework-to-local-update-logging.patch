@@ -1,7 +1,7 @@
 From 00c2d2de05f8bf4ce9c146e6be0d36afcf450a5b Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 22 Apr 2015 10:39:28 -0700
-Subject: [PATCH 051/115] CDK-898: Set MR framework to local, update logging.
+Subject: [PATCH 051/140] CDK-898: Set MR framework to local, update logging.
 
 If either the source or target is local, then this explicitly sets the
 MR framework to local to ensure that the job won't run on the cluster
@@ -133,5 +133,5 @@ index de7d89a..751bbbb 100644
  public class TestCSVImportCommand {
  
 -- 
-1.7.0.4
+1.7.9.5
 

@@ -1,7 +1,8 @@
-From 8e047dd33321d01c36dc601909d066a7e730b150 Mon Sep 17 00:00:00 2001
+From 29add2ff5a9e0179cfca68b555736c65497790bb Mon Sep 17 00:00:00 2001
 From: Wolfgang Hoschek <whoschek@cloudera.com>
 Date: Fri, 11 Sep 2015 10:26:32 -0700
-Subject: [PATCH 102/115] KITE-1069: Make zkClientSessionTimeout and zkClientConnectTimeout configurable in SolrLocator
+Subject: [PATCH 104/140] KITE-1069: Make zkClientSessionTimeout and
+ zkClientConnectTimeout configurable in SolrLocator
 
 ---
  .../org/kitesdk/morphline/solr/SolrLocator.java    |   17 +++++++++++++++--
@@ -89,5 +90,5 @@ index 9796edb..61e2fb6 100644
        throw new IllegalArgumentException("Cannot connect to ZooKeeper: " + zkHost, e);
      }
 -- 
-1.7.0.4
+1.7.9.5
 

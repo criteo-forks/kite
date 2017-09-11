@@ -1,14 +1,15 @@
 From 9735c2d5acada1f43c0c5922823ddf535e20e058 Mon Sep 17 00:00:00 2001
 From: Tom White <tom@cloudera.com>
 Date: Fri, 6 Mar 2015 10:30:26 +0000
-Subject: [PATCH 012/115] CDK-949. Dataset partition-config command should allow nested field names.
+Subject: [PATCH 012/140] CDK-949. Dataset partition-config command should
+ allow nested field names.
 
 ---
- .../java/org/kitesdk/data/DatasetDescriptor.java   |    8 ++----
- .../main/java/org/kitesdk/data/spi/SchemaUtil.java |    4 +-
- .../java/org/kitesdk/data/spi/TestConstraints.java |    3 +-
+ .../java/org/kitesdk/data/DatasetDescriptor.java   |    8 +++-----
+ .../main/java/org/kitesdk/data/spi/SchemaUtil.java |    4 ++--
+ .../java/org/kitesdk/data/spi/TestConstraints.java |    3 ++-
  .../org/kitesdk/data/spi/TestRefinableViews.java   |    2 +-
- .../commands/CreatePartitionStrategyCommand.java   |   21 ++++++++++---------
+ .../commands/CreatePartitionStrategyCommand.java   |   21 ++++++++++----------
  .../TestCreatePartitionStrategyCommand.java        |   12 +++++++++++
  .../src/test/resources/test-schemas/user.avsc      |   17 ++++++++++++++++
  7 files changed, 48 insertions(+), 19 deletions(-)
@@ -191,5 +192,5 @@ index 8d7b704..e69a4af 100644
    ]
  }
 -- 
-1.7.0.4
+1.7.9.5
 

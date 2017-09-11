@@ -1,11 +1,12 @@
 From d6ef4fd674b09a40dab9c1a234d3ec394162c8ea Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 20 May 2015 10:14:26 -0700
-Subject: [PATCH 062/115] CDK-1003: Add error message to URIBuilder precondition.
+Subject: [PATCH 062/140] CDK-1003: Add error message to URIBuilder
+ precondition.
 
 ---
  .../src/main/java/org/kitesdk/data/URIBuilder.java |    3 ++-
- 1 files changed, 2 insertions(+), 1 deletions(-)
+ 1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/URIBuilder.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/URIBuilder.java
 index ba97333..26211c9 100644
@@ -22,5 +23,5 @@ index ba97333..26211c9 100644
      Pair<URIPattern, Map<String, String>> pair = Registration
          .lookupPatternByRepoUri(URI.create(repoUri.getRawSchemeSpecificPart()));
 -- 
-1.7.0.4
+1.7.9.5
 

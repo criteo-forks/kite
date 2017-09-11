@@ -1,0 +1,78 @@
+From dc41f5825c00b267da357e34918268403077d2dd Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Sat, 5 Dec 2015 01:03:34 -0800
+Subject: [PATCH 116/140] CDH-35218: Add getMilliseconds convenience methods
+ to morphline Configs
+
+---
+ .../java/org/kitesdk/morphline/base/Configs.java   |   13 +++++++++++--
+ .../org/kitesdk/morphline/api/ConfigsTest.java     |   18 ++++++++++++++++++
+ 2 files changed, 29 insertions(+), 2 deletions(-)
+
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/base/Configs.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/base/Configs.java
+index 081998f..5c76534 100644
+--- a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/base/Configs.java
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/base/Configs.java
+@@ -175,12 +175,21 @@ public final class Configs {
+     return charset;
+   }  
+ 
+-  public long getNanoseconds(Config config, String path, long defaults) {    
++  public long getMilliseconds(Config config, String path, long defaultMillis) {    
++    long defaultNanos = TimeUnit.MILLISECONDS.toNanos(defaultMillis); 
++    return TimeUnit.NANOSECONDS.toMillis(getNanoseconds(config, path, defaultNanos));
++  }
++  
++  public long getMilliseconds(Config config, String path) {    
++    return TimeUnit.NANOSECONDS.toMillis(getNanoseconds(config, path));
++  }
++  
++  public long getNanoseconds(Config config, String path, long defaultNanos) {    
+     addRecognizedArgument(path);
+     if (config.hasPath(path)) {
+       return getNanoseconds(config, path);
+     } else {
+-      return defaults;
++      return defaultNanos;
+     }
+   }
+   
+diff --git a/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/ConfigsTest.java b/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/ConfigsTest.java
+index f143c72..760aa2a 100644
+--- a/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/ConfigsTest.java
++++ b/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/api/ConfigsTest.java
+@@ -23,6 +23,7 @@ import org.junit.Test;
+ import org.kitesdk.morphline.base.Configs;
+ 
+ import com.typesafe.config.Config;
++import com.typesafe.config.ConfigException;
+ import com.typesafe.config.ConfigFactory;
+ import com.typesafe.config.ConfigValue;
+ 
+@@ -60,6 +61,23 @@ public class ConfigsTest extends Assert {
+   }
+   
+   @Test
++  public void testDurations() throws Exception {
++    Config config = ConfigFactory.parseString("duration : 2seconds");
++    Configs configs = new Configs();
++    assertEquals(2000, configs.getMilliseconds(config, "duration", 1000));
++
++    config = ConfigFactory.parseString("xxx : 2seconds");
++    assertEquals(1000, configs.getMilliseconds(config, "duration", 1000));
++    
++    try {
++      assertEquals(1000, configs.getMilliseconds(config, "duration"));
++      fail();
++    } catch (ConfigException e) {
++      ; // expected
++    }
++  }
++  
++  @Test
+   public void testEmptyStringThrowsSyntaxError() throws Exception {
+     Config config = ConfigFactory.parseString("foo : \"\"");
+     try {
+-- 
+1.7.9.5
+

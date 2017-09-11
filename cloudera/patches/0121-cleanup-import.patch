@@ -1,0 +1,37 @@
+From bdc38eb98b7a10d25b7e19f716de65aaeefca128 Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Mon, 1 Feb 2016 16:19:31 -0800
+Subject: [PATCH 121/140] cleanup import
+
+---
+ .../metrics/scalable/ScalableStatisticsTest.java   |    1 -
+ .../metrics/scalable/TDigestReservoirTest.java     |    1 -
+ 2 files changed, 2 deletions(-)
+
+diff --git a/kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/ScalableStatisticsTest.java b/kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/ScalableStatisticsTest.java
+index d750a58..84c2516 100644
+--- a/kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/ScalableStatisticsTest.java
++++ b/kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/ScalableStatisticsTest.java
+@@ -19,7 +19,6 @@ import java.util.Random;
+ 
+ import org.junit.Assert;
+ import org.junit.Test;
+-import org.kitesdk.morphline.metrics.scalable.ScalableStatistics;
+ 
+ import com.tdunning.math.stats.AVLTreeDigest;
+ import com.tdunning.math.stats.TDigest;
+diff --git a/kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/TDigestReservoirTest.java b/kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/TDigestReservoirTest.java
+index e323c80..f213d2e 100644
+--- a/kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/TDigestReservoirTest.java
++++ b/kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/TDigestReservoirTest.java
+@@ -17,7 +17,6 @@ package org.kitesdk.morphline.metrics.scalable;
+ 
+ import org.junit.Assert;
+ import org.junit.Test;
+-import org.kitesdk.morphline.metrics.scalable.TDigestReservoir;
+ 
+ import com.codahale.metrics.Reservoir;
+ 
+-- 
+1.7.9.5
+

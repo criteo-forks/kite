@@ -1,0 +1,1046 @@
+From c4df15727dd333da5e366ac6c20bfa9864c4bd0a Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Mon, 1 Feb 2016 16:16:23 -0800
+Subject: [PATCH 120/140] KITE-1108: Add optional retry feature to loadSolr
+ morphline command (scalable stats)
+
+---
+ .../kite-morphlines-metrics-scalable/README.md     |    3 +
+ .../kite-morphlines-metrics-scalable/pom.xml       |   59 ++++
+ .../morphline/metrics/scalable/MetricBuilders.java |  181 +++++++++++
+ .../metrics/scalable/ScalableStatistics.java       |  322 ++++++++++++++++++++
+ .../metrics/scalable/TDigestMetricBuilders.java    |   62 ++++
+ .../metrics/scalable/TDigestReservoir.java         |  135 ++++++++
+ .../metrics/scalable/ScalableStatisticsTest.java   |  152 +++++++++
+ .../metrics/scalable/TDigestReservoirTest.java     |   43 +++
+ kite-morphlines/pom.xml                            |    1 +
+ 9 files changed, 958 insertions(+)
+ create mode 100644 kite-morphlines/kite-morphlines-metrics-scalable/README.md
+ create mode 100644 kite-morphlines/kite-morphlines-metrics-scalable/pom.xml
+ create mode 100644 kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/MetricBuilders.java
+ create mode 100644 kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/ScalableStatistics.java
+ create mode 100644 kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/TDigestMetricBuilders.java
+ create mode 100644 kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/TDigestReservoir.java
+ create mode 100644 kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/ScalableStatisticsTest.java
+ create mode 100644 kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/TDigestReservoirTest.java
+
+diff --git a/kite-morphlines/kite-morphlines-metrics-scalable/README.md b/kite-morphlines/kite-morphlines-metrics-scalable/README.md
+new file mode 100644
+index 0000000..a3026ae
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-metrics-scalable/README.md
+@@ -0,0 +1,3 @@
++# Kite - Morphlines Metrics Scalable
++
++This module contains tools for scalable metrics.
+diff --git a/kite-morphlines/kite-morphlines-metrics-scalable/pom.xml b/kite-morphlines/kite-morphlines-metrics-scalable/pom.xml
+new file mode 100644
+index 0000000..31a2c45
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-metrics-scalable/pom.xml
+@@ -0,0 +1,59 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<!-- Copyright 2013 Cloudera Inc.
++
++ Licensed under the Apache License, Version 2.0 (the "License");
++ you may not use this file except in compliance with the License.
++ You may obtain a copy of the License at
++
++ http://www.apache.org/licenses/LICENSE-2.0
++
++ Unless required by applicable law or agreed to in writing, software
++ distributed under the License is distributed on an "AS IS" BASIS,
++ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ See the License for the specific language governing permissions and
++ limitations under the License. -->
++<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
++  <modelVersion>4.0.0</modelVersion>
++
++  <parent>
++    <groupId>org.kitesdk</groupId>
++    <artifactId>kite-morphlines</artifactId>
++    <version>1.1.1-SNAPSHOT</version>
++  </parent>
++
++  <artifactId>kite-morphlines-metrics-scalable</artifactId>
++  <name>Kite Morphlines Metrics Scalable</name>
++
++  <dependencies>
++  
++    <dependency>
++      <groupId>com.tdunning</groupId>
++      <artifactId>t-digest</artifactId>
++      <version>3.1</version>
++    </dependency>
++
++    <dependency> <!-- see http://metrics.codahale.com -->
++      <groupId>com.codahale.metrics</groupId>
++      <artifactId>metrics-core</artifactId>
++    </dependency>
++    
++    <dependency> <!-- see https://code.google.com/p/guava-libraries -->
++      <groupId>com.google.guava</groupId>
++      <artifactId>guava</artifactId>
++    </dependency>    
++    
++    <dependency>
++      <groupId>junit</groupId>
++      <artifactId>junit</artifactId>
++      <scope>test</scope>
++    </dependency>
++
++    <dependency> <!-- see http://www.slf4j.org -->
++      <groupId>org.slf4j</groupId>
++      <artifactId>slf4j-log4j12</artifactId>
++      <scope>test</scope>
++    </dependency>
++
++  </dependencies>
++
++</project>
+diff --git a/kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/MetricBuilders.java b/kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/MetricBuilders.java
+new file mode 100644
+index 0000000..da6434c
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/MetricBuilders.java
+@@ -0,0 +1,181 @@
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.morphline.metrics.scalable;
++
++import java.util.concurrent.TimeUnit;
++
++import com.codahale.metrics.Counter;
++import com.codahale.metrics.ExponentiallyDecayingReservoir;
++import com.codahale.metrics.Histogram;
++import com.codahale.metrics.Meter;
++import com.codahale.metrics.Metric;
++import com.codahale.metrics.MetricRegistry;
++import com.codahale.metrics.SlidingTimeWindowReservoir;
++import com.codahale.metrics.SlidingWindowReservoir;
++import com.codahale.metrics.Timer;
++
++/**
++ * Utilities for codahale metrics library.
++ */
++class MetricBuilders {
++
++  public Counter getCounter(MetricRegistry registry, String name) {
++    return getOrAdd(registry, name, COUNTERS);
++  }
++
++  public Meter getMeter(MetricRegistry registry, String name) {
++    return getOrAdd(registry, name, METERS);
++  }
++
++  public Histogram getHistogram(MetricRegistry registry, String name) {
++    return getOrAdd(registry, name, HISTOGRAMS);
++  }
++
++  public Timer getTimer(MetricRegistry registry, String name) {
++    return getOrAdd(registry, name, TIMERS);
++  }
++
++  public Histogram getSlidingWindowHistogram(MetricRegistry registry, String name, final int size) {
++    return getOrAdd(registry, name, new MetricBuilder<Histogram>() {
++      @Override
++      public Histogram newMetric() {
++        return new Histogram(new SlidingWindowReservoir(size));
++      }
++      @Override
++      public boolean isInstance(Metric metric) {
++        return Histogram.class.isInstance(metric);
++      }          
++    });
++  }
++
++  public Histogram getSlidingTimeWindowHistogram(MetricRegistry registry, String name, final long window,
++      final TimeUnit windowUnit) {
++    return getOrAdd(registry, name, new MetricBuilder<Histogram>() {
++      @Override
++      public Histogram newMetric() {
++        return new Histogram(new SlidingTimeWindowReservoir(window, windowUnit));
++      }
++      @Override
++      public boolean isInstance(Metric metric) {
++        return Histogram.class.isInstance(metric);
++      }          
++    });
++  }
++
++  public Timer getSlidingWindowTimer(MetricRegistry registry, String name, final int size) {
++    return getOrAdd(registry, name, new MetricBuilder<Timer>() {
++      @Override
++      public Timer newMetric() {
++        return new Timer(new SlidingWindowReservoir(size));
++      }
++      @Override
++      public boolean isInstance(Metric metric) {
++        return Timer.class.isInstance(metric);
++      }          
++    });
++  }
++
++  public Timer getSlidingTimeWindowTimer(MetricRegistry registry, String name, final long window,
++      final TimeUnit windowUnit) {
++    return getOrAdd(registry, name, new MetricBuilder<Timer>() {
++      @Override
++      public Timer newMetric() {
++        return new Timer(new SlidingTimeWindowReservoir(window, windowUnit));
++      }
++      @Override
++      public boolean isInstance(Metric metric) {
++        return Timer.class.isInstance(metric);
++      }          
++    });
++  }
++
++  @SuppressWarnings("unchecked")
++  protected <T extends Metric> T getOrAdd(MetricRegistry registry, String name, MetricBuilder<T> builder) {
++    final Metric metric = registry.getMetrics().get(name);
++    if (builder.isInstance(metric)) {
++      return (T) metric;
++    } else if (metric == null) {
++      try {
++        return registry.register(name, builder.newMetric());
++      } catch (IllegalArgumentException e) {
++        final Metric added = registry.getMetrics().get(name);
++        if (builder.isInstance(added)) {
++          return (T) added;
++        }
++      }
++    }
++    throw new IllegalArgumentException(name + " is already used for a different type of metric");
++  }
++
++  private static final MetricBuilder<Counter> COUNTERS = new MetricBuilder<Counter>() {
++    @Override
++    public Counter newMetric() {
++      return new Counter();
++    }
++
++    @Override
++    public boolean isInstance(Metric metric) {
++      return Counter.class.isInstance(metric);
++    }
++  };
++
++  private static final MetricBuilder<Meter> METERS = new MetricBuilder<Meter>() {
++    @Override
++    public Meter newMetric() {
++      return new Meter();
++    }
++
++    @Override
++    public boolean isInstance(Metric metric) {
++      return Meter.class.isInstance(metric);
++    }
++  };
++
++  private static final MetricBuilder<Histogram> HISTOGRAMS = new MetricBuilder<Histogram>() {
++    @Override
++    public Histogram newMetric() {
++      return new Histogram(new ExponentiallyDecayingReservoir());
++    }
++
++    @Override
++    public boolean isInstance(Metric metric) {
++      return Histogram.class.isInstance(metric);
++    }
++  };
++
++  private static final MetricBuilder<Timer> TIMERS = new MetricBuilder<Timer>() {
++    @Override
++    public Timer newMetric() {
++      return new Timer();
++    }
++
++    @Override
++    public boolean isInstance(Metric metric) {
++      return Timer.class.isInstance(metric);
++    }
++  };
++
++  
++  ///////////////////////////////////////////////////////////////////////////////
++  // Nested classes:
++  ///////////////////////////////////////////////////////////////////////////////
++  protected interface MetricBuilder<T extends Metric> {
++
++    T newMetric();
++
++    boolean isInstance(Metric metric);
++  }
++}
+diff --git a/kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/ScalableStatistics.java b/kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/ScalableStatistics.java
+new file mode 100644
+index 0000000..1372b6b
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/ScalableStatistics.java
+@@ -0,0 +1,322 @@
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.morphline.metrics.scalable;
++
++import java.lang.reflect.Method;
++import java.lang.reflect.Modifier;
++import java.nio.ByteBuffer;
++import java.util.Arrays;
++
++import com.google.common.base.Charsets;
++import com.google.common.base.Preconditions;
++import com.tdunning.math.stats.AVLTreeDigest;
++//import com.tdunning.math.stats.ArrayDigest;
++//import com.tdunning.math.stats.MergingDigest;
++//import com.tdunning.math.stats.TreeDigest;
++import com.tdunning.math.stats.TDigest;
++
++/**
++ * Given an arbitrarily large dataset, this class maintains descriptive statistics in O(1) memory,
++ * and also maintains approximate quantiles (e.g. percentiles) requiring little memory per
++ * https://github.com/tdunning/t-digest
++ * 
++ * For small datasets a data structure and algorithm is used that computes exact quantiles (without
++ * approximation). After N values have been inserted we switch to the approximate algorithm.
++ * 
++ * The class can be serialized and deserialized and multiple instances can be merged, e.g. the
++ * independent stats and quantiles of each separate MapReduce task can be merged into a single
++ * overall job summary statistic.
++ */
++public final class ScalableStatistics {
++  
++  // for exact basic descriptive stats:
++  private long count = 0; 
++  private double min = Double.MAX_VALUE;
++  private double max = -Double.MAX_VALUE;
++  private double sum = 0;
++  private double sumOfSquares = 0;
++    
++  // for approximate quantiles:
++  private TDigest tdigest;
++
++  // for exact quantiles:
++  private int exactQuantilesThreshold;
++  private double[] exactValues;
++  private int numExactValues = 0;
++  private boolean areExactValuesSorted = false;
++  
++  private static final int EXACT_QUANTILES_THRESHOLD = 100;
++  private static final int COMPRESSION = 100;
++  private static final int MAGIC_CODE = 384979084; // for sanity checks of data format
++  private static final int MAX_DEFAULT_ARRAY_LENGTH = 0;
++  
++  /** Constructs an instance with default parameters */
++  public ScalableStatistics() {
++    this(EXACT_QUANTILES_THRESHOLD);
++  }
++  
++  ScalableStatistics(int exactQuantilesThreshold) {
++    this(exactQuantilesThreshold, getDefaultTDigest());
++  }
++  
++  /**
++   * Constructs an instance with given parameters.
++   * 
++   * @param exactQuantilesThreshold
++   *          Determines after how many added values to dynamically switch the algorithm from exact
++   *          quantiles to approximate quantiles. Must be greater or equal to zero. Set this
++   *          parameter to zero if you want to always maintain approximate quantiles. In practise,
++   *          the approximation error is more noticeable on small data sets than on big data sets, so to
++   *          guarantee high quality quantiles even for small datasets you might want to set this
++   *          parameter to something like 100, which requires about 800 Bytes RAM, proportional to
++   *          exactQuantilesThreshold.
++   * @param tdigest
++   *          The algorihm to use for maintaining approximate quantiles. Must not be null.
++   */
++  public ScalableStatistics(int exactQuantilesThreshold, TDigest tdigest) {
++    Preconditions.checkNotNull(tdigest);
++    this.tdigest = tdigest;
++    Preconditions.checkArgument(exactQuantilesThreshold >= 0);
++    this.exactQuantilesThreshold = exactQuantilesThreshold;
++    this.exactValues = new double[Math.min(exactQuantilesThreshold, MAX_DEFAULT_ARRAY_LENGTH)];
++  }
++  
++  private static TDigest getDefaultTDigest() {
++    //return TDigest.createDigest(COMPRESSION);
++    return new AVLTreeDigest(COMPRESSION);
++    //return new TreeDigest(COMPRESSION);
++    //return new ArrayDigest(4, COMPRESSION);
++    //return new MergingDigest(COMPRESSION);    
++  }
++  
++  /** Adds the given data value to the data set */
++  public void add(double value) {
++    count++;
++    min = Math.min(min, value);
++    max = Math.max(max, value);
++    sum += value;
++    sumOfSquares += value * value;
++    addQuantileValue(value);
++  }
++  
++  private void addQuantileValue(double value) {
++    if (exactValues != null && numExactValues == exactQuantilesThreshold) { 
++      // dynamically switch algorithm from exact quantiles to approximate quantiles
++      assert exactValues.length == numExactValues;
++      for (double v : exactValues) {
++        tdigest.add(v);
++      }
++      exactValues = null;
++    }
++    
++    if (exactValues != null) {
++      if (numExactValues == exactValues.length) { // grow array
++        int newCapacity = Math.min(exactQuantilesThreshold, (numExactValues * 3) / 2 + 1);
++        exactValues = Arrays.copyOf(exactValues, newCapacity);
++      }
++      exactValues[numExactValues++] = value;
++      areExactValuesSorted = false;
++    } else {
++      tdigest.add(value);
++    }    
++  }
++  
++  /**
++   * Merges another statistics instance into this instance. For example, this way the independent
++   * stats and quantiles of each separate MapReduce task can be merged into a single overall job
++   * summary statistic.
++   */
++  public void add(ScalableStatistics other) {
++    count += other.count;
++    min = Math.min(min, other.min);
++    max = Math.max(max, other.max);
++    sum += other.sum;
++    sumOfSquares += other.sumOfSquares;
++    tdigest.add(other.tdigest);
++    if (other.exactValues != null) {
++      for (int i = 0; i < other.numExactValues; i++) {
++        addQuantileValue(other.exactValues[i]);
++      }
++    }
++  }
++  
++  /** Serializes the data structure into a byte array */
++  public byte[] asBytes() {
++    byte[] className = tdigest.getClass().getName().getBytes(Charsets.UTF_8);
++    int vlen = exactValues == null ? 0 : numExactValues;
++    ByteBuffer buf = ByteBuffer.allocate(4 + 8*5 + 4 + 4 + 8*vlen + 4 + className.length + tdigest.byteSize() + 4);
++    buf.putInt(MAGIC_CODE); // for sanity checks
++    
++    // write basic descriptive stats
++    buf.putLong(count);
++    buf.putDouble(min);
++    buf.putDouble(max);
++    buf.putDouble(sum);
++    buf.putDouble(sumOfSquares);
++    
++    // write exact values, if any
++    buf.putInt(exactQuantilesThreshold);
++    buf.putInt(exactValues == null ? -1 : numExactValues);
++    if (exactValues != null) {
++      for (int i = 0; i < numExactValues; i++) {
++        buf.putDouble(exactValues[i]);
++      }
++    }
++    
++    // write tdigest
++    buf.putInt(className.length);
++    buf.put(className);
++    tdigest.asBytes(buf);
++    
++    buf.putInt(MAGIC_CODE); // for sanity checks
++    Preconditions.checkArgument(buf.position() == buf.capacity());
++    return buf.array();
++  }
++  
++  /** Derializes the data structure from a byte array */
++  public static ScalableStatistics fromBytes(byte[] bytes) {
++    Preconditions.checkArgument(bytes.length > 0);
++    ByteBuffer buf = ByteBuffer.wrap(bytes);
++    ScalableStatistics stats = new ScalableStatistics();
++    Preconditions.checkArgument(buf.getInt() == MAGIC_CODE);
++    
++    // read basic descriptive stats
++    stats.count = buf.getLong();
++    stats.min = buf.getDouble();
++    stats.max = buf.getDouble();
++    stats.sum = buf.getDouble();
++    stats.sumOfSquares = buf.getDouble();
++    
++    // read exact values, if any
++    stats.exactQuantilesThreshold = buf.getInt();
++    int vlen = buf.getInt();
++    if (vlen >= 0) {
++      stats.numExactValues = vlen;
++      stats.exactValues = new double[vlen];
++      for (int i = 0; i < vlen; i++) {
++        stats.exactValues[i] = buf.getDouble();
++      }
++    } else {
++      stats.exactValues = null;
++    }
++    
++    // read tdigest
++    byte[] classNameBytes = new byte[buf.getInt()];
++    buf.get(classNameBytes);
++    String className = new String(classNameBytes, Charsets.UTF_8);
++    try {
++      Method method = Class.forName(className).getMethod("fromBytes", ByteBuffer.class);
++      Preconditions.checkArgument(Modifier.isStatic(method.getModifiers()));
++      stats.tdigest = (TDigest) method.invoke(null, buf);
++    } catch (Exception e) {
++      throw new RuntimeException(e);
++    }
++    
++    Preconditions.checkArgument(buf.getInt() == MAGIC_CODE);
++    Preconditions.checkArgument(buf.position() == buf.capacity());
++    return stats;
++  }
++  
++  /**
++   * Returns an independent copy of this instance that doesn't share backing storage with this
++   * instance.
++   */
++  public ScalableStatistics copy() {
++    return fromBytes(asBytes());
++  }
++
++  /** Returns the number of values that have been added so far */
++  public long getCount() {
++    return count;
++  }
++
++  /** Returns the maximum value of the data set */
++  public double getMax() {
++    return max;
++  }
++
++  /** Returns the minimum value of the data set */
++  public double getMin() {
++    return min;
++  }
++
++  /** Returns the sum of the values in the data set */
++  public double getSum() {
++    return sum;
++  }
++
++  /** Returns the sum of the squared values in the data set */
++  public double getSumOfSquares() {
++    return sumOfSquares;
++  }
++  
++  /** Returns the mean of the data set */
++  public double getMean() {
++    return getSum() / getCount();
++  }
++  
++  /** Returns the standard deviation of the data set */
++  public double getStandardDeviation() {
++    double variance = (getSumOfSquares() - getMean() * getSum()) / getCount();
++    return Math.sqrt(variance);
++  }
++  
++  /**
++   * Returns the quantile of the data set.
++   * 
++   * @param quantile
++   *          must satisfy 0.0 <= quantile <= 1.0. For example to read the 99% percentile pass
++   *          quantile = 0.99
++   */  
++  public double getQuantile(double quantile) {    
++    if (exactValues != null) {
++      return getExactQuantile(quantile);
++    } else {
++      return tdigest.quantile(quantile);
++    }
++  }
++
++  private double getExactQuantile(double quantile) {
++    if (quantile < 0.0 || quantile > 1.0) {
++      throw new IllegalArgumentException("There must hold 0.0 <= quantile <= 1.0 for: " + quantile);
++    }
++    if (numExactValues == 0) {
++      return Double.NaN;
++    }
++    if (!areExactValuesSorted) {
++      Arrays.sort(exactValues, 0, numExactValues);
++      areExactValuesSorted = true;
++    }
++    double i = (numExactValues - 1) * quantile;
++    int j = (int)i;
++    if (j == numExactValues - 1) {
++      return exactValues[j];
++    } else { // interpolate
++      double diff = i - j ;
++      double low = exactValues[j];
++      double high = exactValues[j + 1];
++      return low + diff * (high - low);
++    }
++  }
++  
++  @Override
++  public String toString() {
++    return "count:" + getCount() + ", min:" + getMin() + ", max:" + getMax() + ", mean:" + getMean() + ", sum:"
++        + getSum() + ", stddev:" + getStandardDeviation() + ", median:" + getQuantile(0.5) + ", p75:"
++        + getQuantile(0.75) + ", p95:" + getQuantile(0.95) + ", p98:" + getQuantile(0.98) + ", p99:" + getQuantile(0.99)
++        + ", p999:" + getQuantile(0.999);
++  }
++}
+diff --git a/kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/TDigestMetricBuilders.java b/kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/TDigestMetricBuilders.java
+new file mode 100644
+index 0000000..3f282d7
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/TDigestMetricBuilders.java
+@@ -0,0 +1,62 @@
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.morphline.metrics.scalable;
++
++import com.codahale.metrics.Histogram;
++import com.codahale.metrics.Metric;
++import com.codahale.metrics.MetricRegistry;
++import com.codahale.metrics.Timer;
++
++/**
++ * Convenience classes for codahale metrics using aggregations based on t-digest algorithm.
++ */
++class TDigestMetricBuilders extends MetricBuilders {
++  
++  @Override
++  public Histogram getHistogram(MetricRegistry registry, String name) {
++    return getOrAdd(registry, name, HISTOGRAMS);
++  }
++  
++  @Override
++  public Timer getTimer(MetricRegistry registry, String name) {
++    return getOrAdd(registry, name, TIMERS);
++  }
++  
++  private static final MetricBuilder<Histogram> HISTOGRAMS = new MetricBuilder<Histogram>() {
++    @Override
++    public Histogram newMetric() {
++      return new Histogram(new TDigestReservoir());
++    }
++
++    @Override
++    public boolean isInstance(Metric metric) {
++      return Histogram.class.isInstance(metric);
++    }
++  };
++
++  private static final MetricBuilder<Timer> TIMERS = new MetricBuilder<Timer>() {
++    @Override
++    public Timer newMetric() {
++      return new Timer(new TDigestReservoir());
++    }
++
++    @Override
++    public boolean isInstance(Metric metric) {
++      return Timer.class.isInstance(metric);
++    }
++  };
++ 
++}
+diff --git a/kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/TDigestReservoir.java b/kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/TDigestReservoir.java
+new file mode 100644
+index 0000000..c6043b5
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-metrics-scalable/src/main/java/org/kitesdk/morphline/metrics/scalable/TDigestReservoir.java
+@@ -0,0 +1,135 @@
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.morphline.metrics.scalable;
++
++import java.io.OutputStream;
++
++import com.codahale.metrics.Histogram;
++import com.codahale.metrics.Reservoir;
++import com.codahale.metrics.Snapshot;
++import com.codahale.metrics.Timer;
++import com.google.common.base.Preconditions;
++
++/**
++ * Enables codahale {@link Histogram} and {@link Timer} metrics to use
++ * {@link ScalableStatistics} as a backing data structure.
++ */
++public final class TDigestReservoir implements Reservoir {
++
++  private final ScalableStatistics stats;
++  
++  public TDigestReservoir() {
++    this(new ScalableStatistics());
++  }
++
++  public TDigestReservoir(ScalableStatistics stats) {
++    Preconditions.checkNotNull(stats);
++    this.stats = stats;
++  }
++  
++  @Override
++  synchronized public int size() {
++    long size = stats.getCount();
++    Preconditions.checkArgument(size <= Integer.MAX_VALUE);
++    return (int) size;
++  }
++
++  @Override
++  synchronized public void update(long value) {
++    stats.add(value);
++  }
++
++  @Override
++  synchronized public Snapshot getSnapshot() {
++    return new TDigestSnapshot(stats.copy());
++  }
++  
++  
++  ///////////////////////////////////////////////////////////////////////////////
++  // Nested classes:
++  ///////////////////////////////////////////////////////////////////////////////
++  public static final class TDigestSnapshot extends Snapshot {
++
++    private final ScalableStatistics stats;
++    
++    private TDigestSnapshot(ScalableStatistics stats) {
++      super(new long[0]); // FIXME change to super() with metrics-core-3.1.x
++      this.stats = stats;
++    }
++    
++    public ScalableStatistics getScalableStatistics() {
++      return stats;
++    }
++        
++    @Override
++    public int size() {
++      long size = stats.getCount();
++      Preconditions.checkArgument(size <= Integer.MAX_VALUE);
++      return (int) size;
++    }
++
++    @Override
++    public long getMax() {
++      if (size() == 0) {
++        return 0;
++      }
++      return Math.round(stats.getMax());
++    }
++
++    @Override
++    public long getMin() {
++      if (size() == 0) {
++        return 0;
++      }
++      return Math.round(stats.getMin());
++    }
++
++    @Override
++    public double getMean() {
++      if (size() == 0) {
++        return 0;
++      }
++      return stats.getMean();
++    }
++
++    @Override
++    public double getStdDev() {
++      if (size() == 0) {
++        return 0;
++      }
++      return stats.getStandardDeviation();
++    }
++
++    @Override
++    public double getValue(double quantile) {
++      if (size() == 0) {
++        return 0;
++      }
++      return stats.getQuantile(quantile);
++    }
++    
++    @Override
++    public long[] getValues() {
++      throw new UnsupportedOperationException();
++    }
++
++    @Override
++    public void dump(OutputStream output) {
++      throw new UnsupportedOperationException();
++    }
++
++  }
++}
+diff --git a/kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/ScalableStatisticsTest.java b/kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/ScalableStatisticsTest.java
+new file mode 100644
+index 0000000..d750a58
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/ScalableStatisticsTest.java
+@@ -0,0 +1,152 @@
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.morphline.metrics.scalable;
++
++import java.util.Random;
++
++import org.junit.Assert;
++import org.junit.Test;
++import org.kitesdk.morphline.metrics.scalable.ScalableStatistics;
++
++import com.tdunning.math.stats.AVLTreeDigest;
++import com.tdunning.math.stats.TDigest;
++
++public class ScalableStatisticsTest extends Assert {
++
++  @Test
++  public void testBasic() throws Exception {
++    double maxDelta = 0.00000000001;
++    assertEquals(0, new ScalableStatistics().getCount());
++    
++    for (int i = 0; i < 2; i++) {
++      int exactQuantilesThreshold = i == 0 ? 3 : 10000;
++      ScalableStatistics stats = new ScalableStatistics(exactQuantilesThreshold);
++      assertEquals(Double.NaN, stats.getQuantile(0.5), maxDelta);
++      try {
++        stats.getQuantile(1.1);
++        fail();
++      } catch (IllegalArgumentException e) {
++        ; // expected
++      }
++      
++      try {
++        stats.getQuantile(-0.1);
++        fail();
++      } catch (IllegalArgumentException e) {
++        ; // expected
++      }
++      stats.copy();      
++      stats.add(0);
++      assertEquals(0.0, stats.getQuantile(1.0), maxDelta);
++      stats.copy();
++      
++      ScalableStatistics stats3 = new ScalableStatistics(exactQuantilesThreshold);
++      stats3.add(-10);
++      stats3.add(70);
++      stats3.add(stats);
++      //System.out.println(stats3);
++      String expected3 = "count:3, min:-10.0, max:70.0, mean:20.0, sum:60.0, stddev:35.59026084010437, median:0.0, p75:35.0, p95:62.99999999999999, p98:67.2, p99:68.6, p999:69.86";
++      assertEquals(expected3, stats3.toString());
++      
++      double max = 40.0;
++      stats.add(max);
++      assertEquals(max, stats.getQuantile(1.0), maxDelta);
++      stats.copy();      
++      stats.add(30);
++      assertEquals(max, stats.getQuantile(1.0), maxDelta);
++      stats.add(20);
++      assertEquals(max, stats.getQuantile(1.0), maxDelta);
++      stats.add(10);
++      assertEquals(max, stats.getQuantile(1.0), maxDelta);
++      assertEquals(5, stats.getCount());
++      //System.out.println("iter="+i + ": " + stats.toString());
++      String expected = "count:5, min:0.0, max:40.0, mean:20.0, sum:100.0, stddev:14.142135623730951, median:20.0, p75:30.0, p95:38.0, p98:39.2, p99:39.6, p999:39.96";
++      assertEquals(expected, stats.toString());
++      ScalableStatistics stats2 = stats.copy();
++      assertEquals(expected, stats2.toString());
++      stats.add(stats2);
++      assertEquals(10, stats.getCount());
++      //System.out.println(stats.toString());
++      expected = "count:10, min:0.0, max:40.0, mean:20.0, sum:200.0, stddev:14.142135623730951, median:20.0, p75:30.0, p95:40.0, p98:40.0, p99:40.0, p999:40.0";
++      assertEquals(expected, stats.toString());
++    }
++  }
++  
++  @Test
++  public void testNISTExample() {
++    double[] values = new double[] { 95.1772, 95.1567, 95.1937, 95.1959, 95.1442, 95.0610, 95.1591, 95.1195, 95.1772,
++        95.0925, 95.1990, 95.1682 };
++    for (int i = 0; i < 2; i++) {
++      int exactQuantilesThreshold = i == 0 ? 3 : 10000;
++      ScalableStatistics stats = new ScalableStatistics(exactQuantilesThreshold);
++      for (double value : values) {
++        stats.add(value);
++      }
++      assertEquals(95.19568, stats.getQuantile(0.9), 0);
++      assertEquals(95.1990, stats.getQuantile(0.999), 1.0e-4);
++      assertEquals(95.1990, stats.getQuantile(1.0), 0);
++    }
++  }
++
++  @Test
++  public void testMinMaxWithNegativeValue() throws Exception {
++    double maxDelta = 0.00000000001;
++    ScalableStatistics stats = new ScalableStatistics();
++    stats.add(-5);
++    assertEquals(-5, stats.getMin(), maxDelta);
++    assertEquals(-5, stats.getMax(), maxDelta);
++  }
++  
++  @Test
++  public void testAccuracy() throws Exception {
++    testAccuracyInternal(0.99, 10,     0.0, null);
++    testAccuracyInternal(0.99, 1000,   0.000000000000001, null);
++    testAccuracyInternal(0.99, 10000,  0.0001, null);
++    
++    testAccuracyInternal(0.90, 10,     0.000000000000001, null);
++    testAccuracyInternal(0.90, 1000,   0.001, null);
++    testAccuracyInternal(0.90, 10000,  0.01, null);
++    
++    // same params but with custom tdigest with higher accuracy:
++    testAccuracyInternal(0.99, 10,     0.0, createCustomTDigest());
++    testAccuracyInternal(0.99, 1000,   0.000000000000001, createCustomTDigest());
++    testAccuracyInternal(0.99, 10000,  0.000000000000001, createCustomTDigest());
++    
++    testAccuracyInternal(0.90, 10,     0.000000000000001, createCustomTDigest());
++    testAccuracyInternal(0.90, 1000,   0.000000000000001, createCustomTDigest());
++    testAccuracyInternal(0.90, 10000,  0.001, createCustomTDigest());
++  }
++  
++  private TDigest createCustomTDigest() {
++    return new AVLTreeDigest(400);
++  }
++
++  private void testAccuracyInternal(double quantile, int size, double maxDelta, TDigest tdigest) {
++    Random rand = new Random(12345);
++    ScalableStatistics approx = 
++        tdigest == null ? 
++            new ScalableStatistics(0) : 
++            new ScalableStatistics(0, tdigest);
++    ScalableStatistics exact  = new ScalableStatistics(size + 3);
++    for (int i = 0; i < size; i++) {
++      double value = rand.nextDouble();
++      exact.add(value);
++      approx.add(value);
++      assertEquals(exact.getQuantile(quantile), approx.getQuantile(quantile), maxDelta);
++    }
++  }
++
++}
+diff --git a/kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/TDigestReservoirTest.java b/kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/TDigestReservoirTest.java
+new file mode 100644
+index 0000000..e323c80
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-metrics-scalable/src/test/java/org/kitesdk/morphline/metrics/scalable/TDigestReservoirTest.java
+@@ -0,0 +1,43 @@
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.morphline.metrics.scalable;
++
++import org.junit.Assert;
++import org.junit.Test;
++import org.kitesdk.morphline.metrics.scalable.TDigestReservoir;
++
++import com.codahale.metrics.Reservoir;
++
++public class TDigestReservoirTest extends Assert {
++
++  @Test
++  public void testBasic() throws Exception {
++    double maxDelta = 0.00000000001;
++    Reservoir reservoir = new TDigestReservoir();
++    assertEquals(0, reservoir.size());
++    reservoir.update(100);
++    reservoir.update(101);
++    reservoir.update(300);
++    assertEquals(3, reservoir.size());
++    assertEquals(3, reservoir.getSnapshot().size());    
++    assertEquals(100, reservoir.getSnapshot().getMin());    
++    assertEquals(300, reservoir.getSnapshot().getMax());    
++    assertEquals(101, reservoir.getSnapshot().getMedian(), maxDelta);    
++    assertEquals(101, reservoir.getSnapshot().getValue(0.5), maxDelta);    
++    assertEquals(501.0 / 3, reservoir.getSnapshot().getMean(), maxDelta);    
++  }
++  
++}
+diff --git a/kite-morphlines/pom.xml b/kite-morphlines/pom.xml
+index fbd2d27..b474afb 100644
+--- a/kite-morphlines/pom.xml
++++ b/kite-morphlines/pom.xml
+@@ -31,6 +31,7 @@
+     <module>kite-morphlines-avro</module>
+     <module>kite-morphlines-json</module>
+     <module>kite-morphlines-maxmind</module>
++    <module>kite-morphlines-metrics-scalable</module>
+     <module>kite-morphlines-metrics-servlets</module>
+     <module>kite-morphlines-protobuf</module>
+     <module>kite-morphlines-saxon</module>
+-- 
+1.7.9.5
+

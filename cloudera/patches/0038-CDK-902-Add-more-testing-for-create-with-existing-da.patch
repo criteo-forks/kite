@@ -1,11 +1,12 @@
 From 0d297677f02deb7e2945b692f178bc0ae927ad2a Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Thu, 2 Apr 2015 10:42:46 -0700
-Subject: [PATCH 038/115] CDK-902: Add more testing for create with existing data.
+Subject: [PATCH 038/140] CDK-902: Add more testing for create with existing
+ data.
 
 ---
  .../data/spi/filesystem/FileSystemDataset.java     |    2 +-
- .../spi/hive/HiveManagedDatasetRepository.java     |    6 ++-
+ .../spi/hive/HiveManagedDatasetRepository.java     |    6 +-
  .../org/kitesdk/data/spi/hive/MetaStoreUtil.java   |   32 +++++++++
  .../commands/TestCreateDatasetCommandCluster.java  |   73 ++++++++++++++++++++
  .../TestCreateDatasetWithExistingData.java         |   18 +++++
@@ -261,5 +262,5 @@ index a6582bf..ad82858 100644
      command.datasets = Lists.newArrayList(existingPartitionedURI);
      command.run();
 -- 
-1.7.0.4
+1.7.9.5
 

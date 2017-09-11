@@ -1,10 +1,11 @@
 From a57154c67d5e6ecf2fb4cb526d65b108cf770ba3 Mon Sep 17 00:00:00 2001
 From: Wolfgang Hoschek <whoschek@cloudera.com>
 Date: Tue, 28 Apr 2015 11:23:01 +0300
-Subject: [PATCH 017/115] CDK-994: The morphline grok command should also support multiple groups that have the same name
+Subject: [PATCH 017/140] CDK-994: The morphline grok command should also
+ support multiple groups that have the same name
 
 ---
- .../org/kitesdk/morphline/stdlib/GrokBuilder.java  |   24 +++++++++----
+ .../org/kitesdk/morphline/stdlib/GrokBuilder.java  |   24 ++++++++-----
  .../org/kitesdk/morphline/api/MorphlineTest.java   |   15 ++++++++
  .../grokWithMultipleGroupsWithSameName.conf        |   36 ++++++++++++++++++++
  3 files changed, 67 insertions(+), 8 deletions(-)
@@ -120,5 +121,5 @@ index 0000000..e4a96ae
 +  }
 +]
 -- 
-1.7.0.4
+1.7.9.5
 

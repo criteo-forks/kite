@@ -1,15 +1,15 @@
 From 0fb8052b3d31cb4e0046253b8aecb5208bf1084a Mon Sep 17 00:00:00 2001
 From: Tom White <tom@cloudera.com>
 Date: Tue, 19 May 2015 15:40:37 +0100
-Subject: [PATCH 061/115] CDK-988. Address Ryan's feedback.
+Subject: [PATCH 061/140] CDK-988. Address Ryan's feedback.
 
 ---
  .../java/org/kitesdk/data/PartitionStrategy.java   |   16 ++++++------
- .../kitesdk/data/spi/PartitionStrategyParser.java  |   20 +++++++-------
+ .../kitesdk/data/spi/PartitionStrategyParser.java  |   20 +++++++--------
  .../partition/FixedLongRangeFieldPartitioner.java  |   26 ++++++++++----------
  .../data/spi/partition/PartitionFunctions.java     |    2 +-
  .../data/spi/TestPartitionStrategyParser.java      |   10 ++++----
- .../TestFixedLongRangeFieldPartitioner.java        |   12 ++++----
+ .../TestFixedLongRangeFieldPartitioner.java        |   12 ++++-----
  6 files changed, 43 insertions(+), 43 deletions(-)
 
 diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionStrategy.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/PartitionStrategy.java
@@ -262,5 +262,5 @@ index fa8b4a5..8ae2a76 100644
  
  }
 -- 
-1.7.0.4
+1.7.9.5
 

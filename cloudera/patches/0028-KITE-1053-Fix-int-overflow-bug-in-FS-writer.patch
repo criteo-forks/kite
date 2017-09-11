@@ -1,7 +1,7 @@
 From 73bde7cb74e781acfff7ce487d8cb4ecc438819f Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Mon, 27 Jul 2015 14:32:21 -0700
-Subject: [PATCH 028/115] KITE-1053: Fix int overflow bug in FS writer.
+Subject: [PATCH 028/140] KITE-1053: Fix int overflow bug in FS writer.
 
 Keeping the number of records written in an int caused a bug where
 writing more than Integer.MAX_VALUE records (~2B) would overflow the
@@ -9,7 +9,7 @@ counter and the check to see whether any records had been written would
 fail because count is less than 0. The fix is to use a long.
 ---
  .../data/spi/filesystem/FileSystemWriter.java      |    2 +-
- 1 files changed, 1 insertions(+), 1 deletions(-)
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemWriter.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemWriter.java
 index 96f1295..9210f81 100644
@@ -25,5 +25,5 @@ index 96f1295..9210f81 100644
    protected final FileSystem fs;
    protected FileAppender<E> appender;
 -- 
-1.7.0.4
+1.7.9.5
 

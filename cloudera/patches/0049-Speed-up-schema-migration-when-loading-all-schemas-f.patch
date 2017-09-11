@@ -1,7 +1,8 @@
 From db949ea3772fefaaf9ebe3cf03f248a1baa8355d Mon Sep 17 00:00:00 2001
 From: Prasanna Rajaperumal <prasanna@cloudera.com>
 Date: Mon, 13 Apr 2015 15:58:39 -0700
-Subject: [PATCH 049/115] Speed up schema migration when loading all schemas from a directory
+Subject: [PATCH 049/140] Speed up schema migration when loading all schemas
+ from a directory
 
 The following changes are made
 1. kicking off HbaseAdmin.createTableAsync for a bunch of tables and waiting for HBaseAdmin.isTableAvailable for all the tables is much quicker. The SchemaTool waits for a maximum of 10 minutes for all the tables to become available which seems like a very legible buffer.
@@ -375,5 +376,5 @@ index e20fbd2..90c2d0a 100644
     * 
     * @param schemaFile
 -- 
-1.7.0.4
+1.7.9.5
 

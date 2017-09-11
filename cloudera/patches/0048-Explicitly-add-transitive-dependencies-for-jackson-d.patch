@@ -1,12 +1,13 @@
 From 7b2ace5780d9510014f9f1a22e5004774407eb35 Mon Sep 17 00:00:00 2001
 From: Tom White <tom@cloudera.com>
 Date: Thu, 16 Apr 2015 15:45:35 +0100
-Subject: [PATCH 048/115] Explicitly add transitive dependencies for jackson-databind.
+Subject: [PATCH 048/140] Explicitly add transitive dependencies for
+ jackson-databind.
 
 ---
  kite-data/kite-data-core/pom.xml |    8 ++++++++
  pom.xml                          |   10 ++++++++++
- 2 files changed, 18 insertions(+), 0 deletions(-)
+ 2 files changed, 18 insertions(+)
 
 diff --git a/kite-data/kite-data-core/pom.xml b/kite-data/kite-data-core/pom.xml
 index c250940..9e1648c 100644
@@ -49,5 +50,5 @@ index b88215c..642fbad 100644
        <!-- Maven plugin -->
        <dependency>
 -- 
-1.7.0.4
+1.7.9.5
 

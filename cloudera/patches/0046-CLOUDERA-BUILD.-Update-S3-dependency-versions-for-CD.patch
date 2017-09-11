@@ -1,7 +1,8 @@
 From b167c5d173e203d79b7cf0636d8dad47158c8e26 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Tue, 25 Aug 2015 15:19:59 -0700
-Subject: [PATCH 046/115] CLOUDERA-BUILD. Update S3 dependency versions for CDH.
+Subject: [PATCH 046/140] CLOUDERA-BUILD. Update S3 dependency versions for
+ CDH.
 
 ---
  kite-data/pom.xml |    4 ++--
@@ -37,5 +38,5 @@ index f85fbf6..0766e61 100644
      <!-- Plugin versions -->
      <vers.doxia-module-markdown>1.4</vers.doxia-module-markdown>
 -- 
-1.7.0.4
+1.7.9.5
 

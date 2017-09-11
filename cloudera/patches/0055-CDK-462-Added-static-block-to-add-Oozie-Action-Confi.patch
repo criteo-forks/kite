@@ -1,11 +1,12 @@
 From ff862140787ed2027a3ef2e348977d09ee9e68f9 Mon Sep 17 00:00:00 2001
 From: Micah Whitacre <micah.whitacre@cerner.com>
 Date: Wed, 11 Mar 2015 11:55:43 -0500
-Subject: [PATCH 055/115] CDK-462: Added static block to add Oozie Action Config to Configuration if present.
+Subject: [PATCH 055/140] CDK-462: Added static block to add Oozie Action
+ Config to Configuration if present.
 
 ---
  .../org/kitesdk/data/spi/DefaultConfiguration.java |   15 ++++++++++++++-
- 1 files changed, 14 insertions(+), 1 deletions(-)
+ 1 file changed, 14 insertions(+), 1 deletion(-)
 
 diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DefaultConfiguration.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/DefaultConfiguration.java
 index 94e18f8..4de3f29 100644
@@ -41,5 +42,5 @@ index 94e18f8..4de3f29 100644
    /**
     * Get a copy of the default Hadoop {@link Configuration}.
 -- 
-1.7.0.4
+1.7.9.5
 

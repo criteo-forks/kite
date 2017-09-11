@@ -1,11 +1,12 @@
 From 37e0b220c6a0a0ee68e633a50baf37dbec613527 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 27 May 2015 17:54:18 -0700
-Subject: [PATCH 066/115] CDK-992: Fix delete command, only load repo if needed.
+Subject: [PATCH 066/140] CDK-992: Fix delete command, only load repo if
+ needed.
 
 ---
  .../org/kitesdk/cli/commands/DeleteCommand.java    |    8 +-------
- 1 files changed, 1 insertions(+), 7 deletions(-)
+ 1 file changed, 1 insertion(+), 7 deletions(-)
 
 diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/DeleteCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/DeleteCommand.java
 index 5bf3760..e56f1e5 100644
@@ -47,5 +48,5 @@ index 5bf3760..e56f1e5 100644
        console.debug("Deleted {}", uriOrName);
      }
 -- 
-1.7.0.4
+1.7.9.5
 

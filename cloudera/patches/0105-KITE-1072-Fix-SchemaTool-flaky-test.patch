@@ -1,14 +1,14 @@
-From b52d7bcf75bf5f7ec7b4b8c71b14e9309f88c113 Mon Sep 17 00:00:00 2001
+From bca8987afccb73978f63d0a1d85eefc9949e1982 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Tue, 15 Sep 2015 10:33:05 -0700
-Subject: [PATCH 105/115] KITE-1072: Fix SchemaTool flaky test.
+Subject: [PATCH 105/140] KITE-1072: Fix SchemaTool flaky test.
 
 This makes all of the tests use a randomly-generated table name, except
 for the directory migration test that uses a table name set in the test
 schema, "simple".
 ---
  .../kitesdk/data/hbase/tool/SchemaToolTest.java    |   13 +++++++++----
- 1 files changed, 9 insertions(+), 4 deletions(-)
+ 1 file changed, 9 insertions(+), 4 deletions(-)
 
 diff --git a/kite-data/kite-data-hbase/src/test/java/org/kitesdk/data/hbase/tool/SchemaToolTest.java b/kite-data/kite-data-hbase/src/test/java/org/kitesdk/data/hbase/tool/SchemaToolTest.java
 index 1f1d3ea..e357f7d 100644
@@ -67,5 +67,5 @@ index 1f1d3ea..e357f7d 100644
          tablePool, tableName, "SimpleHBaseRecord", manager);
      testBasicOperations(dao);
 -- 
-1.7.0.4
+1.7.9.5
 

@@ -1,14 +1,15 @@
 From 7ca8d83c4e51d5125f4a27e471ec921f0e1d13a7 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Fri, 26 Jun 2015 17:32:29 -0700
-Subject: [PATCH 089/115] KITE-873: Add missing options to copy-based commands.
+Subject: [PATCH 089/140] KITE-873: Add missing options to copy-based
+ commands.
 
 ---
  .../org/kitesdk/cli/commands/CSVImportCommand.java |   18 ++++++++++++++++++
  .../cli/commands/InputFormatImportCommand.java     |   18 ++++++++++++++++++
  .../kitesdk/cli/commands/JSONImportCommand.java    |   19 ++++++++++++++++++-
  .../org/kitesdk/cli/commands/TransformCommand.java |   10 ++++++++++
- 4 files changed, 64 insertions(+), 1 deletions(-)
+ 4 files changed, 64 insertions(+), 1 deletion(-)
 
 diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CSVImportCommand.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/CSVImportCommand.java
 index 00605be..4f381c5 100644
@@ -203,5 +204,5 @@ index e774252..0409614 100644
  
      if (result.succeeded()) {
 -- 
-1.7.0.4
+1.7.9.5
 

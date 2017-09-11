@@ -1,7 +1,7 @@
-From f38e4bc36748f7d29bdd1cc980cc874b9e4728ae Mon Sep 17 00:00:00 2001
+From 5dc298f6ed1c1f42416b0f23518f5f4f303d90f4 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 24 Jun 2015 14:16:32 -0700
-Subject: [PATCH 100/115] KITE-1023: Fix PartitionView URI escaping.
+Subject: [PATCH 100/140] KITE-1023: Fix PartitionView URI escaping.
 
 This adds test for URIs with escaped characters and fixes handling in
 the FS PartitionView implementation. The implementation was accidentally
@@ -21,7 +21,7 @@ than setting the internal URI directly.
  .../spi/filesystem/FileSystemPartitionView.java    |   30 ++++++-------
  .../data/spi/filesystem/TestFileSystemDataset.java |    2 +-
  .../filesystem/TestFileSystemPartitionView.java    |   45 ++++++++++++++++++-
- .../data/spi/filesystem/TestFileSystemUtil.java    |   47 +++++++++++++++++--
+ .../data/spi/filesystem/TestFileSystemUtil.java    |   47 +++++++++++++++++---
  5 files changed, 111 insertions(+), 27 deletions(-)
 
 diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/filesystem/FileSystemDataset.java
@@ -342,5 +342,5 @@ index 4901b3a..497348a 100644
      try {
        writer = dataset.newWriter();
 -- 
-1.7.0.4
+1.7.9.5
 

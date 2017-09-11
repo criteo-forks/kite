@@ -1,7 +1,8 @@
 From 7e3fdb8d6d4b97cec36830ccecd6ded2f8c46996 Mon Sep 17 00:00:00 2001
 From: Tom White <tom@cloudera.com>
 Date: Fri, 22 May 2015 10:55:08 +0100
-Subject: [PATCH 063/115] CDK-988. Implement and test project and projectStrict.
+Subject: [PATCH 063/140] CDK-988. Implement and test project and
+ projectStrict.
 
 ---
  .../java/org/kitesdk/data/PartitionStrategy.java   |   14 +-
@@ -11,7 +12,7 @@ Subject: [PATCH 063/115] CDK-988. Implement and test project and projectStrict.
  .../data/spi/partition/PartitionFunctions.java     |   10 +-
  .../java/org/kitesdk/data/spi/predicates/In.java   |    2 +-
  .../data/spi/TestPartitionStrategyParser.java      |    6 +-
- .../TestFixedLongRangeFieldPartitioner.java        |   43 -----
+ .../TestFixedLongRangeFieldPartitioner.java        |   43 ------
  .../TestLongFixedSizeRangeFieldPartitioner.java    |   48 ++++++
  .../spi/partition/TestPartitionerProjection.java   |   42 +++++
  10 files changed, 271 insertions(+), 183 deletions(-)
@@ -619,5 +620,5 @@ index 2933f2f..c061f2f 100644
      final FieldPartitioner<String, String> fp =
          new RangeFieldPartitioner("str", "str_bound", new String[]{"a", "b", "c"});
 -- 
-1.7.0.4
+1.7.9.5
 

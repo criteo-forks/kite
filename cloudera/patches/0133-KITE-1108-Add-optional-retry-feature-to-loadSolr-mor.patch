@@ -1,0 +1,28 @@
+From f19f998bf91320b5d0bd916be65881d2c9a8ed14 Mon Sep 17 00:00:00 2001
+From: Wolfgang Hoschek <whoschek@cloudera.com>
+Date: Tue, 1 Mar 2016 15:51:49 -0800
+Subject: [PATCH 133/140] KITE-1108: Add optional retry feature to loadSolr
+ morphline command (There's no point retrying solr
+ updates for docs with undefined field names)
+
+---
+ .../solrj/retry/DefaultRetryPolicyFactory.java     |    3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/DefaultRetryPolicyFactory.java b/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/DefaultRetryPolicyFactory.java
+index 277a1d8..8098e1f 100644
+--- a/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/DefaultRetryPolicyFactory.java
++++ b/kite-morphlines/kite-morphlines-solr-core/src/main/java/org/apache/solr/client/solrj/retry/DefaultRetryPolicyFactory.java
+@@ -57,6 +57,9 @@ public final class DefaultRetryPolicyFactory implements RetryPolicyFactory {
+       if (sex.code() == ErrorCode.UNSUPPORTED_MEDIA_TYPE.code) {
+         return RetryPolicyFactory.DONT_RETRY; // no point retrying that - would never succeed
+       }
++      if (sex.getMessage().startsWith("undefined field")) { // schema.xml mismatch, see IndexSchema.java
++        return RetryPolicyFactory.DONT_RETRY; // no point retrying that - would never succeed
++      }
+     }
+     if (currentPolicy == null) {
+       return initialRetryPolicy; // init
+-- 
+1.7.9.5
+

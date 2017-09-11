@@ -1,7 +1,8 @@
 From bd644a0b1d85405dd87980423e59bc0f0c850e91 Mon Sep 17 00:00:00 2001
 From: Tom White <tom@cloudera.com>
 Date: Thu, 16 Apr 2015 15:03:37 +0100
-Subject: [PATCH 060/115] CDK-988. Add a long range partitioner with fixed size bounds.
+Subject: [PATCH 060/140] CDK-988. Add a long range partitioner with fixed
+ size bounds.
 
 ---
  .../java/org/kitesdk/data/PartitionStrategy.java   |   45 ++++++++
@@ -10,7 +11,7 @@ Subject: [PATCH 060/115] CDK-988. Add a long range partitioner with fixed size b
  .../data/spi/partition/PartitionFunctions.java     |    8 ++
  .../data/spi/TestPartitionStrategyParser.java      |   34 ++++++
  .../TestFixedLongRangeFieldPartitioner.java        |   43 +++++++
- 6 files changed, 267 insertions(+), 0 deletions(-)
+ 6 files changed, 267 insertions(+)
  create mode 100644 kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/partition/FixedLongRangeFieldPartitioner.java
  create mode 100644 kite-data/kite-data-core/src/test/java/org/kitesdk/data/spi/partition/TestFixedLongRangeFieldPartitioner.java
 
@@ -373,5 +374,5 @@ index 0000000..fa8b4a5
 +
 +}
 -- 
-1.7.0.4
+1.7.9.5
 

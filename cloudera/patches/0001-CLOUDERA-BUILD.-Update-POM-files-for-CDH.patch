@@ -1,7 +1,7 @@
 From 24528ea240c457085308ef95af0d3f28f06d40c3 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Tue, 24 Feb 2015 16:05:25 -0800
-Subject: [PATCH 001/115] CLOUDERA-BUILD. Update POM files for CDH.
+Subject: [PATCH 001/140] CLOUDERA-BUILD. Update POM files for CDH.
 
 Most updates are setting the version to 1.0.0-cdh5.4.0-SNAPSHOT.
 
@@ -33,7 +33,7 @@ Other updates:
  kite-data/kite-data-crunch/pom.xml                 |   14 +-
  kite-data/kite-data-flume/pom.xml                  |    4 +-
  kite-data/kite-data-hbase/pom.xml                  |    6 +-
- kite-data/kite-data-hive/pom.xml                   |   16 +--
+ kite-data/kite-data-hive/pom.xml                   |   16 +-
  kite-data/kite-data-mapreduce/pom.xml              |   12 +-
  kite-data/kite-data-spark/pom.xml                  |   14 +-
  kite-data/pom.xml                                  |    2 +-
@@ -1539,5 +1539,5 @@ index 7bf8472..e1972a6 100644
      </profile>
  
 -- 
-1.7.0.4
+1.7.9.5
 

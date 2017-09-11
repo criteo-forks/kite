@@ -1,7 +1,8 @@
 From 73052357396650401df613c6476153f6afe2ea9e Mon Sep 17 00:00:00 2001
 From: Joey Echeverria <joey42@gmail.com>
 Date: Fri, 27 Feb 2015 14:12:21 -0800
-Subject: [PATCH 010/115] CDK-944: Reading parquet datasets fails after schema evolution
+Subject: [PATCH 010/140] CDK-944: Reading parquet datasets fails after schema
+ evolution
 
 * Added a test to demonstrate this bug
 * Added setting of the parquet reader schema.
@@ -451,5 +452,5 @@ index 0000000..c771860
 +  ]
 +}
 -- 
-1.7.0.4
+1.7.9.5
 

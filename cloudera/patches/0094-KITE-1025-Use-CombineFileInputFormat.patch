@@ -1,7 +1,7 @@
 From 412f4fd5e3b8733bc361110cc6528fb0f5ea84f0 Mon Sep 17 00:00:00 2001
 From: Gabriel Reid <gabrielr@ngdata.com>
 Date: Mon, 29 Jun 2015 15:58:49 +0200
-Subject: [PATCH 094/115] KITE-1025 Use CombineFileInputFormat
+Subject: [PATCH 094/140] KITE-1025 Use CombineFileInputFormat
 
 Wrap Avro and Parquet inputs with CombineFileInputFormat so that
 multiple small files don't result in multiple input splits and
@@ -436,5 +436,5 @@ index f2cf302..2ebe0c0 100644
 +  }
  }
 -- 
-1.7.0.4
+1.7.9.5
 

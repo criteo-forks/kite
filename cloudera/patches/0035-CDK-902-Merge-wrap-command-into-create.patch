@@ -1,7 +1,7 @@
 From b7ef72f4f9a759c8cff32eb468d179dcfb8f49fe Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 25 Mar 2015 10:26:29 -0700
-Subject: [PATCH 035/115] CDK-902: Merge wrap command into create.
+Subject: [PATCH 035/140] CDK-902: Merge wrap command into create.
 
 Wrap is almost identical to create, but fills in missing values when
 there is existing data. Rather than have two commands, this adds the
@@ -10,7 +10,7 @@ inference for schemas, partition strategies, and formats to create.
 This also ensures that any datasets created with the CLI are valid for
 any existing data.
 ---
- .../data/spi/filesystem/FileSystemUtil.java        |   17 ++-
+ .../data/spi/filesystem/FileSystemUtil.java        |   17 +-
  .../src/main/java/org/kitesdk/cli/Main.java        |    2 -
  .../kitesdk/cli/commands/CreateDatasetCommand.java |  153 ++++++++++++++----
  .../kitesdk/cli/commands/WrapDatasetCommand.java   |  170 --------------------
@@ -481,5 +481,5 @@ index c35f097..4c93c37 100644
      TestUtil.run("delete", FILE_DATASET_URI);
      TestUtil.run("-v", "create", FILE_DATASET_URI, "-s", avsc);
 -- 
-1.7.0.4
+1.7.9.5
 

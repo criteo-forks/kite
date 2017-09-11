@@ -1,7 +1,9 @@
 From 36b8f5fab8f4994cb069cc0e0f379d5384a39d19 Mon Sep 17 00:00:00 2001
 From: Wolfgang Hoschek <whoschek@cloudera.com>
 Date: Thu, 2 Jul 2015 13:37:32 -0700
-Subject: [PATCH 024/115] KITE-1030: readCSV WARN log msg on overly long lines where quoteChar is non-empty should print the whole record seen so far
+Subject: [PATCH 024/140] KITE-1030: readCSV WARN log msg on overly long lines
+ where quoteChar is non-empty should print the whole
+ record seen so far
 
 ---
  .../jcsv/fastreader/QuotedCSVTokenizer.java        |    8 ++++++--
@@ -51,5 +53,5 @@ index c105333..1784a4c 100644
          }
          
 -- 
-1.7.0.4
+1.7.9.5
 

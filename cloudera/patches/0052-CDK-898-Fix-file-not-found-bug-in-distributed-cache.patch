@@ -1,7 +1,8 @@
 From bf7faf2e93def91be1576f9005b02deafb4512cc Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 22 Apr 2015 14:53:38 -0700
-Subject: [PATCH 052/115] CDK-898: Fix file not found bug in distributed cache.
+Subject: [PATCH 052/140] CDK-898: Fix file not found bug in distributed
+ cache.
 
 Setup in the distributed cache is failing when using the local job
 runner when HDFS is the default file system. This is very likely related
@@ -10,7 +11,7 @@ using LocalJobRunner. This is safe because HDFS has already been loaded,
 so lookups without the authority with still resolve to the full URI.
 ---
  .../main/java/org/kitesdk/tools/TransformTask.java |   11 ++++++++++-
- 1 files changed, 10 insertions(+), 1 deletions(-)
+ 1 file changed, 10 insertions(+), 1 deletion(-)
 
 diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/tools/TransformTask.java
 index d11da1d..8b0a5cf 100644
@@ -43,5 +44,5 @@ index d11da1d..8b0a5cf 100644
  
      PType<T> toPType = ptype(to);
 -- 
-1.7.0.4
+1.7.9.5
 

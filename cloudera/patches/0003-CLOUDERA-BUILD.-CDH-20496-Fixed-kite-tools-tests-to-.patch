@@ -1,12 +1,13 @@
 From 11a9fff99b88791c0b8c5739bb92a40904bc26ad Mon Sep 17 00:00:00 2001
 From: Joey Echeverria <joey@cloudera.com>
 Date: Thu, 24 Jul 2014 10:28:46 -0400
-Subject: [PATCH 003/115] CLOUDERA-BUILD. CDH-20496: Fixed kite-tools tests to work with slf4j 1.7.5
+Subject: [PATCH 003/140] CLOUDERA-BUILD. CDH-20496: Fixed kite-tools tests to
+ work with slf4j 1.7.5
 
 This doesn't belong upstream as Kite still builds with an older slf4j upstream.
 ---
  .../src/test/java/org/kitesdk/cli/TestMain.java    |    9 +++++----
- 1 files changed, 5 insertions(+), 4 deletions(-)
+ 1 file changed, 5 insertions(+), 4 deletions(-)
 
 diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/TestMain.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/TestMain.java
 index 99374ec..e86c602 100644
@@ -50,5 +51,5 @@ index 99374ec..e86c602 100644
    }
  
 -- 
-1.7.0.4
+1.7.9.5
 

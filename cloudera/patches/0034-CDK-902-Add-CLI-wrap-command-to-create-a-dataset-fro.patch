@@ -1,7 +1,8 @@
 From d463611a0b36d27a7377e457bd91097d0dae6e9a Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Sat, 21 Feb 2015 17:00:09 -0800
-Subject: [PATCH 034/115] CDK-902: Add CLI wrap command to create a dataset from existing data.
+Subject: [PATCH 034/140] CDK-902: Add CLI wrap command to create a dataset
+ from existing data.
 
 ---
  .../java/org/kitesdk/data/DatasetDescriptor.java   |   52 +----
@@ -890,5 +891,5 @@ index 0000000..b92be69
 +
 +}
 -- 
-1.7.0.4
+1.7.9.5
 

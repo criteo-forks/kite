@@ -1,7 +1,8 @@
 From f036f3d6c4ff4afa0d3403115af3f869ead9216e Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Thu, 11 Jun 2015 13:24:51 -0700
-Subject: [PATCH 082/115] CDK-1018: Avoid unnecessary copy in MR output format.
+Subject: [PATCH 082/140] CDK-1018: Avoid unnecessary copy in MR output
+ format.
 
 It appears that this was working around PARQUET-62, which fixed
 dictionary support when incoming records are reused. Updating to 1.6.0
@@ -114,5 +115,5 @@ index 9669c30..7944cbc 100644
      ImmutableList<Integer> counts = ImmutableList.of(1, 2, 3, 4, 5, 6, 7, 8, 9,
        10);
 -- 
-1.7.0.4
+1.7.9.5
 

@@ -1,0 +1,463 @@
+From 5b815b5dba5ee28797904221bea4362936a5ecba Mon Sep 17 00:00:00 2001
+From: Tristan Stevens <tristan@cloudera.com>
+Date: Fri, 15 Apr 2016 15:37:50 +0100
+Subject: [PATCH 135/140] Provide hashDigest morphlines function
+
+---
+ .../morphline/stdlib/HashDigestBuilder.java        |  220 ++++++++++++++++++++
+ .../kitesdk/morphline/stdlib/HashDigestTest.java   |   81 +++++++
+ .../test/resources/test-morphlines/hashDigest.conf |   83 ++++++++
+ .../confluence/morphlinesReferenceGuide.confluence |   25 +++
+ 4 files changed, 409 insertions(+)
+ create mode 100644 kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/HashDigestBuilder.java
+ create mode 100644 kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/stdlib/HashDigestTest.java
+ create mode 100644 kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/hashDigest.conf
+
+diff --git a/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/HashDigestBuilder.java b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/HashDigestBuilder.java
+new file mode 100644
+index 0000000..2ab6886
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/HashDigestBuilder.java
+@@ -0,0 +1,220 @@
++
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.morphline.stdlib;
++
++import java.nio.charset.Charset;
++import java.security.MessageDigest;
++import java.security.NoSuchAlgorithmException;
++import java.util.Collection;
++import java.util.Collections;
++import java.util.ListIterator;
++
++import org.kitesdk.morphline.api.Command;
++import org.kitesdk.morphline.api.CommandBuilder;
++import org.kitesdk.morphline.api.MorphlineCompilationException;
++import org.kitesdk.morphline.api.MorphlineContext;
++import org.kitesdk.morphline.api.Record;
++import org.kitesdk.morphline.base.AbstractCommand;
++
++import com.google.common.base.Charsets;
++import com.typesafe.config.Config;
++
++/**
++ * Command that creates a hash digest of a field so-as to deterministically
++ * provide a unique key
++ */
++
++public class HashDigestBuilder implements CommandBuilder {
++
++  @Override
++  public Collection<String> getNames() {
++    return Collections.singletonList("hashDigest");
++  }
++
++  @Override
++  public Command build(Config config, Command parent, Command child,
++      MorphlineContext context) {
++    return new HashDigest(this, config, parent, child, context);
++  }
++
++  ///////////////////////////////////////////////////////////////////////////////
++  // Nested classes:
++  ///////////////////////////////////////////////////////////////////////////////
++  private static final class HashDigest extends AbstractCommand {
++
++    private final String inputFieldName;
++    private final String outputFieldName;
++    private final String hashType;
++    private final boolean preserveExisting;
++    private final Charset charset;
++    private final MessageDigest digest;
++
++    private static final String INPUT_FIELD = "inputField";
++    private static final String OUTPUT_FIELD = "outputField";
++    private static final String HASH_TYPE = "hashType";
++    private static final String PRESERVE_EXISTING_NAME = "preserveExisting";
++    private static final String CHARSET_FIELD = "charset";
++    private static final boolean PRESERVE_EXISTING_DEFAULT = true;
++
++    public HashDigest(CommandBuilder builder, Config config, Command parent,
++        Command child, MorphlineContext context) {
++      super(builder, config, parent, child, context);
++
++      this.inputFieldName = getConfigs().getString(config, INPUT_FIELD);
++      this.outputFieldName = getConfigs().getString(config, OUTPUT_FIELD);
++      this.hashType = getConfigs().getString(config, HASH_TYPE);
++      this.preserveExisting = getConfigs().getBoolean(config,
++          PRESERVE_EXISTING_NAME, PRESERVE_EXISTING_DEFAULT);
++      this.charset = getConfigs().getCharset(config, CHARSET_FIELD, Charsets.UTF_8);
++      
++
++      try {
++        this.digest = MessageDigest.getInstance(hashType);
++      } catch (NoSuchAlgorithmException e) {
++        throw new MorphlineCompilationException("Unable to initialise digest", config, e);
++      }
++      
++      validateArguments();
++
++      if (LOG.isTraceEnabled()) {
++        LOG.trace("inputField: {}", inputFieldName);
++        LOG.trace("outputField: {}", outputFieldName);
++        LOG.trace("hashType: {}", hashType);
++        LOG.trace("preserveExisting: {}", preserveExisting );
++      }
++    }
++
++    @Override
++    protected boolean doProcess(Record record) {
++
++      if (!preserveExisting) {
++        record.removeAll(outputFieldName);
++      }
++
++      ListIterator iter = record.get(inputFieldName).listIterator();
++      
++      while (iter.hasNext()) {
++        Object inputField = iter.next();
++        byte[] inputFieldBytes;
++        if (inputField == null ) {
++          inputFieldBytes = null;
++        } else if (inputField instanceof byte[]) {
++          inputFieldBytes = (byte[])inputField;
++        } else {
++          inputFieldBytes = inputField.toString().getBytes(charset);
++        }
++        record.put(outputFieldName, doHash(inputFieldBytes));
++      }
++
++      // pass record to next command in chain:
++      return super.doProcess(record);
++
++    }
++
++    private String doHash(byte[] inputBytes) {
++      digest.reset();
++      
++      return Hex.encodeHexString(digest.digest(inputBytes));
++    }
++
++  }
++
++  //Manually shaded subset from org.apache.commons.codec 1.8.
++  /*
++   * Licensed to the Apache Software Foundation (ASF) under one or more
++   * contributor license agreements.  See the NOTICE file distributed with
++   * this work for additional information regarding copyright ownership.
++   * The ASF licenses this file to You under the Apache License, Version 2.0
++   * (the "License"); you may not use this file except in compliance with
++   * the License.  You may obtain a copy of the License at
++   *
++   *      http://www.apache.org/licenses/LICENSE-2.0
++   *
++   * Unless required by applicable law or agreed to in writing, software
++   * distributed under the License is distributed on an "AS IS" BASIS,
++   * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   * See the License for the specific language governing permissions and
++   * limitations under the License.
++   */
++  private static class Hex {
++    /**
++     * Used to build output as Hex
++     */
++    private static final char[] DIGITS_LOWER =
++        {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'};
++
++    /**
++     * Used to build output as Hex
++     */
++    private static final char[] DIGITS_UPPER =
++        {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
++
++    
++    protected static char[] encodeHex(final byte[] data, final char[] toDigits) {
++      final int l = data.length;
++      final char[] out = new char[l << 1];
++      // two characters form the hex value.
++      for (int i = 0, j = 0; i < l; i++) {
++          out[j++] = toDigits[(0xF0 & data[i]) >>> 4];
++          out[j++] = toDigits[0x0F & data[i]];
++      }
++      return out;
++    }
++    /**
++     * Converts an array of bytes into a String representing the hexadecimal values of each byte in order. The returned
++     * String will be double the length of the passed array, as it takes two characters to represent any given byte.
++     *
++     * @param data
++     *            a byte[] to convert to Hex characters
++     * @return A String containing hexadecimal characters
++     * @since 1.4
++     */
++    public static String encodeHexString(final byte[] data) {
++        return new String(encodeHex(data));
++    }
++    
++    /**
++     * Converts an array of bytes into an array of characters representing the hexadecimal values of each byte in order.
++     * The returned array will be double the length of the passed array, as it takes two characters to represent any
++     * given byte.
++     *
++     * @param data
++     *            a byte[] to convert to Hex characters
++     * @return A char[] containing hexadecimal characters
++     */
++    public static char[] encodeHex(final byte[] data) {
++        return encodeHex(data, true);
++    }
++    
++    /**
++     * Converts an array of bytes into an array of characters representing the hexadecimal values of each byte in order.
++     * The returned array will be double the length of the passed array, as it takes two characters to represent any
++     * given byte.
++     *
++     * @param data
++     *            a byte[] to convert to Hex characters
++     * @param toLowerCase
++     *            <code>true</code> converts to lowercase, <code>false</code> to uppercase
++     * @return A char[] containing hexadecimal characters
++     * @since 1.4
++     */
++    public static char[] encodeHex(final byte[] data, final boolean toLowerCase) {
++        return encodeHex(data, toLowerCase ? DIGITS_LOWER : DIGITS_UPPER);
++    }
++    
++  }
++}
+diff --git a/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/stdlib/HashDigestTest.java b/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/stdlib/HashDigestTest.java
+new file mode 100644
+index 0000000..d46f27c
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-core/src/test/java/org/kitesdk/morphline/stdlib/HashDigestTest.java
+@@ -0,0 +1,81 @@
++/*
++ * Copyright 2013 Cloudera Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package org.kitesdk.morphline.stdlib;
++
++import org.junit.Test;
++import org.kitesdk.morphline.api.AbstractMorphlineTest;
++import org.kitesdk.morphline.api.Record;
++import org.kitesdk.morphline.base.Fields;
++
++public class HashDigestTest extends AbstractMorphlineTest {
++
++  @Test
++  public void testHashDigest() throws Exception {
++    morphline = createMorphline("test-morphlines/hashDigest");
++    Record record = new Record();
++    String if1 = "The quick brown fox jumped over the lazy dog";
++    String if2 = "Lorem ipsum dolor sit amet, cu vel vero liber vivendum, liber labitur senserit ei cum. Qui ex soluta viderer, inimicus pertinacia assueverit ad mei, ut esse melius dissentias ius. Ei nec delicata splendide dissentiet, dicit ridens feugiat an qui. Ut quot diceret usu. Qui affert commodo voluptatibus ne, quis euismod instructior ne ius.";
++    String if3 = "Hello world!";
++    
++    
++    record.put("if1", if1);
++    record.put("if2", if2);
++    
++    record.put("of2","don'tdeleteme");
++    
++    record.put("if3", if3);
++    record.put("of3", "deleteme");
++    
++    byte[] bytes = if1.getBytes("UTF-8");
++    record.put(Fields.ATTACHMENT_BODY, bytes);
++    
++    
++    Record expected = new Record();
++    expected.put("if1", if1);
++    expected.put("if2", if2);
++    expected.put("if3", if3);
++    expected.put("of2","don'tdeleteme");
++
++
++    expected.put("of1", "08A008A01D498C404B0C30852B39D3B8".toLowerCase());
++    expected.put("of2", "B80EBD810BF0287790CD107DB2C3FF21E6A2BA5C".toLowerCase());
++    expected.put("of3", "C0535E4BE2B79FFD93291305436BF889314E4A3FAEC05ECFFCBB7DF31AD9E51A".toLowerCase());
++    expected.put("of4", "08A008A01D498C404B0C30852B39D3B8".toLowerCase());
++    expected.put("of5", "108e2d013753189cb812c41e99e565f5".toLowerCase());
++    
++    processAndVerifySuccess(record, expected);
++  }
++  
++  
++
++  private void processAndVerifySuccess(Record input, Record expected) {
++    processAndVerifySuccess(input, expected, true);
++  }
++
++  private void processAndVerifySuccess(Record input, Record expected, boolean isSame) {
++    collector.reset();
++    startSession();
++    assertEquals(1, collector.getNumStartEvents());
++    assertTrue(morphline.process(input));
++    assertEquals(expected, collector.getFirstRecord());
++    if (isSame) {
++      assertSame(input, collector.getFirstRecord());    
++    } else {
++      assertNotSame(input, collector.getFirstRecord());    
++    }
++  }
++
++}
+diff --git a/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/hashDigest.conf b/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/hashDigest.conf
+new file mode 100644
+index 0000000..cdf37fd
+--- /dev/null
++++ b/kite-morphlines/kite-morphlines-core/src/test/resources/test-morphlines/hashDigest.conf
+@@ -0,0 +1,83 @@
++# Copyright 2013 Cloudera Inc.
++#
++# Licensed under the Apache License, Version 2.0 (the "License");
++# you may not use this file except in compliance with the License.
++# You may obtain a copy of the License at
++#
++# http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++
++morphlines : [
++  {
++    id : morphline1
++    importCommands : ["org.kitesdk.**"]
++    
++    commands : [    
++      
++      { logDebug { format : "input record: {}", args : ["@{}"] } }                 
++      
++      { 
++        readBlob {}
++      } 
++      
++      {
++        hashDigest {
++          inputField : if1
++          outputField : of1
++          preserveExisting : false
++          hashType : md5
++        }
++      }
++      
++      {
++        hashDigest {
++          inputField : if2
++          outputField : of2
++          preserveExisting : true
++          hashType : sha1
++        }
++      }
++      
++      {
++        hashDigest {
++          inputField : if3
++          outputField : of3
++          preserveExisting : false
++          hashType : SHA-256
++        }
++      }
++      
++      {
++        hashDigest {
++          inputField : _attachment_body
++          outputField : of4
++          preserveExisting : false
++          hashType : md5
++        }
++      }
++      
++      {
++        hashDigest {
++          inputField : if1
++          outputField : of5
++          preserveExisting : false
++          hashType : md5
++          charset : UTF-16
++        }
++      }
++      
++      {
++        setValues {
++          _attachment_body : []
++        }
++      }
++      
++      { logDebug { format : "output record: {}", args : ["@{}"] } }    
++    ]
++  }
++]
+diff --git a/kite-morphlines/src/site/confluence/morphlinesReferenceGuide.confluence b/kite-morphlines/src/site/confluence/morphlinesReferenceGuide.confluence
+index b4a98c4..69d2d27 100644
+--- a/kite-morphlines/src/site/confluence/morphlinesReferenceGuide.confluence
++++ b/kite-morphlines/src/site/confluence/morphlinesReferenceGuide.confluence
+@@ -65,6 +65,7 @@ h3. kite\-morphlines\-core\-stdlib
+ | [#findReplace] | Examines each string value in a given field and replaces each substring of the string value that matches the given string literal or grok pattern with the given replacement. |
+ | [#generateUUID] | Sets a universally unique identifier on all records that are intercepted. |
+ | [#grok] | Uses regular expression pattern matching to extract structured fields from unstructured log or text data. |
++| [#hashDigest] | Compute a hash digest of the input field. |
+ | [#head] | Ignores all input records beyond the N\-th record, akin to the Unix {{head}} command. |
+ | [#if] | Implements if\-then\-else conditional control flow. |
+ | [#java] | Scripting support for Java. Dynamically compiles and executes the given Java code block. | 
+@@ -874,6 +875,30 @@ grok {
+ Note: An easy way to test grok out is to use the [online grok debugger|http://grokdebug.herokuapp.com/] from the logstash project. There is also a corresponding [YouTube video|http://www.youtube.com/watch?v=YIKm6WUgFTY].
+ {note}
+ 
++h2. hashDigest
++
++The {{hashDigest}} command ([source code|https://github.com/kite-sdk/kite/blob/master/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/HashDigestBuilder.java]) computes a cryptographic hash digest of the input field, writing the hash digest to the specified output field. The algorithm must be specified using the {{hashType}} property. See the [Java Cryptography Architecture
++Standard Algorithm Name Document|http://docs.oracle.com/javase/8/docs/technotes/guides/security/StandardNames.html#MessageDigest] for information about standard message digest algorithm names. See the [Supported Encodings Document|https://docs.oracle.com/javase/8/docs/technotes/guides/intl/encoding.doc.html] for the constants used by the {{charset}} parameter. N.B. The character sets and hashing algorithms available may depend on your JVM, your locale and also installation of JCE Unlimited Strength Jurisdiction Policy Files.
++
++The command provides the following configuration options:
++|| Property Name || Default || Description ||
++| inputField | n/a | The input to the hash digest function |
++| outputField | n/a | The field in which to store the computed hash digest |
++| hashType | n/a | The hashing algorithm to use |
++| preserveExisting | true | Whether to preserve the field value if one is already present. |
++| charset | UTF\-8 | The character encoding to use when converting the inputField into a byte\[\] for submission to the hashing algorithm. |
++
++Example usage:
++{code}
++hashDigest {
++  inputField : inputData
++  outputField : sha256HashDigest
++  preserveExisting : false
++  hashType : SHA-256
++  charset : UTF-8
++}
++{code}
++
+ h2. head
+ 
+ The {{head}} command ([source code|https://github.com/kite-sdk/kite/blob/master/kite-morphlines/kite-morphlines-core/src/main/java/org/kitesdk/morphline/stdlib/HeadBuilder.java]) ignores all input records beyond the N\-th record, thus emitting at most N records, akin to the Unix {{head}} command. This can be helpful to quickly test a morphline with the first few records from a larger dataset.
+-- 
+1.7.9.5
+

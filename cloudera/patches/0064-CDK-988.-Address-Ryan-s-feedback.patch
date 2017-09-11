@@ -1,7 +1,7 @@
 From 35ac102bf15b8eb997b54abe4cdc0dae52644578 Mon Sep 17 00:00:00 2001
 From: Tom White <tom@cloudera.com>
 Date: Tue, 26 May 2015 16:46:58 +0100
-Subject: [PATCH 064/115] CDK-988. Address Ryan's feedback.
+Subject: [PATCH 064/140] CDK-988. Address Ryan's feedback.
 
 ---
  .../LongFixedSizeRangeFieldPartitioner.java        |    2 +-
@@ -53,5 +53,5 @@ index c061f2f..34aeb64 100644
      Assert.assertEquals(Ranges.singleton(10L),
          fp.projectStrict(Ranges.open(5L, 15L)));
 -- 
-1.7.0.4
+1.7.9.5
 

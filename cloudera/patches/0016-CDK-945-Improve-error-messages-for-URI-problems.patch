@@ -1,16 +1,16 @@
 From f9f812510628fcc8c657c8a23dacd3ce5cd9148f Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 11 Mar 2015 17:32:13 -0700
-Subject: [PATCH 016/115] CDK-945: Improve error messages for URI problems.
+Subject: [PATCH 016/140] CDK-945: Improve error messages for URI problems.
 
 * Add a suggestion to make sure default HDFS URI is configured
 * Add known patterns for the matching URI scheme
 ---
- .../java/org/kitesdk/data/spi/Registration.java    |   29 +++++++++++++++----
- .../main/java/org/kitesdk/data/spi/URIPattern.java |    8 +++++
- .../org/kitesdk/data/spi/filesystem/Loader.java    |   10 +++++-
+ .../java/org/kitesdk/data/spi/Registration.java    |   29 ++++++++++++++++----
+ .../main/java/org/kitesdk/data/spi/URIPattern.java |    8 ++++++
+ .../org/kitesdk/data/spi/filesystem/Loader.java    |   10 +++++--
  .../data/spi/filesystem/TestHDFSDatasetURIs.java   |   12 ++++++++
- .../java/org/kitesdk/data/spi/hive/Loader.java     |   11 +++++--
+ .../java/org/kitesdk/data/spi/hive/Loader.java     |   11 ++++++--
  5 files changed, 59 insertions(+), 11 deletions(-)
 
 diff --git a/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Registration.java b/kite-data/kite-data-core/src/main/java/org/kitesdk/data/spi/Registration.java
@@ -182,5 +182,5 @@ index e0cf3f5..80b1776 100644
  
        // setup the MetaStore URI
 -- 
-1.7.0.4
+1.7.9.5
 

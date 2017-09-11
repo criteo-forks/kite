@@ -1,12 +1,12 @@
 From dce2e265bd7f494ecdf00ea3a8eba52d0ff3fab4 Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Wed, 11 Mar 2015 18:43:17 -0700
-Subject: [PATCH 013/115] CDK-952: Add CLI list command.
+Subject: [PATCH 013/140] CDK-952: Add CLI list command.
 
 ---
  .../src/main/java/org/kitesdk/cli/Main.java        |    2 +
  .../java/org/kitesdk/cli/commands/ListCommand.java |   71 ++++++++++++++++++++
- 2 files changed, 73 insertions(+), 0 deletions(-)
+ 2 files changed, 73 insertions(+)
  create mode 100644 kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/commands/ListCommand.java
 
 diff --git a/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java b/kite-tools-parent/kite-tools/src/main/java/org/kitesdk/cli/Main.java
@@ -107,5 +107,5 @@ index 0000000..f66196f
 +  }
 +}
 -- 
-1.7.0.4
+1.7.9.5
 

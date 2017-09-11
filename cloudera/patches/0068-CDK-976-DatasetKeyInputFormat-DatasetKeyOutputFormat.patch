@@ -1,12 +1,14 @@
 From 9247c90721242bcef6cc96ec1316152a9791959d Mon Sep 17 00:00:00 2001
 From: Cole Skoviak <cole.skoviak@cerner.com>
 Date: Thu, 21 May 2015 11:34:27 -0500
-Subject: [PATCH 068/115] CDK-976: DatasetKeyInputFormat/DatasetKeyOutputFormat setting job configuration before loading dataset
+Subject: [PATCH 068/140] CDK-976:
+ DatasetKeyInputFormat/DatasetKeyOutputFormat
+ setting job configuration before loading dataset
 
 ---
  .../data/mapreduce/DatasetKeyInputFormat.java      |    3 +++
  .../data/mapreduce/DatasetKeyOutputFormat.java     |    3 +++
- 2 files changed, 6 insertions(+), 0 deletions(-)
+ 2 files changed, 6 insertions(+)
 
 diff --git a/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java b/kite-data/kite-data-mapreduce/src/main/java/org/kitesdk/data/mapreduce/DatasetKeyInputFormat.java
 index ded5695..492e354 100644
@@ -51,5 +53,5 @@ index dc03ef7..e5464ac 100644
      return usePerTaskAttemptDatasets(view) ?
          new MergeOutputCommitter<E>() : new NullOutputCommitter();
 -- 
-1.7.0.4
+1.7.9.5
 

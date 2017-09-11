@@ -1,11 +1,12 @@
-From 26474a8e48ad1d4de704b8625db890d49759340c Mon Sep 17 00:00:00 2001
+From 53cb51c558552faca9dca224cde00078c98522a5 Mon Sep 17 00:00:00 2001
 From: Gregory Chanan <gchanan@cloudera.com>
 Date: Wed, 9 Sep 2015 18:13:12 -0700
-Subject: [PATCH 103/115] KITE-1068: SolrCellMorphlineTests fails on Locales with non-Arabic digits
+Subject: [PATCH 102/140] KITE-1068: SolrCellMorphlineTests fails on Locales
+ with non-Arabic digits
 
 ---
  .../morphline/solr/AbstractSolrMorphlineTest.java  |    3 +++
- 1 files changed, 3 insertions(+), 0 deletions(-)
+ 1 file changed, 3 insertions(+)
 
 diff --git a/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/kitesdk/morphline/solr/AbstractSolrMorphlineTest.java b/kite-morphlines/kite-morphlines-solr-core/src/test/java/org/kitesdk/morphline/solr/AbstractSolrMorphlineTest.java
 index e450fc2..33e7911 100644
@@ -29,5 +30,5 @@ index e450fc2..33e7911 100644
      int numDocs = 0;    
      for (int i = 0; i < 1; i++) {
 -- 
-1.7.0.4
+1.7.9.5
 

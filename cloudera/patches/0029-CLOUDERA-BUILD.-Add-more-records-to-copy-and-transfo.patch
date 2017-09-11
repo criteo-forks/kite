@@ -1,7 +1,8 @@
 From a3c2e4d4d61421865cf9565520e379fd41819c6e Mon Sep 17 00:00:00 2001
 From: Ryan Blue <blue@apache.org>
 Date: Fri, 7 Aug 2015 11:18:12 -0700
-Subject: [PATCH 029/115] CLOUDERA-BUILD. Add more records to copy and transform tests.
+Subject: [PATCH 029/140] CLOUDERA-BUILD. Add more records to copy and
+ transform tests.
 
 Upstream Crunch changed its partitioning function to be more random,
 which resulted in not covering all expected partitions with a small
@@ -9,7 +10,7 @@ number of records (before this was guarnanteed). The fix is to increase
 the number of records in the test.
 ---
  .../cli/commands/TestCopyCommandCluster.java       |   33 +++++++++++++++-----
- .../cli/commands/TestTransformCommandCluster.java  |   30 ++++++++++++-----
+ .../cli/commands/TestTransformCommandCluster.java  |   30 ++++++++++++------
  2 files changed, 46 insertions(+), 17 deletions(-)
 
 diff --git a/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java b/kite-tools-parent/kite-tools/src/test/java/org/kitesdk/cli/commands/TestCopyCommandCluster.java
@@ -219,5 +220,5 @@ index 0ce744a..708ded3 100644
    }
  
 -- 
-1.7.0.4
+1.7.9.5
 
